@@ -1,2 +1,5 @@
 # Story-Untangling
-Story understanding and plot analysis pilot.
+
+## Aims 
+
+Experiments for textual story understanding tasks.
