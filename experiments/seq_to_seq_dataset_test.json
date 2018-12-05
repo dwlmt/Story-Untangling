@@ -1,23 +1,23 @@
 {
   "dataset_reader":{
     "type":"writing_prompts",
-
     "source_token_indexers": {
       "tokens": {
         "type": "single_id",
         "namespace": "source_tokens"
       }
     },
-
     "target_token_indexers": {
       "tokens": {
         "type": "single_id",
         "namespace": "target_tokens"
       }
-    }
+    },
+    "dataset_path": "/disk/scratch/writing_prompts_dataset_path/",
+    "use_existing_cached_db": false
   },
 
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/train.wp_target",
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/first_500",///afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/train.wp_target",
   "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/valid.wp_target",
   "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/test.wp_target",
 
