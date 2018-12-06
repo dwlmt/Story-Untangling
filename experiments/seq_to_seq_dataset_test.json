@@ -48,8 +48,18 @@
   },
 
   "iterator": {
-    "type": "bucket",
-    "batch_size" : 16
+    "type": "epoch_tracking_bucket",
+    "batch_size": 60,
+    "sorting_keys": [
+      [
+        "source_tokens",
+        "num_tokens"
+      ],
+      [
+        "target_tokens",
+        "num_tokens"
+      ]
+    ]
   },
 
   "trainer": {

@@ -11,9 +11,9 @@ from allennlp.common import Params
 from allennlp.common.checks import ConfigurationError
 from allennlp.common.file_utils import cached_path
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
-from allennlp.data import Token
+from allennlp.data import Token, Field
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.data.fields import TextField
+from allennlp.data.fields import TextField, MetadataField, ListField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
@@ -59,6 +59,8 @@ class WritingPromptsDatasetReader(DatasetReader):
         Whether or not to add `START_SYMBOL` to the beginning of the source sequence.
     sentence_context_window : int, (optional, default=2)
         Reads as a sliding windows over sentences. How many sentences to use as a context for each sentence to predict.
+    sentence_predictive_window : int, (optional, default=1)
+        Reads as a sliding windows over sentences. How many sentences to predict.
     target_positive : bool, (optional, default=True)
         Whether to yield the target predictive context or not.
     target_negative : bool, (optional, default=True)
@@ -78,6 +80,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  target_token_indexers: Dict[str, TokenIndexer] = None,
                  source_add_start_token: bool = True,
                  sentence_context_window: int = 2,
+                 sentence_predictive_window: int = 1,
                  target_positive: bool = True,
                  target_negative: bool = True,
                  dataset_path: str = "./dataset-cache/",
@@ -91,6 +94,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._target_token_indexers = target_token_indexers or self._source_token_indexers
         self._source_add_start_token = source_add_start_token
         self._sentence_context_window = sentence_context_window
+        self._sentence_predictive_window = sentence_predictive_window
         self._target_positive: bool = target_positive
         self._target_negative: bool = target_negative
         self._sentence_splitter = SpacySentenceSplitter()
@@ -119,22 +123,31 @@ class WritingPromptsDatasetReader(DatasetReader):
                 continue
 
             sentence_text = [s["text"] for s in sentences]
-            sentence_lengths = [s["sentence_len"] for s in sentences]
 
-            for source_sequence, target_sequence in dual_window(sentence_text, size=self._sentence_context_window):
+            for source_sequence, target_sequence, absolute_count, relative_count in dual_window(sentence_text,
+                                                                                                context_size=self._sentence_context_window,
+                                                                                                predictive_size=self._sentence_predictive_window,
+                                                                                                num_of_sentences=story[
+                                                                                                    "sentence_num"]):
                 source_sequence = " ".join(source_sequence)
                 logging.debug(f"Source: '{source_sequence}', Target: '{target_sequence}'")
 
-                negative_tokens = None
+                negative_sequence = None
                 if self._target_negative:
-                    negative_dict = next(negative_sampler)
-                    negative_tokens = negative_dict["text"]
+                    negative_sequence = ""
+                    for i in range(self._sentence_predictive_window):
+                        negative_dict = next(negative_sampler)
+                        negative_sequence += negative_dict["text"]
 
-                yield self.text_to_instance(source_sequence, target_sequence, negative_tokens)
+                metadata = {"story_id": story_id}
+
+                yield self.text_to_instance(source_sequence, target_sequence, negative_sequence, metadata,
+                                            absolute_count, relative_count)
 
     @overrides
     def text_to_instance(self, source_tokens: str, target_tokens: str = None,
-                         target_negative_tokens: str = None, ) -> Instance:  # type: ignore
+                         target_negative_tokens: str = None, metadata: Dict[str, any] = None,
+                         absolute_position: int = 0, relative_position: float = 0.0) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
 
@@ -149,11 +162,17 @@ class WritingPromptsDatasetReader(DatasetReader):
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
                                                self._source_token_indexers)
         if target_tokens is not None:
-            field_dict['target_tokens'] = tokenize(source_tokens, self._target_tokenizer.tokenize,
+            field_dict['target_tokens'] = tokenize(target_tokens, self._target_tokenizer.tokenize,
                                                    self._target_token_indexers)
         if target_negative_tokens is not None:
-            field_dict['negative_tokens'] = tokenize(source_tokens, self._target_tokenizer.tokenize,
+            field_dict['negative_tokens'] = tokenize(target_negative_tokens, self._target_tokenizer.tokenize,
                                                      self._target_token_indexers)
+
+        # Wrap in an array there isn't a single value scalar field.
+        field_dict["absolute_position"] = ArrayField([absolute_position])
+        field_dict["relative_position"] = ArrayField([relative_position])
+
+        field_dict["metadata"] = MetadataField(metadata)
 
         return Instance(field_dict)
 
