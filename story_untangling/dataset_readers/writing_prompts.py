@@ -18,10 +18,12 @@ from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
 from allennlp.data.tokenizers.word_splitter import JustSpacesWordSplitter, SpacyWordSplitter
-from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
+from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter, SentenceSplitter
 from aiofile import AIOFile, LineReader
+from typing import Dict, Tuple, List, Any
 import aiofile
 import dataset
+from dataset import Database
 
 from overrides import overrides
 from sqlalchemy import Index
@@ -68,6 +70,7 @@ class WritingPromptsDatasetReader(DatasetReader):
     db_discriminator : str (optional, default=def)
         Allow multiple databases to be kept separate rather than wiping over each other.
     """
+
     def __init__(self,
                  source_tokenizer: Tokenizer = None,
                  target_tokenizer: Tokenizer = None,
@@ -79,7 +82,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  target_negative: bool = True,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
-                 db_discriminator = "def",
+                 db_discriminator="def",
                  lazy: bool = False) -> None:
         super().__init__(lazy)
         self._source_tokenizer = source_tokenizer or WordTokenizer()
@@ -99,10 +102,12 @@ class WritingPromptsDatasetReader(DatasetReader):
     def _read(self, file_path):
 
         loop = asyncio.get_event_loop()
-        dataset_db = loop.run_until_complete(create_dataset_db(self._dataset_path, self._db_discriminator, file_path, self._use_existing_cached_db))
-
+        dataset_db = loop.run_until_complete(
+            create_dataset_db(self._dataset_path, self._db_discriminator, file_path, self._use_existing_cached_db))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
+
+        negative_sampler = negative_sentence_sampler(db)
 
         stories = db.query('SELECT * FROM story ORDER BY id')
         for story in stories:
@@ -113,35 +118,49 @@ class WritingPromptsDatasetReader(DatasetReader):
                 logging.warning(f"Story has no sentences: {story_id}")
                 continue
 
-            sentence_text  = [s["text"] for s in sentences]
-            sentence_lengths = [ s["sentence_len"] for s in sentences]
+            sentence_text = [s["text"] for s in sentences]
+            sentence_lengths = [s["sentence_len"] for s in sentences]
 
             for source_sequence, target_sequence in dual_window(sentence_text, size=self._sentence_context_window):
                 source_sequence = " ".join(source_sequence)
                 logging.debug(f"Source: '{source_sequence}', Target: '{target_sequence}'")
-                yield self.text_to_instance(source_sequence, target_sequence)
 
+                negative_tokens = None
+                if self._target_negative:
+                    negative_dict = next(negative_sampler)
+                    negative_tokens = negative_dict["text"]
+
+                yield self.text_to_instance(source_sequence, target_sequence, negative_tokens)
 
     @overrides
-    def text_to_instance(self, source_tokens: str, target_tokens: str = None) -> Instance:  # type: ignore
+    def text_to_instance(self, source_tokens: str, target_tokens: str = None,
+                         target_negative_tokens: str = None, ) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
-        tokenized_source = self._source_tokenizer.tokenize(source_tokens)
-        if self._source_add_start_token:
-            tokenized_source.insert(0, Token(START_SYMBOL))
-        tokenized_source.append(Token(END_SYMBOL))
-        source_field = TextField(tokenized_source, self._source_token_indexers)
+        field_dict = {}
+
+        def tokenize(tokens, tokenizer, indexer):
+            tokenized_source = tokenizer(tokens)
+            if self._source_add_start_token:
+                tokenized_source.insert(0, Token(START_SYMBOL))
+            tokenized_source.append(Token(END_SYMBOL))
+            token_field = TextField(tokenized_source, indexer)
+            return token_field
+
+        field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
+                                               self._source_token_indexers)
         if target_tokens is not None:
-            tokenized_target = self._target_tokenizer.tokenize(target_tokens)
-            tokenized_target.insert(0, Token(START_SYMBOL))
-            tokenized_target.append(Token(END_SYMBOL))
-            target_field = TextField(tokenized_target, self._target_token_indexers)
-            return Instance({"source_tokens": source_field, "target_tokens": target_field})
-        else:
-            return Instance({'source_tokens': source_field})
+            field_dict['target_tokens'] = tokenize(source_tokens, self._target_tokenizer.tokenize,
+                                                   self._target_token_indexers)
+        if target_negative_tokens is not None:
+            field_dict['negative_tokens'] = tokenize(source_tokens, self._target_tokenizer.tokenize,
+                                                     self._target_token_indexers)
+
+        return Instance(field_dict)
 
 
-async def create_dataset_db(dataset_path, db_discriminator, file_path, use_existing_database=True,
-                      sentence_splitter=SpacySentenceSplitter(), batch_size=100, max_workers=8):
+async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
+                            sentence_splitter: SentenceSplitter = SpacySentenceSplitter(), batch_size: int = 100,
+                            max_workers: int = 4) -> str:
     file_name = os.path.basename(file_path)
     database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
     dataset_db = f"sqlite:///{database_file}"
@@ -172,31 +191,31 @@ async def create_dataset_db(dataset_path, db_discriminator, file_path, use_exist
 
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
                 story_sentences = sentence_splitter.batch_split_sentences(lines)
-                tasks.append(loop.run_in_executor(executor, SaveStoryToDatabase(dataset_db), story_sentences, story_nums))
+                tasks.append(
+                    loop.run_in_executor(executor, SaveStoryToDatabase(dataset_db), story_sentences, story_nums))
             for task in tasks:
                 story_ids = await task
                 logger.info(f"Saved stories to db with ids: {story_ids}")
                 # Add indices to key fields.
 
-
             try:
                 db.query('CREATE INDEX idx_story_id on sentence(story_id)')
             except:
-                pass # Because of the aysnc/
-
+                pass  # Because of the aysnc/
 
     return dataset_db
 
-async def chunk_stories_from_file(file, batch_size=100):
+
+async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
     """ Async yield batches of stories that are line separated/
     """
     line_count = 1
     lines = []
     story_nums = []
-    async with AIOFile(file, mode="r", encoding = 'unicode_escape') as f:
-        #for line in f.readline():
+    async with AIOFile(file, mode="rb") as f:
         async for line in LineReader(f):
-            line = line.replace("<newline>","")
+            line = line.decode('utf-8', errors="ignore")
+            line = line.replace("<newline>", "")
             lines.append(line)
             story_nums.append(line_count)
             if len(lines) == batch_size:
@@ -211,7 +230,7 @@ class SaveStoryToDatabase:
     def __init__(self, dataset_db):
         self._dataset_db = dataset_db
 
-    def __call__(self, story_sentences, story_nums):
+    def __call__(self, story_sentences: List[str], story_nums: List[int]) -> List[int]:
         story_ids = []
         for sentences, story_num in zip(story_sentences, story_nums):
             db = dataset.connect(self._dataset_db, engine_kwargs={"pool_recycle": 3600})
@@ -227,13 +246,21 @@ class SaveStoryToDatabase:
                 for i, sent in enumerate(sentences):
                     sentence_len = len(sent)
                     total_story_tokens += sentence_len
-                    sentences_to_save.append(dict(sentence_num=i, text=sent, sentence_len=sentence_len, story_id=story_id))
+                    sentences_to_save.append(
+                        dict(sentence_num=i, text=sent, sentence_len=sentence_len, story_id=story_id))
                 sentence_table.insert_many(sentences_to_save)
 
-                story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id), ['id'])
+                story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
+                                   ['id'])
                 db.commit()
                 story_ids.append(story_id)
             except:
                 db.rollback()
         return story_ids
 
+
+def negative_sentence_sampler(db: Database) -> Dict[str, Any]:
+    while True:
+        random_sentences = db.query(f'SELECT * FROM sentence ORDER BY RANDOM()')
+        for sentence in random_sentences:
+            yield sentence

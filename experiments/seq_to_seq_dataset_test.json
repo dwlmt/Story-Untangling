@@ -14,10 +14,13 @@
       }
     },
     "dataset_path": "/disk/scratch/writing_prompts_dataset_path/",
-    "use_existing_cached_db": false
+    "use_existing_cached_db": false,
+    "target_positive": true,
+    "target_negative": true,
+    "lazy": true
   },
-
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/first_500",///afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/train.wp_target",
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/first_500",
+  //"/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/train.wp_target",
   "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/valid.wp_target",
   "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/test.wp_target",
 
@@ -50,7 +53,7 @@
   },
 
   "trainer": {
-    "num_epochs": 15,
+    "num_epochs": 1,
     "patience": 10,
     "cuda_device": -1,
     "optimizer": {
