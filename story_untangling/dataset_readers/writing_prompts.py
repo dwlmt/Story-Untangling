@@ -14,7 +14,7 @@ import dataset
 
 from overrides import overrides
 
-from story_untangling.dataset_readers.create_dataset import create_dataset_db, negative_sentence_sampler
+from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
 from story_untangling.dataset_readers.dataset_utils import dual_window
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -56,6 +56,12 @@ class WritingPromptsDatasetReader(DatasetReader):
         Reused an existing cached database db if it exists or delete and recreate.
     db_discriminator : str (optional, default=def)
         Allow multiple databases to be kept separate rather than wiping over each other.
+    save_sentiment: bool (optional, default=True)
+        Whether to save sentence level sentiment when creating the dataset.
+    ner_model : str (optional, default=None)
+        AllenNLP NER model to run for features.
+    coreference_model : str (optional, default=None)
+        AllenNLP Coreference model.
     """
 
     def __init__(self,
@@ -71,7 +77,9 @@ class WritingPromptsDatasetReader(DatasetReader):
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
-
+                 save_sentiment: bool = True,
+                 ner_model: str = None,
+                 coreference_model: str = None,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
         self._source_tokenizer = source_tokenizer or WordTokenizer()
@@ -87,13 +95,20 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._dataset_path = dataset_path
         self._use_existing_cached_db = use_existing_cached_db
         self._db_discriminator = db_discriminator
+        self._save_sentiment = save_sentiment
+        self._ner_model = ner_model
+        self._coreference_model = coreference_model
 
     @overrides
     def _read(self, file_path):
 
         loop = asyncio.get_event_loop()
         dataset_db = loop.run_until_complete(
-            create_dataset_db(self._dataset_path, self._db_discriminator, file_path, self._use_existing_cached_db))
+            create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
+                              should_save_sentiment=self._save_sentiment,
+                              file_path=file_path, use_existing_database=self._use_existing_cached_db,
+                              ner_model=self._ner_model,
+                              coreference_model=self._coreference_model))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
 
