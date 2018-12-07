@@ -1,38 +1,23 @@
 import asyncio
-import json
 import logging
-import os
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from pathlib import Path
-from typing import Dict
 
-import spacy
-from allennlp.common import Params
-from allennlp.common.checks import ConfigurationError
-from allennlp.common.file_utils import cached_path
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
-from allennlp.data import Token, Field
+from allennlp.data import Token
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.data.fields import TextField, MetadataField, ListField, ArrayField
+from allennlp.data.fields import TextField, MetadataField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
-from allennlp.data.tokenizers.word_splitter import JustSpacesWordSplitter, SpacyWordSplitter
-from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter, SentenceSplitter
-from aiofile import AIOFile, LineReader
-from typing import Dict, Tuple, List, Any
-import aiofile
+from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
+from typing import Dict
 import dataset
-from dataset import Database
 
 from overrides import overrides
-from sqlalchemy import Index
 
+from story_untangling.dataset_readers.create_dataset import create_dataset_db, negative_sentence_sampler
 from story_untangling.dataset_readers.dataset_utils import dual_window
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
-
-import multiprocessing as mp
 
 
 @DatasetReader.register("writing_prompts")
@@ -86,6 +71,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
+
                  lazy: bool = False) -> None:
         super().__init__(lazy)
         self._source_tokenizer = source_tokenizer or WordTokenizer()
@@ -177,109 +163,3 @@ class WritingPromptsDatasetReader(DatasetReader):
         return Instance(field_dict)
 
 
-async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
-                            sentence_splitter: SentenceSplitter = SpacySentenceSplitter(), batch_size: int = 100,
-                            max_workers: int = 4) -> str:
-    file_name = os.path.basename(file_path)
-    database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
-    dataset_db = f"sqlite:///{database_file}"
-    logging.info(f"Cached dataset path: {dataset_db}")
-
-    # Create dir
-    try:
-        os.makedirs(dataset_path)
-    except OSError:
-        pass
-
-    # Remove database if it shouldn't be reused.
-    if not use_existing_database:
-        try:
-            os.remove(database_file)
-        except OSError:
-            pass
-
-    if not Path(dataset_db).is_file():
-
-        loop = asyncio.get_event_loop()
-
-        f"{dataset_db}?mode=ro&cache=shared"
-        db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
-        db.commit()
-        tasks = []
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-
-            async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
-                story_sentences = sentence_splitter.batch_split_sentences(lines)
-                tasks.append(
-                    loop.run_in_executor(executor, SaveStoryToDatabase(dataset_db), story_sentences, story_nums))
-            for task in tasks:
-                story_ids = await task
-                logger.info(f"Saved stories to db with ids: {story_ids}")
-                # Add indices to key fields.
-
-            try:
-                db.query('CREATE INDEX idx_story_id on sentence(story_id)')
-            except:
-                pass  # Because of the aysnc/
-
-    return dataset_db
-
-
-async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
-    """ Async yield batches of stories that are line separated/
-    """
-    line_count = 1
-    lines = []
-    story_nums = []
-    async with AIOFile(file, mode="rb") as f:
-        async for line in LineReader(f):
-            line = line.decode('utf-8', errors="ignore")
-            line = line.replace("<newline>", "")
-            lines.append(line)
-            story_nums.append(line_count)
-            if len(lines) == batch_size:
-                yield lines, story_nums
-                lines = []
-                story_nums = []
-
-    yield lines, story_nums
-
-
-class SaveStoryToDatabase:
-    def __init__(self, dataset_db):
-        self._dataset_db = dataset_db
-
-    def __call__(self, story_sentences: List[str], story_nums: List[int]) -> List[int]:
-        story_ids = []
-        for sentences, story_num in zip(story_sentences, story_nums):
-            db = dataset.connect(self._dataset_db, engine_kwargs={"pool_recycle": 3600})
-            db.begin()
-            try:
-                story_table = db['story']
-                sentence_table = db['sentence']
-                story = dict(story_num=story_num)
-                story_id = story_table.insert(story)
-                sentences_to_save = []
-
-                total_story_tokens = 0
-                for i, sent in enumerate(sentences):
-                    sentence_len = len(sent)
-                    total_story_tokens += sentence_len
-                    sentences_to_save.append(
-                        dict(sentence_num=i, text=sent, sentence_len=sentence_len, story_id=story_id))
-                sentence_table.insert_many(sentences_to_save)
-
-                story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
-                                   ['id'])
-                db.commit()
-                story_ids.append(story_id)
-            except:
-                db.rollback()
-        return story_ids
-
-
-def negative_sentence_sampler(db: Database) -> Dict[str, Any]:
-    while True:
-        random_sentences = db.query(f'SELECT * FROM sentence ORDER BY RANDOM()')
-        for sentence in random_sentences:
-            yield sentence
