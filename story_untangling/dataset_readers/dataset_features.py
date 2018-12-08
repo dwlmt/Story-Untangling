@@ -59,6 +59,20 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
         create_story_tasks = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
 
+            # Create the main tables and columns that need indexing.
+            story_table = db.create_table('story',
+                                          primary_type=db.types.bigint)
+            sentence_table = db.create_table('sentence',
+                                             primary_type=db.types.bigint)
+            sentence_table.create_column('story_id', db.types.integer)
+            sentence_table.create_column('start_span', db.types.integer)
+            sentence_table.create_column('end_span', db.types.integer)
+            # Indices created at the beginning as creating them later causing other processes to fail
+            # when the a large index is locking the database.
+            sentence_table.create_index(['story_id'])
+            sentence_table.create_index(['start_span'])
+            sentence_table.create_index(['end_span'])
+
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
                 story_sentences = sentence_splitter.batch_split_sentences(lines)
                 create_story_tasks.append(
@@ -66,13 +80,6 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
             story_ids = await asyncio.gather(*create_story_tasks)
             logger.info(f"Saved stories to db with ids: {story_ids}")
-
-            try:
-                db["sentence"].create_index(['story_id'])
-                db["sentence"].create_index(['start_span'])
-                db["sentence"].create_index(['end_span'])
-            except Exception as e:
-                logging.error(e)
 
             if should_save_sentiment:
                 await save_sentiment(batch_size, dataset_db, db, executor, loop)
@@ -127,10 +134,19 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str):
 
 async def save_coreferences(coreference_model: Model, dataset_db: str):
     db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
+
+    coref_table = db.create_table('sentence',
+                                  primary_type=db.types.bigint)
+    coref_table.create_column('story_id', db.types.integer)
+    coref_table.create_column('start_span', db.types.integer)
+    coref_table.create_column('end_span', db.types.integer)
+    coref_table.create_index(['story_id'])
+    coref_table.create_index(['start_span'])
+    coref_table.create_index(['end_span'])
+
     coreference_processor = CoreferenceProcessor(coreference_model, dataset_db)
 
     sentence_table = db["sentence"]
-    coref_table = db["coreference"]
     for story in db['story']:
 
         sentence_text = " ".join([s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')])
