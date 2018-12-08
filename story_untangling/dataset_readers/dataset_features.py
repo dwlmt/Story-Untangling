@@ -60,10 +60,9 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
 
             # Create the main tables and columns that need indexing.
-            story_table = db.create_table('story',
-                                          primary_type=db.types.bigint)
-            sentence_table = db.create_table('sentence',
-                                             primary_type=db.types.bigint)
+            db.begin()
+            story_table = db.create_table('story')
+            sentence_table = db.create_table('sentence')
             sentence_table.create_column('story_id', db.types.integer)
             sentence_table.create_column('start_span', db.types.integer)
             sentence_table.create_column('end_span', db.types.integer)
@@ -72,6 +71,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             sentence_table.create_index(['story_id'])
             sentence_table.create_index(['start_span'])
             sentence_table.create_index(['end_span'])
+            db.commit()
 
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
                 story_sentences = sentence_splitter.batch_split_sentences(lines)
@@ -135,14 +135,15 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str):
 async def save_coreferences(coreference_model: Model, dataset_db: str):
     db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
 
-    coref_table = db.create_table('sentence',
-                                  primary_type=db.types.bigint)
+    db.begin()
+    coref_table = db.create_table('sentence')
     coref_table.create_column('story_id', db.types.integer)
     coref_table.create_column('start_span', db.types.integer)
     coref_table.create_column('end_span', db.types.integer)
     coref_table.create_index(['story_id'])
     coref_table.create_index(['start_span'])
     coref_table.create_index(['end_span'])
+    db.commit()
 
     coreference_processor = CoreferenceProcessor(coreference_model, dataset_db)
 
@@ -160,8 +161,6 @@ async def save_coreferences(coreference_model: Model, dataset_db: str):
         except Exception as e:
             logging.error(e)
             db.rollback()
-
-    coref_table.create_index(['story_id'])
 
     logger.info(f"Coreferences Saved")
 
