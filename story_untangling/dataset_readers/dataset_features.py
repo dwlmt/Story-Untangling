@@ -54,16 +54,16 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
         loop = asyncio.get_event_loop()
 
         f"{dataset_db}?mode=ro&cache=shared"
-        db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
-        db.commit()
-        create_story_tasks = []
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
+            
             # Create the main tables and columns that need indexing.
-            db.begin()
             story_table = db.create_table('story')
+            story_table.create_column('story_num', db.types.integer)
             sentence_table = db.create_table('sentence')
             sentence_table.create_column('story_id', db.types.integer)
+            sentence_table.create_column('sentence_num', db.types.integer)
+            sentence_table.create_column('sentence_len', db.types.integer)
             sentence_table.create_column('start_span', db.types.integer)
             sentence_table.create_column('end_span', db.types.integer)
             # Indices created at the beginning as creating them later causing other processes to fail
@@ -71,7 +71,9 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             sentence_table.create_index(['story_id'])
             sentence_table.create_index(['start_span'])
             sentence_table.create_index(['end_span'])
-            db.commit()
+
+        create_story_tasks = []
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
 
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
                 story_sentences = sentence_splitter.batch_split_sentences(lines)
@@ -82,7 +84,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             logger.info(f"Saved stories to db with ids: {story_ids}")
 
             if should_save_sentiment:
-                await save_sentiment(batch_size, dataset_db, db, executor, loop)
+                await save_sentiment(batch_size, dataset_db, executor, loop)
 
             if ner_model:
                 await save_ner(ner_model, batch_size, dataset_db)
@@ -93,57 +95,57 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
     return dataset_db
 
 
-async def save_sentiment(batch_size, dataset_db, db, executor, loop):
-    db["sentence"].create_column('vader_sentiment', db.types.float)
-    db["sentence"].create_column('textblob_polarity', db.types.float)
-    db["sentence"].create_column('textblob_subjectivity', db.types.float)
-    sentiment_batch = []
-    sentiment_tasks = []
-    for sentence in db['sentence']:
-        sentiment_batch.append(sentence)
+async def save_sentiment(batch_size, dataset_db, executor, loop):
+    with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+        db["sentence"].create_column('vader_sentiment', db.types.float)
+        db["sentence"].create_column('textblob_polarity', db.types.float)
+        db["sentence"].create_column('textblob_subjectivity', db.types.float)
+        sentiment_batch = []
+        sentiment_tasks = []
+        for sentence in db['sentence']:
+            sentiment_batch.append(sentence)
 
-        if len(sentiment_batch) == batch_size:
-            sentiment_tasks.append(
-                loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
-            sentiment_batch = []
-    sentiment_tasks.append(
-        loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
-    await asyncio.gather(*sentiment_tasks)
-    logger.info(f"Sentiment saved")
+            if len(sentiment_batch) == batch_size:
+                sentiment_tasks.append(
+                    loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+                sentiment_batch = []
+        sentiment_tasks.append(
+            loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+        await asyncio.gather(*sentiment_tasks)
+        logger.info(f"Sentiment saved")
 
 
 async def save_ner(ner_model: Model, batch_size: int, dataset_db: str):
-    db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
-    db["sentence"].create_column('ner_tags', db.types.text)
-    ner_processor = NERProcessor(ner_model, dataset_db)
-    ner_batch = []
+    with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+        db["sentence"].create_column('ner_tags', db.types.text)
+        ner_processor = NERProcessor(ner_model, dataset_db)
+        ner_batch = []
 
-    for sentence in db['sentence']:
-        ner_batch.append(sentence)
+        for sentence in db['sentence']:
+            ner_batch.append(sentence)
 
-        if len(ner_batch) == batch_size:
-            ner_data_to_save = ner_processor(ner_batch)
-            update_table_on_id(db, "sentence", ner_data_to_save)
-            ner_batch = []
+            if len(ner_batch) == batch_size:
+                ner_data_to_save = ner_processor(ner_batch)
+                update_table_on_id(db, "sentence", ner_data_to_save)
+                ner_batch = []
 
-    ner_data_to_save = ner_processor(ner_batch)
-    update_table_on_id(db, "sentence", ner_data_to_save)
+        ner_data_to_save = ner_processor(ner_batch)
+        update_table_on_id(db, "sentence", ner_data_to_save)
 
-    logger.info(f"Named Entity Tags Saved")
+        logger.info(f"Named Entity Tags Saved")
 
 
 async def save_coreferences(coreference_model: Model, dataset_db: str):
-    db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
+    with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
-    db.begin()
-    coref_table = db.create_table('sentence')
-    coref_table.create_column('story_id', db.types.integer)
-    coref_table.create_column('start_span', db.types.integer)
-    coref_table.create_column('end_span', db.types.integer)
-    coref_table.create_index(['story_id'])
-    coref_table.create_index(['start_span'])
-    coref_table.create_index(['end_span'])
-    db.commit()
+        coref_table = db.create_table('sentence')
+        coref_table.create_column('story_id', db.types.integer)
+        coref_table.create_column('start_span', db.types.integer)
+        coref_table.create_column('end_span', db.types.integer)
+        coref_table.create_index(['story_id'])
+        coref_table.create_index(['start_span'])
+        coref_table.create_index(['end_span'])
+        
 
     coreference_processor = CoreferenceProcessor(coreference_model, dataset_db)
 
@@ -155,12 +157,11 @@ async def save_coreferences(coreference_model: Model, dataset_db: str):
         coref_to_save = coreference_processor(sentence_text, story["id"])
 
         try:
-            db.begin()
+
             coref_table.insert_many(coref_to_save)
-            db.commit()
+
         except Exception as e:
             logging.error(e)
-            db.rollback()
 
     logger.info(f"Coreferences Saved")
 
@@ -168,13 +169,12 @@ async def save_coreferences(coreference_model: Model, dataset_db: str):
 def update_table_on_id(db, table, data):
     try:
         sentence_table = db[table]
-        db.begin()
+
         for sent_dict in data:
             sentence_table.update(sent_dict, ["id"])
-        db.commit()
+
     except Exception as e:
         logging.error(e)
-        db.rollback()
 
 
 async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
@@ -219,8 +219,9 @@ class SentimentDatabaseFeatures:
 
             sents_to_save.append(sentiment_dict)
 
-        db = dataset.connect(self._dataset_db, engine_kwargs={"pool_recycle": 3600})
-        update_table_on_id(db, "sentence", sents_to_save)
+        with dataset.connect(self._dataset_db,
+                             engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+            update_table_on_id(db, "sentence", sents_to_save)
 
 
 class SaveStoryToDatabase:
@@ -231,36 +232,37 @@ class SaveStoryToDatabase:
     def __call__(self, story_sentences: List[str], story_nums: List[int]) -> List[int]:
         story_ids = []
         for sentences, story_num in zip(story_sentences, story_nums):
-            db = dataset.connect(self._dataset_db, engine_kwargs={"pool_recycle": 3600})
-            db.begin()
-            try:
-                story_table = db['story']
-                sentence_table = db['sentence']
-                story = dict(story_num=story_num)
-                story_id = story_table.insert(story)
-                sentences_to_save = []
+            with dataset.connect(self._dataset_db,
+                                 engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
-                total_story_tokens = 0
-                sentences = self._word_tokenizer.batch_tokenize(sentences)
+                try:
+                    story_table = db['story']
+                    sentence_table = db['sentence']
+                    story = dict(story_num=story_num)
+                    story_id = story_table.insert(story)
+                    sentences_to_save = []
 
-                for i, sent in enumerate(sentences):
-                    start_span = total_story_tokens
-                    sentence_len = len(sent)
-                    total_story_tokens += sentence_len
-                    end_span = total_story_tokens
-                    sentences_to_save.append(
-                        dict(sentence_num=i, story_id=story_id, text=" ".join([s.text for s in sent]),
-                             sentence_len=sentence_len,
-                             start_span=start_span, end_span=end_span))
-                sentence_table.insert_many(sentences_to_save)
+                    total_story_tokens = 0
+                    sentences = self._word_tokenizer.batch_tokenize(sentences)
 
-                story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
-                                   ['id'])
-                db.commit()
-                story_ids.append(story_id)
-            except Exception as e:
-                logging.error(e)
-                db.rollback()
+                    for i, sent in enumerate(sentences):
+                        start_span = total_story_tokens
+                        sentence_len = len(sent)
+                        total_story_tokens += sentence_len
+                        end_span = total_story_tokens
+                        sentences_to_save.append(
+                            dict(sentence_num=i, story_id=story_id, text=" ".join([s.text for s in sent]),
+                                 sentence_len=sentence_len,
+                                 start_span=start_span, end_span=end_span))
+                    sentence_table.insert_many(sentences_to_save)
+
+                    story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
+                                       ['id'])
+                    story_ids.append(story_id)
+
+                except Exception as e:
+                    logging.error(e)
+                    
         return story_ids
 
 
