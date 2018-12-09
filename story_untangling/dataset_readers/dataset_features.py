@@ -49,7 +49,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
         except OSError:
             pass
 
-    if not Path(dataset_db).is_file():
+    if not Path(database_file).is_file():
 
         loop = asyncio.get_event_loop()
 
