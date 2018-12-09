@@ -38,7 +38,6 @@
         "trainable": true
       }
     },
-
     "encoder": {
       "type": "lstm",
       "input_size": 150,

@@ -1,0 +1,1 @@
+from story_untangling.models import reading_thoughts

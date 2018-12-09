@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import numpy
 
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data import Token
@@ -170,8 +171,8 @@ class WritingPromptsDatasetReader(DatasetReader):
                                                      self._target_token_indexers)
 
         # Wrap in an array there isn't a single value scalar field.
-        field_dict["absolute_position"] = ArrayField([absolute_position])
-        field_dict["relative_position"] = ArrayField([relative_position])
+        field_dict["absolute_position"] = ArrayField(numpy.array([absolute_position]))
+        field_dict["relative_position"] = ArrayField(numpy.array([relative_position]))
 
         field_dict["metadata"] = MetadataField(metadata)
 
