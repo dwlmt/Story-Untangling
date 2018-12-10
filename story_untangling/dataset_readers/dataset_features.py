@@ -6,18 +6,15 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any
 
 import dataset
-import more_itertools
+import nltk
 from aiofile import AIOFile, LineReader
 from allennlp.data.tokenizers import SentenceSplitter, WordTokenizer
 from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
-from allennlp.data.tokenizers.word_splitter import WordSplitter
 from allennlp.models import Model
 from allennlp.predictors import Predictor
 from dataset import Database
 from nltk.sentiment import SentimentIntensityAnalyzer
 from textblob import TextBlob
-
-import nltk
 
 nltk.download('vader_lexicon')
 
@@ -30,7 +27,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                             ner_model: str = None,
                             coreference_model: str = None,
                             batch_size: int = 100,
-                            max_workers: int = 8) -> str:
+                            max_workers: int = 12) -> str:
     file_name = os.path.basename(file_path)
     database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
     dataset_db = f"sqlite:///{database_file}"

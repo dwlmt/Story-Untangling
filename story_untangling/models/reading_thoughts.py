@@ -1,18 +1,13 @@
 import logging
-
-import numpy as np
-import overrides
-import torch
-import torch.nn as nn
-from allennlp.common.util import START_SYMBOL
-from allennlp.data import Vocabulary
-from allennlp.models import Model
-from allennlp.modules import TextFieldEmbedder, Attention, SimilarityFunction, Seq2VecEncoder
 from typing import Dict, Any
 
+import torch
+import torch.nn as nn
+from allennlp.data import Vocabulary
+from allennlp.models import Model
+from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
-from torch.nn.functional import nll_loss
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -56,11 +51,16 @@ class ReadingThoughts(Model):
         self._nll_loss = nn.NLLLoss()
 
         self.metrics = {
-            "target_accuracy": CategoricalAccuracy(),
-            "target_accuracy5": CategoricalAccuracy(top_k=5),
-            "target_correct_score_avg": Average(),
-            "target_correct_log_prob_avg": Average(),
-            "target_correct_prob_avg": Average()
+            "neighbour_accuracy": CategoricalAccuracy(),
+            "neighbour_accuracy5": CategoricalAccuracy(top_k=5),
+            "neighbour_correct_score_avg": Average(),
+            "neighbour_correct_log_prob_avg": Average(),
+            "neighbour_correct_prob_avg": Average(),
+            "random_accuracy": CategoricalAccuracy(),
+            "random_accuracy5": CategoricalAccuracy(top_k=5),
+            "random_correct_score_avg": Average(),
+            "random_correct_log_prob_avg": Average(),
+            "random_correct_prob_avg": Average()
         }
 
     def forward(self,  # type: ignore
@@ -84,11 +84,11 @@ class ReadingThoughts(Model):
         target_tokens: ``Dict[str, torch.LongTensor]``
             The output of ``TextField.as_array()`` applied on the source
             ``TextField``. This will be passed through a ``TextFieldEmbedder``
-            and then through an encoder.
+            and then through an encoder. These are the correct target sentences and neighbouring sentences in the text.
         negative_tokens: ``Dict[str, torch.LongTensor]``
             The output of ``TextField.as_array()`` applied on the source
             ``TextField``. This will be passed through a ``TextFieldEmbedder``
-            and then through an encoder.
+            and then through an encoder. These are sampled or selected from non-negative text.
 
         """
         output_dict = {}
@@ -100,45 +100,65 @@ class ReadingThoughts(Model):
         source_mask = get_text_field_mask(source_tokens)
         encoded_source = self._source_encoder(embedded_source, source_mask)
 
-        loss = torch.tensor(0.0).to(embedded_source.device)
+        embedded_target = self._target_embedder(target_tokens)
+        target_mask = get_text_field_mask(target_tokens)
+        encoded_target = self._target_encoder(embedded_target, target_mask)
 
-        if target_tokens:
+        scores = torch.matmul(encoded_source, torch.t(encoded_target))
+        loss, mask = self._calculate_loss(batch_size, scores, output_dict)
 
-            embedded_target = self._target_embedder(target_tokens)
-            target_mask = get_text_field_mask(target_tokens)
-            encoded_target = self._target_encoder(embedded_target, target_mask)
+        if negative_tokens:
+            embedded_negative = self._target_embedder(negative_tokens)
+            negative_mask = get_text_field_mask(negative_tokens)
+            encoded_negative = self._target_encoder(embedded_negative, negative_mask)
 
-            scores = torch.matmul(encoded_source, torch.t(encoded_target))
+            # This is replacing one of the negative random samples with the correct output.
+            # It is hacky but computationally efficient meaning one of the random samples isn't used.
+            neg_mask = (1 - mask.float()).float()
+            mask = mask.float()
+            neg_scores = torch.matmul(encoded_source, torch.t(encoded_negative))
+            comb_scores = torch.zeros(scores.shape).to(scores.device)
+            comb_scores += scores * mask
+            comb_scores += neg_scores * neg_mask
 
-            output_dict["target_scores"] = scores
-
-            # The correct answer should correspond to the same position in the batch.
-            target_labels = torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device)
-            target_labels += torch.eye(batch_size, dtype=torch.long).to(scores.device)
-
-            scores_softmax = self._log_softmax(scores)
-            output_dict["target_scores_softmax"] = scores_softmax
-
-            correct_mask = target_labels == 1
-            output_dict["target_correct_score"] = scores[correct_mask]
-            target_correct_probability = scores_softmax[correct_mask]
-            output_dict["target_correct_probability"] = target_correct_probability.mean().item()
-
-            self.metrics["target_correct_score_avg"](output_dict["target_correct_score"].mean().item())
-            probs = torch.exp(target_correct_probability)
-            self.metrics["target_correct_log_prob_avg"](target_correct_probability.mean().item())
-            self.metrics["target_correct_prob_avg"](probs.mean().item())
-
-            for t in target_labels:
-                loss += self._nll_loss(scores_softmax, t)
-
-                self.metrics["target_accuracy"](scores_softmax, t)
-                self.metrics["target_accuracy5"](scores_softmax, t)
+            neg_loss, _ = self._calculate_loss(batch_size, neg_scores, output_dict, metrics_prefix="random")
+            loss += neg_loss
 
         output_dict["loss"] = loss
 
 
         return output_dict
+
+    def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour"):
+
+        loss = torch.tensor(0.0).to(scores.device)
+
+        output_dict["{metrics_prefix}_scores"] = scores
+
+        # The correct answer should correspond to the same position in the batch.
+        target_labels = torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device)
+        target_labels += torch.eye(batch_size, dtype=torch.long).to(scores.device)
+        correct_mask = target_labels == 1
+        # Calculate the loss
+        scores_softmax = self._log_softmax(scores)
+        for t in target_labels:
+            loss += self._nll_loss(scores_softmax, t)
+
+            self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, t)
+            self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, t)
+
+        # Some extra work just for metrics.
+        output_dict[f"{metrics_prefix}_scores_softmax"] = scores_softmax
+        output_dict[f"{metrics_prefix}_correct_score"] = scores[correct_mask]
+        target_correct_probability = scores_softmax[correct_mask]
+        output_dict[f"{metrics_prefix}_correct_probability"] = target_correct_probability.mean().item()
+        self.metrics[f"{metrics_prefix}_correct_score_avg"](
+            output_dict[f"{metrics_prefix}_correct_score"].mean().item())
+        probs = torch.exp(target_correct_probability)
+        self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](target_correct_probability.mean().item())
+        self.metrics[f"{metrics_prefix}_correct_prob_avg"](probs.mean().item())
+
+        return loss, correct_mask
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {metric_name: metric.get_metric(reset) for metric_name, metric in self.metrics.items()}

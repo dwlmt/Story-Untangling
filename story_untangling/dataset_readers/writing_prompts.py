@@ -1,7 +1,9 @@
 import asyncio
 import logging
-import numpy
+from typing import Dict
 
+import dataset
+import numpy
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data import Token
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
@@ -10,9 +12,6 @@ from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
 from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
-from typing import Dict
-import dataset
-
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
@@ -47,8 +46,6 @@ class WritingPromptsDatasetReader(DatasetReader):
         Reads as a sliding windows over sentences. How many sentences to use as a context for each sentence to predict.
     sentence_predictive_window : int, (optional, default=1)
         Reads as a sliding windows over sentences. How many sentences to predict.
-    target_positive : bool, (optional, default=True)
-        Whether to yield the target predictive context or not.
     target_negative : bool, (optional, default=True)
         Whether to yield a negative target context or not.
     dataset_path : str, (optional, default=./dataset-cache/)
@@ -73,7 +70,6 @@ class WritingPromptsDatasetReader(DatasetReader):
                  source_add_start_token: bool = True,
                  sentence_context_window: int = 2,
                  sentence_predictive_window: int = 1,
-                 target_positive: bool = True,
                  target_negative: bool = True,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
@@ -90,7 +86,6 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._source_add_start_token = source_add_start_token
         self._sentence_context_window = sentence_context_window
         self._sentence_predictive_window = sentence_predictive_window
-        self._target_positive: bool = target_positive
         self._target_negative: bool = target_negative
         self._sentence_splitter = SpacySentenceSplitter()
         self._dataset_path = dataset_path
