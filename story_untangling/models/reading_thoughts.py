@@ -113,11 +113,8 @@ class ReadingThoughts(Model):
             output_dict["target_scores"] = scores
 
             # The correct answer should correspond to the same position in the batch.
-            target_labels = torch.zeros(batch_size, batch_size).to(scores.device)
-            target_labels += torch.eye(batch_size).to(scores.device)
-
-            target_labels_sum = torch.sum(target_labels, dim=1, keepdim=True)
-            target_labels = (target_labels / target_labels_sum).long()
+            target_labels = torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device)
+            target_labels += torch.eye(batch_size, dtype=torch.long).to(scores.device)
 
             scores_softmax = self._log_softmax(scores)
             output_dict["target_scores_softmax"] = scores_softmax
