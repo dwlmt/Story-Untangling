@@ -11,6 +11,8 @@ from allennlp.modules import TextFieldEmbedder, Attention, SimilarityFunction, S
 from typing import Dict, Any
 
 from allennlp.nn.util import get_text_field_mask
+from allennlp.training.metrics import CategoricalAccuracy, Average
+from torch.nn.functional import nll_loss
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -50,7 +52,16 @@ class ReadingThoughts(Model):
         self._target_embedder = target_embedder or source_embedder
         self._target_encoder = target_encoder or source_encoder
 
-        self._loss = torch.nn.CrossEntropyLoss()
+        self._log_softmax = nn.LogSoftmax(dim=1)
+        self._nll_loss = nn.NLLLoss()
+
+        self.metrics = {
+            "target_accuracy": CategoricalAccuracy(),
+            "target_accuracy5": CategoricalAccuracy(top_k=5),
+            "target_correct_score_avg": Average(),
+            "target_correct_log_prob_avg": Average(),
+            "target_correct_prob_avg": Average()
+        }
 
     def forward(self,  # type: ignore
                 source_tokens: Dict[str, torch.LongTensor],
@@ -89,7 +100,7 @@ class ReadingThoughts(Model):
         source_mask = get_text_field_mask(source_tokens)
         encoded_source = self._source_encoder(embedded_source, source_mask)
 
-        loss = torch.tensor(0.0)
+        loss = torch.tensor(0.0).to(embedded_source.device)
 
         if target_tokens:
 
@@ -99,13 +110,38 @@ class ReadingThoughts(Model):
 
             scores = torch.matmul(encoded_source, torch.t(encoded_target))
 
+            output_dict["target_scores"] = scores
+
             # The correct answer should correspond to the same position in the batch.
-            target_labels = torch.zeros(batch_size, batch_size).long()
-            target_labels += torch.eye(batch_size).long()
+            target_labels = torch.zeros(batch_size, batch_size).to(scores.device)
+            target_labels += torch.eye(batch_size).to(scores.device)
+
+            target_labels_sum = torch.sum(target_labels, dim=1, keepdim=True)
+            target_labels = (target_labels / target_labels_sum).long()
+
+            scores_softmax = self._log_softmax(scores)
+            output_dict["target_scores_softmax"] = scores_softmax
+
+            correct_mask = target_labels == 1
+            output_dict["target_correct_score"] = scores[correct_mask]
+            target_correct_probability = scores_softmax[correct_mask]
+            output_dict["target_correct_probability"] = target_correct_probability.mean().item()
+
+            self.metrics["target_correct_score_avg"](output_dict["target_correct_score"].mean().item())
+            probs = torch.exp(target_correct_probability)
+            self.metrics["target_correct_log_prob_avg"](target_correct_probability.mean().item())
+            self.metrics["target_correct_prob_avg"](probs.mean().item())
 
             for t in target_labels:
-                loss += self._loss(scores, t)
+                loss += self._nll_loss(scores_softmax, t)
+
+                self.metrics["target_accuracy"](scores_softmax, t)
+                self.metrics["target_accuracy5"](scores_softmax, t)
 
         output_dict["loss"] = loss
 
+
         return output_dict
+
+    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
+        return {metric_name: metric.get_metric(reset) for metric_name, metric in self.metrics.items()}
