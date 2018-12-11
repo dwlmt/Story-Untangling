@@ -128,7 +128,7 @@ class ReadingThoughts(Model):
             comb_scores += scores * identity.float()
             comb_scores += neg_scores * neg_identity.float()
 
-            neg_loss = self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="random")
+            neg_loss = self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative")
             loss += neg_loss
 
         output_dict["loss"] = loss
