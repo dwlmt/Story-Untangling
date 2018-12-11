@@ -6,6 +6,7 @@ import torch.nn as nn
 from allennlp.data import Vocabulary
 from allennlp.models import Model
 from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder
+from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
 
@@ -31,14 +32,18 @@ class ReadingThoughts(Model):
            Embedder for the target sequences, defaults to the same as source if not specified.
        target_encoder : ``Seq2VecEncoder``, (optional, default=source_encoder)
            The encoder for the target sequence, if not specified used the target one.
+       initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
+        Used to initialize the model parameters.
        """
 
     def __init__(self,
                  vocab: Vocabulary,
+
                  source_embedder: TextFieldEmbedder,
                  source_encoder: Seq2VecEncoder,
                  target_embedder: TextFieldEmbedder = None,
                  target_encoder: Seq2VecEncoder = None,
+                 initializer: InitializerApplicator = InitializerApplicator(),
                  ) -> None:
         super().__init__(vocab)
         self._vocab = vocab
@@ -62,6 +67,8 @@ class ReadingThoughts(Model):
             "random_correct_log_prob_avg": Average(),
             "random_correct_prob_avg": Average()
         }
+
+        initializer(self)
 
     def forward(self,  # type: ignore
                 source_tokens: Dict[str, torch.LongTensor],
@@ -105,7 +112,7 @@ class ReadingThoughts(Model):
         encoded_target = self._target_encoder(embedded_target, target_mask)
 
         scores = torch.matmul(encoded_source, torch.t(encoded_target))
-        loss, mask = self._calculate_loss(batch_size, scores, output_dict)
+        loss = self._calculate_loss(batch_size, scores, output_dict)
 
         if negative_tokens:
             embedded_negative = self._target_embedder(negative_tokens)
@@ -114,12 +121,12 @@ class ReadingThoughts(Model):
 
             # This is replacing one of the negative random samples with the correct output.
             # It is hacky but computationally efficient meaning one of the random samples isn't used.
-            neg_mask = (1 - mask.float()).float()
-            mask = mask.float()
             neg_scores = torch.matmul(encoded_source, torch.t(encoded_negative))
+            identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
+            neg_identity = (identity != 1)
             comb_scores = torch.zeros(scores.shape).to(scores.device)
-            comb_scores += scores * mask
-            comb_scores += neg_scores * neg_mask
+            comb_scores += scores * identity.float()
+            comb_scores += neg_scores * neg_identity.float()
 
             neg_loss, _ = self._calculate_loss(batch_size, neg_scores, output_dict, metrics_prefix="random")
             loss += neg_loss
@@ -137,7 +144,8 @@ class ReadingThoughts(Model):
 
         # The correct answer should correspond to the same position in the batch.
         target_labels = torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device)
-        target_labels += torch.eye(batch_size, dtype=torch.long).to(scores.device)
+        identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
+        target_labels += identity
         correct_mask = target_labels == 1
         # Calculate the loss
         scores_softmax = self._log_softmax(scores)
@@ -158,7 +166,7 @@ class ReadingThoughts(Model):
         self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](target_correct_probability.mean().item())
         self.metrics[f"{metrics_prefix}_correct_prob_avg"](probs.mean().item())
 
-        return loss, correct_mask
+        return loss
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {metric_name: metric.get_metric(reset) for metric_name, metric in self.metrics.items()}
