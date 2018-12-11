@@ -61,11 +61,11 @@ class ReadingThoughts(Model):
             "neighbour_correct_score_avg": Average(),
             "neighbour_correct_log_prob_avg": Average(),
             "neighbour_correct_prob_avg": Average(),
-            "random_accuracy": CategoricalAccuracy(),
-            "random_accuracy5": CategoricalAccuracy(top_k=5),
-            "random_correct_score_avg": Average(),
-            "random_correct_log_prob_avg": Average(),
-            "random_correct_prob_avg": Average()
+            "negative_accuracy": CategoricalAccuracy(),
+            "negative_accuracy5": CategoricalAccuracy(top_k=5),
+            "negative_correct_score_avg": Average(),
+            "negative_correct_log_prob_avg": Average(),
+            "negative_correct_prob_avg": Average()
         }
 
         initializer(self)
