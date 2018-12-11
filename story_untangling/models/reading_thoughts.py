@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import torch
 import torch.nn as nn
@@ -72,18 +72,14 @@ class ReadingThoughts(Model):
 
     def forward(self,  # type: ignore
                 source_tokens: Dict[str, torch.LongTensor],
-                target_tokens: Dict[str, torch.LongTensor] = None,
-                negative_tokens: Dict[str, torch.LongTensor] = None,
-                absolute_position: Dict[str, Any] = None,
-                relative_position: Dict[str, Any] = None,
-                metadata: Dict[str, Any] = None,
-                epoch: Dict[str, Any] = None
+                target_tokens: Dict[str, torch.LongTensor],
+                negative_tokens: Optional[Dict[str, torch.LongTensor]] = None,
+                absolute_position: Optional[Dict[str, Any]] = None,
+                relative_position: Optional[Dict[str, Any]] = None,
+                metadata: Optional[Dict[str, Any]] = None,
+                epoch: Optional[Dict[str, Any]] = None
                 ) -> Dict[str, torch.Tensor]:
-        # pylint: disable=arguments-differ
         """
-        Decoder logic for producing the target sequences.
-        Parameters
-        ----------
         source_tokens: ``Dict[str, torch.LongTensor]``
             The output of ``TextField.as_array()`` applied on the source
             ``TextField``. This will be passed through a ``TextFieldEmbedder``
@@ -96,6 +92,14 @@ class ReadingThoughts(Model):
             The output of ``TextField.as_array()`` applied on the source
             ``TextField``. This will be passed through a ``TextFieldEmbedder``
             and then through an encoder. These are sampled or selected from non-negative text.
+        absolute_position: ``Opt[Dict[str, Any]]``, optional
+            the start position of the context as a sentence count.
+        relative_position: ``Opt[Dict[str, Any]]``, optional
+            the relative position from 0.0-1.0 of how far into the story the context is.
+        metdata: ``Opt[Dict[str, Any]]``, optional
+            metadata with story information.
+        epoch: ``Opt[Dict[str, Any]]``, optional
+            the epoch of the run.
 
         """
         output_dict = {}
