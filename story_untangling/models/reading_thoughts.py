@@ -147,19 +147,18 @@ class ReadingThoughts(Model):
         output_dict["{metrics_prefix}_scores"] = scores
 
         # The correct answer should correspond to the same position in the batch.
-        target_labels = torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device)
         identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
-        target_labels += identity
-        correct_mask = target_labels == 1
+        target_classes = torch.argmax(identity, dim=1)  # Get indices and NLLLoss needs these.
         # Calculate the loss
         scores_softmax = self._log_softmax(scores)
-        for t in target_labels:
-            loss += self._nll_loss(scores_softmax, t)
 
-            self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, t)
-            self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, t)
+        loss += self._nll_loss(scores_softmax, target_classes)
+
+        self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
+        self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
 
         # Some extra work just for metrics.
+        correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device) + identity) == 1
         output_dict[f"{metrics_prefix}_scores_softmax"] = scores_softmax
         output_dict[f"{metrics_prefix}_correct_score"] = scores[correct_mask]
         target_correct_probability = scores_softmax[correct_mask]

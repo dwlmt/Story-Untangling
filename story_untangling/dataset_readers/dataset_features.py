@@ -154,24 +154,27 @@ async def save_coreferences(coreference_model: Model, dataset_db: str):
         coref_to_save = coreference_processor(sentence_text, story["id"])
 
         try:
-
+            db.begin()
             coref_table.insert_many(coref_to_save)
-
+            db.commit()
         except Exception as e:
             logging.error(e)
+            db.rollback()
 
     logger.info(f"Coreferences Saved")
 
 
 def update_table_on_id(db, table, data):
     try:
+        db.begin()
         sentence_table = db[table]
-
         for sent_dict in data:
             sentence_table.update(sent_dict, ["id"])
+        db.commit()
 
     except Exception as e:
         logging.error(e)
+        db.rollback()
 
 
 async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
@@ -233,6 +236,7 @@ class SaveStoryToDatabase:
                                  engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
                 try:
+                    db.begin()
                     story_table = db['story']
                     sentence_table = db['sentence']
                     story = dict(story_num=story_num)
@@ -256,9 +260,11 @@ class SaveStoryToDatabase:
                     story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
                                        ['id'])
                     story_ids.append(story_id)
+                    db.commit()
 
                 except Exception as e:
                     logging.error(e)
+                    db.rollback()
                     
         return story_ids
 
