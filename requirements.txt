@@ -1,8 +1,10 @@
-setuptools==40.4.3
-typing==3.6.4
-nltk==3.3
 aiofile==1.4.3
-textblob==0.15.2
+nltk==3.3
+typing==3.6.4
 dataset==1.1.0
+setuptools==40.4.3
+textblob==0.15.2
+torch==1.0.0
+numpy==1.14.2
 overrides==1.9
 allennlp==0.7.2
