@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict
+from typing import Dict, List, Union
 
 import dataset
 import numpy
@@ -60,6 +60,8 @@ class WritingPromptsDatasetReader(DatasetReader):
         AllenNLP NER model to run for features.
     coreference_model : str (optional, default=None)
         AllenNLP Coreference model.
+    cuda_device : List[Int] (optional, default=-1)
+        List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
 
     def __init__(self,
@@ -77,6 +79,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  save_sentiment: bool = True,
                  ner_model: str = None,
                  coreference_model: str = None,
+                 cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
         self._source_tokenizer = source_tokenizer or WordTokenizer()
@@ -94,6 +97,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._save_sentiment = save_sentiment
         self._ner_model = ner_model
         self._coreference_model = coreference_model
+        self._cuda_device = cuda_device
 
     @overrides
     def _read(self, file_path):
@@ -104,7 +108,8 @@ class WritingPromptsDatasetReader(DatasetReader):
                               should_save_sentiment=self._save_sentiment,
                               file_path=file_path, use_existing_database=self._use_existing_cached_db,
                               ner_model=self._ner_model,
-                              coreference_model=self._coreference_model))
+                              coreference_model=self._coreference_model,
+                              cuda_device=self._cuda_device))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
 

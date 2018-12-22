@@ -3,7 +3,7 @@ import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional, Union
 
 import dataset
 import nltk
@@ -27,7 +27,8 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                             ner_model: str = None,
                             coreference_model: str = None,
                             batch_size: int = 100,
-                            max_workers: int = 12) -> str:
+                            max_workers: int = 12,
+                            cuda_device: Union[List[int], int] = None) -> str:
     file_name = os.path.basename(file_path)
     database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
     dataset_db = f"sqlite:///{database_file}"
@@ -84,10 +85,10 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                 await save_sentiment(batch_size, dataset_db, executor, loop)
 
             if ner_model:
-                await save_ner(ner_model, batch_size, dataset_db)
+                await save_ner(ner_model, batch_size, dataset_db, cuda_device=cuda_device)
 
             if coreference_model:
-                await save_coreferences(coreference_model, dataset_db)
+                await save_coreferences(coreference_model, dataset_db, cuda_device=cuda_device)
 
     return dataset_db
 
@@ -112,10 +113,10 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
         logger.info(f"Sentiment saved")
 
 
-async def save_ner(ner_model: Model, batch_size: int, dataset_db: str):
+async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None):
     with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
         db["sentence"].create_column('ner_tags', db.types.text)
-        ner_processor = NERProcessor(ner_model, dataset_db)
+        ner_processor = NERProcessor(ner_model, dataset_db, cuda_device=cuda_device)
         ner_batch = []
 
         for sentence in db['sentence']:
@@ -132,19 +133,18 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str):
         logger.info(f"Named Entity Tags Saved")
 
 
-async def save_coreferences(coreference_model: Model, dataset_db: str):
+async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None):
     with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
-        coref_table = db.create_table('sentence')
+        coref_table = db.create_table('coreference')
         coref_table.create_column('story_id', db.types.integer)
         coref_table.create_column('start_span', db.types.integer)
         coref_table.create_column('end_span', db.types.integer)
         coref_table.create_index(['story_id'])
         coref_table.create_index(['start_span'])
         coref_table.create_index(['end_span'])
-        
 
-    coreference_processor = CoreferenceProcessor(coreference_model, dataset_db)
+    coreference_processor = CoreferenceProcessor(coreference_model, dataset_db, cuda_device=cuda_device)
 
     sentence_table = db["sentence"]
     for story in db['story']:
@@ -251,8 +251,14 @@ class SaveStoryToDatabase:
                         sentence_len = len(sent)
                         total_story_tokens += sentence_len
                         end_span = total_story_tokens
+
+                        text = " ".join([s.text for s in sent])
+
+                        if text is None or len(text) == 0:
+                            continue
+
                         sentences_to_save.append(
-                            dict(sentence_num=i, story_id=story_id, text=" ".join([s.text for s in sent]),
+                            dict(sentence_num=i, story_id=story_id, text=text,
                                  sentence_len=sentence_len,
                                  start_span=start_span, end_span=end_span))
                     sentence_table.insert_many(sentences_to_save)
@@ -277,14 +283,19 @@ def negative_sentence_sampler(db: Database) -> Dict[str, Any]:
 
 
 class NERProcessor(object):
-    def __init__(self, ner_model: str, database_db: str):
+    def __init__(self, ner_model: str, database_db: str, cuda_device: Union[List[int], int] = -1):
         self._ner_predictor = Predictor.from_path(ner_model)
+
+        if cuda_device != -1:
+            self._ner_predictor._model.to(cuda_device)
         self._database_db = database_db
+        self._cuda_device = cuda_device
 
     def __call__(self, stories_sentences: List[Dict[str, Any]]) -> List[List[str]]:
+
         stories_ner = []
 
-        batch_json = [{"sentence": story["text"]} for story in stories_sentences]
+        batch_json = [{"sentence": story["text"], "cuda_device": self._cuda_device} for story in stories_sentences]
 
         batch_result = self._ner_predictor.predict_batch_json(
             batch_json
@@ -296,9 +307,14 @@ class NERProcessor(object):
 
 
 class CoreferenceProcessor(object):
-    def __init__(self, corefernce_model: str, database_db: str):
+    def __init__(self, corefernce_model: str, database_db: str, cuda_device: Union[List[int], int] = -1):
         self._coreference_predictor = Predictor.from_path(corefernce_model)
+
+        if cuda_device != -1:
+            self._coreference_predictor._model.to(cuda_device)
+
         self._database_db = database_db
+        self._cuda_device = cuda_device
 
     def __call__(self, stories_sentences: str, story_id: int) -> List[List[str]]:
 
