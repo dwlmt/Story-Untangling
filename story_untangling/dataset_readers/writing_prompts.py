@@ -40,7 +40,7 @@ class WritingPromptsDatasetReader(DatasetReader):
     target_token_indexers : ``Dict[str, TokenIndexer]``, optional
         Indexers used to define output (target side) token representations. Defaults to
         ``source_token_indexers``.
-    source_add_start_token : bool, (optional, default=True)
+    add_start_end_token : bool, (optional, default=True)
         Whether or not to add `START_SYMBOL` to the beginning of the source sequence.
     sentence_context_window : int, (optional, default=2)
         Reads as a sliding windows over sentences. How many sentences to use as a context for each sentence to predict.
@@ -179,13 +179,14 @@ class WritingPromptsDatasetReader(DatasetReader):
                 tokenized_source.insert(0, Token(START_SYMBOL))
                 tokenized_source.append(Token(END_SYMBOL))
 
+            if len(tokenized_source) > self._truncate_sequence_length and self._truncate_sequences:
+                tokenized_source = tokenized_source[:self._truncate_sequence_length]
+
             token_field = TextField(tokenized_source, indexer)
 
             if len(tokenized_source) == 0:
                 token_field = token_field.empty_field()
 
-            if len(tokenized_source) > self._truncate_sequence_length and self._truncate_sequences:
-                tokenized_source = tokenized_source[:self._truncate_sequence_length]
             return token_field
 
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
