@@ -9,15 +9,15 @@
     "dataset_path": "/disk/scratch/writing_prompts_dataset_path/",
     "use_existing_cached_db": true,
     "target_negative": true,
-    "save_sentiment": false,
-    //"ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.08.31.tar.gz",
-    //"coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
+    "save_sentiment": true,
+    "ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.08.31.tar.gz",
+    "coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
     "lazy": true
   },
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/train.wp_target",
-  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/valid.wp_target",
-  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/test.wp_target",
-  //"/afs/inf.ed.ac.uk/group/project/comics/stories/datasets/writingPrompts/first_500",
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_50",//,"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
+  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_50",//"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
+  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_50",//,"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/writingPrompts/first_500",
   "model": {
     "type": "reading_thoughts",
     "source_embedder": {
@@ -33,12 +33,6 @@
       "input_size": 300,
       "hidden_size": 512,
       "num_layers": 5
-    },
-    "target_encoder": {
-      "type": "gru",
-      "input_size": 300,
-      "hidden_size": 512,
-      "num_layers": 3
     }
   },
   "iterator": {
@@ -46,17 +40,17 @@
     "batch_size": 200
   },
   "trainer": {
-    "num_epochs": 20,
+    "num_epochs": 100,
     "patience": 10,
     "cuda_device": [
       0,
-      1,
-      2,
-      3
+      1
+     // 2,
+     // 3
     ],
     "optimizer": {
       "type": "adam",
-      "lr": 0.01
+      "lr": 0.001
     }
   }
 }

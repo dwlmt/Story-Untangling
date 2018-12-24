@@ -16,7 +16,7 @@ def dual_window(seq: Iterable[str], context_size: int = 2, predictive_size: int 
     context_size = min(context_size + predictive_size, len(seq))
     for i, slice in enumerate(window(seq, size=context_size), start=1):
         s = len(slice)
-        if s > predictive_size:
+        if s == context_size:
             yield slice[0: s - 1], slice[-predictive_size], i, i / float(num_of_sentences)
-        else:
-            yield slice, None, i, i / float(num_of_sentences)
+
+    raise StopIteration

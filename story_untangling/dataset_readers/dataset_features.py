@@ -254,9 +254,6 @@ class SaveStoryToDatabase:
 
                         text = " ".join([s.text for s in sent])
 
-                        if text is None or len(text) == 0:
-                            continue
-
                         sentences_to_save.append(
                             dict(sentence_num=i, story_id=story_id, text=text,
                                  sentence_len=sentence_len,
@@ -287,7 +284,7 @@ class NERProcessor(object):
         self._ner_predictor = Predictor.from_path(ner_model)
 
         if cuda_device != -1:
-            self._ner_predictor._model.to(cuda_device)
+            self._ner_predictor._model = self._ner_predictor._model.to(cuda_device)
         self._database_db = database_db
         self._cuda_device = cuda_device
 
@@ -311,7 +308,7 @@ class CoreferenceProcessor(object):
         self._coreference_predictor = Predictor.from_path(corefernce_model)
 
         if cuda_device != -1:
-            self._coreference_predictor._model.to(cuda_device)
+            self._coreference_predictor._model = self._coreference_predictor._model.to(cuda_device)
 
         self._database_db = database_db
         self._cuda_device = cuda_device

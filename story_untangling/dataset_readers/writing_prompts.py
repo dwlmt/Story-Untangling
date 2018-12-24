@@ -60,6 +60,12 @@ class WritingPromptsDatasetReader(DatasetReader):
         AllenNLP NER model to run for features.
     coreference_model : str (optional, default=None)
         AllenNLP Coreference model.
+    min_story_sentences : int, (optional, default=0)
+        Min number of sentences a story must have to be included.
+    max_story_sentences : int, (optional, default=1000000)
+        Max number of sentences a story must have to be included.
+    positional_features : bool, (optional, default=True)
+        Should encode positional features in the source.
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
@@ -69,7 +75,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  target_tokenizer: Tokenizer = None,
                  source_token_indexers: Dict[str, TokenIndexer] = None,
                  target_token_indexers: Dict[str, TokenIndexer] = None,
-                 source_add_start_token: bool = True,
+                 add_start_end_token: bool = True,
                  sentence_context_window: int = 2,
                  sentence_predictive_window: int = 1,
                  target_negative: bool = True,
@@ -79,6 +85,9 @@ class WritingPromptsDatasetReader(DatasetReader):
                  save_sentiment: bool = True,
                  ner_model: str = None,
                  coreference_model: str = None,
+                 min_story_sentences: int = 0,
+                 max_story_sentences: int = 10 * 6,
+                 positional_features: bool = True,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -86,7 +95,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._target_tokenizer = target_tokenizer or self._source_tokenizer
         self._source_token_indexers = source_token_indexers or {"tokens": SingleIdTokenIndexer()}
         self._target_token_indexers = target_token_indexers or self._source_token_indexers
-        self._source_add_start_token = source_add_start_token
+        self._add_start_end_token = add_start_end_token
         self._sentence_context_window = sentence_context_window
         self._sentence_predictive_window = sentence_predictive_window
         self._target_negative: bool = target_negative
@@ -97,6 +106,9 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._save_sentiment = save_sentiment
         self._ner_model = ner_model
         self._coreference_model = coreference_model
+        self._min_story_sentences = min_story_sentences
+        self._max_story_sentences = max_story_sentences
+        self._positional_features = positional_features
         self._cuda_device = cuda_device
 
     @overrides
@@ -115,7 +127,9 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         negative_sampler = negative_sentence_sampler(db)
 
-        stories = db.query('SELECT * FROM story ORDER BY id')
+        stories = db.query(
+            f'SELECT * FROM story  WHERE sentence_num >= {self._min_story_sentences} '
+            f'AND sentence_num <= {self._max_story_sentences} ORDER BY id')
         for story in stories:
             story_id = story["id"]
             # Id will be the same as the sentence num as they are inserted as a batch in sequence.
@@ -139,7 +153,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                     negative_sequence = ""
                     for i in range(self._sentence_predictive_window):
                         negative_dict = next(negative_sampler)
-                        negative_sequence += negative_dict["text"]
+                        negative_sequence += " " + negative_dict["text"]
 
                 metadata = {"story_id": story_id}
 
@@ -155,10 +169,14 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         def tokenize(tokens, tokenizer, indexer):
             tokenized_source = tokenizer(tokens)
-            if self._source_add_start_token:
+            if self._add_start_end_token:
                 tokenized_source.insert(0, Token(START_SYMBOL))
-            tokenized_source.append(Token(END_SYMBOL))
+                tokenized_source.append(Token(END_SYMBOL))
+
             token_field = TextField(tokenized_source, indexer)
+
+            if len(tokenized_source) == 0:
+                token_field = token_field.empty_field()
             return token_field
 
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
@@ -166,16 +184,21 @@ class WritingPromptsDatasetReader(DatasetReader):
         if target_tokens is not None:
             field_dict['target_tokens'] = tokenize(target_tokens, self._target_tokenizer.tokenize,
                                                    self._target_token_indexers)
+
         if target_negative_tokens is not None:
             field_dict['negative_tokens'] = tokenize(target_negative_tokens, self._target_tokenizer.tokenize,
                                                      self._target_token_indexers)
 
         # Wrap in an array there isn't a single value scalar field.
-        field_dict["absolute_position"] = ArrayField(numpy.array([absolute_position]))
-        field_dict["relative_position"] = ArrayField(numpy.array([relative_position]))
+        source_features = []
+
+        # It only makes sense to include in the source features as otherwise it gives away the correct answers.
+        if self._positional_features:
+            source_features.append(absolute_position)
+            source_features.append(relative_position)
+        if len(source_features) > 0:
+            field_dict["source_features"] = ArrayField(numpy.array(source_features))
 
         field_dict["metadata"] = MetadataField(metadata)
 
         return Instance(field_dict)
-
-
