@@ -24,6 +24,7 @@
   "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
   "model": {
     "type": "reading_thoughts",
+    "similarity_function": {"type": "cosine"},
     "source_embedder": {
       "elmo": {
         "type": "elmo_token_embedder",

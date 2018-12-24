@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 from allennlp.data import Vocabulary
 from allennlp.models import Model
-from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder, FeedForward
+from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder, FeedForward, SimilarityFunction
+from allennlp.modules.similarity_functions import DotProductSimilarity
 from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
@@ -51,6 +52,7 @@ class ReadingThoughts(Model):
                  target_encoder: Seq2VecEncoder = None,
                  source_feedforward: FeedForward = None,
                  target_feedforward: FeedForward = None,
+                 similarity_function: SimilarityFunction = None,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  ) -> None:
         super().__init__(vocab)
@@ -64,6 +66,8 @@ class ReadingThoughts(Model):
         self._target_encoder = target_encoder or source_encoder
         self._target_feedforward = target_feedforward or source_feedforward
 
+        self._similarity_function = similarity_function
+
         # TODO: Rework to allow other similarity based functions to be used.
         self._log_softmax = nn.LogSoftmax(dim=1)
         self._nll_loss = nn.NLLLoss()
@@ -71,14 +75,18 @@ class ReadingThoughts(Model):
         self.metrics = {
             "neighbour_accuracy": CategoricalAccuracy(),
             "neighbour_accuracy5": CategoricalAccuracy(top_k=5),
+            "neighbour_accuracy3": CategoricalAccuracy(top_k=3),
             "neighbour_correct_score_avg": Average(),
             "neighbour_correct_log_prob_avg": Average(),
             "neighbour_correct_prob_avg": Average(),
+            "neighbour_correct_similarity_avg": Average(),
             "negative_accuracy": CategoricalAccuracy(),
+            "negative_accuracy3": CategoricalAccuracy(top_k=3),
             "negative_accuracy5": CategoricalAccuracy(top_k=5),
             "negative_correct_score_avg": Average(),
             "negative_correct_log_prob_avg": Average(),
-            "negative_correct_prob_avg": Average()
+            "negative_correct_prob_avg": Average(),
+            "negative_correct_similarity_avg": Average(),
         }
 
         initializer(self)
@@ -118,6 +126,7 @@ class ReadingThoughts(Model):
             the epoch of the run.
 
         """
+
         # TODO: Refactor in separate module when more stable.
         def reading_encoder(features=None, tokens=None, embedder=None, encoder=None, feedforward=None):
             embedded_source = embedder(tokens)
@@ -137,19 +146,31 @@ class ReadingThoughts(Model):
                                                      self._source_encoder,
                                                      self._source_feedforward)
 
-        encoded_target, _ = reading_encoder(target_features, target_tokens,
-                                            self._target_embedder,
-                                            self._target_encoder,
-                                            self._target_feedforward)
+        if target_tokens:
+            encoded_target, _ = reading_encoder(target_features, target_tokens,
+                                                self._target_embedder,
+                                                self._target_encoder,
+                                                self._target_feedforward)
 
-        scores = torch.matmul(encoded_source, torch.t(encoded_target))
-        loss = self._calculate_loss(batch_size, scores, output_dict)
+            output_dict["encoded_source"] = encoded_source
+            output_dict["encoded_target"] = encoded_target
+
+            scores = torch.matmul(encoded_source, torch.t(encoded_target))
+            loss = self._calculate_loss(batch_size, scores, output_dict)
+
+            # If there is a custom similarity defined then output using this similarity.
+            if self._similarity_function:
+                sim = self._similarity_function(encoded_source, encoded_target)
+                output_dict[f"neighbour_correct_similarity"] = sim
+                self.metrics[f"neighbour_correct_similarity_avg"](sim.mean().item())
 
         if negative_tokens:
             encoded_negative, _ = reading_encoder(negative_features, negative_tokens,
                                                   self._target_embedder,
                                                   self._target_encoder,
                                                   self._target_feedforward)
+
+            output_dict["encoded_negative"] = encoded_negative
 
             # This is replacing one of the negative random samples with the correct output.
             # It is hacky but computationally efficient meaning one of the random samples isn't used.
@@ -163,6 +184,12 @@ class ReadingThoughts(Model):
             neg_loss = self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative")
             loss += neg_loss
 
+            # If there is a custom similarity defined then output using this similarity.
+            if self._similarity_function:
+                sim = self._similarity_function(encoded_source, encoded_negative)
+                output_dict[f"negative_correct_similarity"] = sim
+                self.metrics[f"negative_correct_similarity_avg"](sim.mean().item())
+
         output_dict["loss"] = loss
 
         return output_dict
@@ -170,8 +197,6 @@ class ReadingThoughts(Model):
     def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour"):
 
         loss = torch.tensor(0.0).to(scores.device)
-
-        output_dict["{metrics_prefix}_scores"] = scores
 
         # The correct answer should correspond to the same position in the batch.
         identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
@@ -181,20 +206,24 @@ class ReadingThoughts(Model):
 
         loss += self._nll_loss(scores_softmax, target_classes)
 
-        self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
-        self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
-
         # Some extra work just for metrics.
         correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device) + identity) == 1
-        output_dict[f"{metrics_prefix}_scores_softmax"] = scores_softmax
-        output_dict[f"{metrics_prefix}_correct_score"] = scores[correct_mask]
-        target_correct_probability = scores_softmax[correct_mask]
-        output_dict[f"{metrics_prefix}_correct_probability"] = target_correct_probability.mean().item()
-        self.metrics[f"{metrics_prefix}_correct_score_avg"](
-            output_dict[f"{metrics_prefix}_correct_score"].mean().item())
-        probs = torch.exp(target_correct_probability)
-        self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](target_correct_probability.mean().item())
-        self.metrics[f"{metrics_prefix}_correct_prob_avg"](probs.mean().item())
+        correct_scores = scores[correct_mask]
+        correct_log_probs = scores_softmax[correct_mask]
+        correct_probs = torch.exp(correct_log_probs)
+
+        output_dict[f"{metrics_prefix}_scores"] = scores
+        output_dict[f"{metrics_prefix}_scores_log_softmax"] = scores_softmax
+        output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
+        output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
+        output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
+
+        self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
+        self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
+        self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
+        self.metrics[f"{metrics_prefix}_correct_score_avg"](correct_scores.mean().item())
+        self.metrics[f"{metrics_prefix}_correct_prob_avg"](correct_probs.mean().item())
+        self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](correct_log_probs.mean().item())
 
         return loss
 

@@ -66,6 +66,9 @@ class WritingPromptsDatasetReader(DatasetReader):
         Max number of sentences a story must have to be included.
     positional_features : bool, (optional, default=True)
         Should encode positional features in the source.
+    truncate_sequence_length : int, (optional, default=500)
+        Target sequences longer than this value will be truncated to this value (cutting starting from the end).
+        0 indicates length is unlimited. Value must be greater than or equal to 0.
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
@@ -88,6 +91,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  min_story_sentences: int = 0,
                  max_story_sentences: int = 10 * 6,
                  positional_features: bool = True,
+                 truncate_sequence_length: int = 500,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -109,6 +113,8 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._min_story_sentences = min_story_sentences
         self._max_story_sentences = max_story_sentences
         self._positional_features = positional_features
+        self._truncate_sequence_length = truncate_sequence_length
+        self._truncate_sequences = (truncate_sequence_length != 0)
         self._cuda_device = cuda_device
 
     @overrides
@@ -177,6 +183,9 @@ class WritingPromptsDatasetReader(DatasetReader):
 
             if len(tokenized_source) == 0:
                 token_field = token_field.empty_field()
+
+            if len(tokenized_source) > self._truncate_sequence_length and self._truncate_sequences:
+                tokenized_source = tokenized_source[:self._truncate_sequence_length]
             return token_field
 
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
