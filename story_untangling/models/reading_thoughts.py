@@ -145,6 +145,7 @@ class ReadingThoughts(Model):
                                                      self._source_embedder,
                                                      self._source_encoder,
                                                      self._source_feedforward)
+        loss = torch.tensor(0.0).to(encoded_source.device)
 
         if target_tokens:
             encoded_target, _ = reading_encoder(target_features, target_tokens,
@@ -156,13 +157,14 @@ class ReadingThoughts(Model):
             output_dict["encoded_target"] = encoded_target
 
             scores = torch.matmul(encoded_source, torch.t(encoded_target))
-            loss = self._calculate_loss(batch_size, scores, output_dict)
+            loss += self._calculate_loss(batch_size, scores, output_dict)
 
             # If there is a custom similarity defined then output using this similarity.
             if self._similarity_function:
-                sim = self._similarity_function(encoded_source, encoded_target)
-                output_dict[f"neighbour_correct_similarity"] = sim
-                self.metrics[f"neighbour_correct_similarity_avg"](sim.mean().item())
+                with torch.no_grad():
+                    sim = self._similarity_function(encoded_source, encoded_target)
+                    output_dict[f"neighbour_correct_similarity"] = sim
+                    self.metrics[f"neighbour_correct_similarity_avg"](sim.mean().item())
 
         if negative_tokens:
             encoded_negative, _ = reading_encoder(negative_features, negative_tokens,
@@ -181,14 +183,14 @@ class ReadingThoughts(Model):
             comb_scores += scores * identity.float()
             comb_scores += neg_scores * neg_identity.float()
 
-            neg_loss = self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative")
-            loss += neg_loss
+            loss += self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative")
 
             # If there is a custom similarity defined then output using this similarity.
             if self._similarity_function:
-                sim = self._similarity_function(encoded_source, encoded_negative)
-                output_dict[f"negative_correct_similarity"] = sim
-                self.metrics[f"negative_correct_similarity_avg"](sim.mean().item())
+                with torch.no_grad():
+                    sim = self._similarity_function(encoded_source, encoded_negative)
+                    output_dict[f"negative_correct_similarity"] = sim
+                    self.metrics[f"negative_correct_similarity_avg"](sim.mean().item())
 
         output_dict["loss"] = loss
 
@@ -196,34 +198,33 @@ class ReadingThoughts(Model):
 
     def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour"):
 
-        loss = torch.tensor(0.0).to(scores.device)
-
         # The correct answer should correspond to the same position in the batch.
         identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
         target_classes = torch.argmax(identity, dim=1)  # Get indices and NLLLoss needs these.
         # Calculate the loss
         scores_softmax = self._log_softmax(scores)
 
-        loss += self._nll_loss(scores_softmax, target_classes)
+        loss = self._nll_loss(scores_softmax, target_classes)
 
-        # Some extra work just for metrics.
-        correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device) + identity) == 1
-        correct_scores = scores[correct_mask]
-        correct_log_probs = scores_softmax[correct_mask]
-        correct_probs = torch.exp(correct_log_probs)
+        with torch.no_grad():
+            # Some extra work just for metrics.
+            correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device) + identity) == 1
+            correct_scores = scores[correct_mask]
+            correct_log_probs = scores_softmax[correct_mask]
+            correct_probs = torch.exp(correct_log_probs)
 
-        output_dict[f"{metrics_prefix}_scores"] = scores
-        output_dict[f"{metrics_prefix}_scores_log_softmax"] = scores_softmax
-        output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
-        output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
-        output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
+            output_dict[f"{metrics_prefix}_scores"] = scores
+            output_dict[f"{metrics_prefix}_scores_log_softmax"] = scores_softmax
+            output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
+            output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
+            output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
 
-        self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
-        self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
-        self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
-        self.metrics[f"{metrics_prefix}_correct_score_avg"](correct_scores.mean().item())
-        self.metrics[f"{metrics_prefix}_correct_prob_avg"](correct_probs.mean().item())
-        self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](correct_log_probs.mean().item())
+            self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
+            self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
+            self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
+            self.metrics[f"{metrics_prefix}_correct_score_avg"](correct_scores.mean().item())
+            self.metrics[f"{metrics_prefix}_correct_prob_avg"](correct_probs.mean().item())
+            self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](correct_log_probs.mean().item())
 
         return loss
 
