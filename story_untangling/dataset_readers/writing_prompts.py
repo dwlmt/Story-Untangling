@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Any
 
 import dataset
 import numpy
@@ -154,42 +154,25 @@ class WritingPromptsDatasetReader(DatasetReader):
                 source_sequence = [sentences[i] for i in source_indices if i is not None]
                 target_sequence = [sentences[i] for i in target_indices if i is not None]
 
-
-                source_text = " ".join([s["text"] for s in source_sequence])
-                target_text = " ".join([s["text"] for s in target_sequence])
-
-                source_ner = " ".join([s["ner_tags"] for s in source_sequence if "ner_tags" in s])
-                target_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
-
-                negative_text = None
-                negative_ner=None
                 if self._target_negative:
-                    negative_text = ""
-                    negative_ner = ""
+                    negative_sequence = []
                     for i in range(self._sentence_predictive_window):
-                        negative_dict = next(negative_sampler)
-                        negative_text += " " + negative_dict["text"]
+                        negative_sequence.append(next(negative_sampler))
 
-                        if "ner_tags" in negative_dict:
-                            negative_ner += " " + negative_dict["ner_tags"]
 
                 metadata = {"story_id": story_id, "absolute_position": absolute_position,
                             "relative_position": relative_position, "sentence_number": story["sentence_num"]}
 
 
-                yield self.text_to_instance(source_text, target_text, negative_text,
-                                            source_ner=source_ner, target_ner=target_ner,
-                                            negative_ner=negative_ner,
-                                            metadata=metadata,
-                                            absolute_position=absolute_position, relative_position=relative_position)
+                yield self.text_to_instance(source_sequence, target_sequence, negative_sequence,
+                                            metadata=metadata)
 
     @overrides
-    def text_to_instance(self, source_tokens: str, target_tokens: str = None,
-                         negative_tokens: str = None,
-                         source_ner: str = None, target_ner: str = None,
-                         negative_ner: str = None,
-                         metadata: Dict[str, any] = None,
-                         absolute_position: int = 0, relative_position: float = 0.0) -> Instance:  # type: ignore
+    def text_to_instance(self,
+                         source_sequence: Dict[str,Any],
+                         target_sequence: Dict[str, Any],
+                         negative_sequence: Dict[str, Any],
+                         metadata: Dict[str, Any] = None) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
 
@@ -199,6 +182,7 @@ class WritingPromptsDatasetReader(DatasetReader):
             # If separate ner tags are provided then replace.
             if ner and len(ner) > 0:
 
+                # If provided then swap in the database saved NER tag.
                 for t, n in zip(tokenized_text, ner.split()):
                     ner_tag = n.split('-')[-1].strip()
                     t.ent_type_ = ner_tag
@@ -217,6 +201,13 @@ class WritingPromptsDatasetReader(DatasetReader):
 
             return token_field
 
+        source_tokens = " ".join([s["text"] for s in source_sequence])
+        source_ner = " ".join([s["ner_tags"] for s in source_sequence if "ner_tags" in s])
+
+        target_tokens = " ".join([s["text"] for s in target_sequence])
+        target_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
+
+
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
                                                self._source_token_indexers, source_ner)
 
@@ -224,7 +215,11 @@ class WritingPromptsDatasetReader(DatasetReader):
             field_dict['target_tokens'] = tokenize(target_tokens, self._target_tokenizer.tokenize,
                                                    self._target_token_indexers, target_ner)
 
-        if negative_tokens is not None:
+
+        if self._target_negative:
+            negative_tokens = " ".join([s["text"] for s in negative_sequence])
+            negative_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
+
             field_dict['negative_tokens'] = tokenize(negative_tokens, self._target_tokenizer.tokenize,
                                                      self._target_token_indexers, negative_ner)
 
@@ -233,8 +228,8 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         # It only makes sense to include in the source features as otherwise it gives away the correct answers.
         if self._positional_features:
-            source_features.append(absolute_position)
-            source_features.append(relative_position)
+            source_features.append(metadata["absolute_position"])
+            source_features.append(metadata["relative_position"])
         if len(source_features) > 0:
             field_dict["source_features"] = ArrayField(numpy.array(source_features))
 
