@@ -142,47 +142,33 @@ class WritingPromptsDatasetReader(DatasetReader):
                 logging.warning(f"Story has no sentences: {story_id}")
                 continue
 
-            sentence_text = [s["text"] for s in sentences]
-
-            source_ner_tags = []
-            target_ner_tags = []
-            ner_tags = [s["ner_tags"].split('-')[-1].strip() for s in sentences if "ner_tags" in s and len(s["ner_tags"]) > 0]
-            if len(ner_tags) > 0:
-                for source_ner, target_ner, _, _ in dual_window(sentence_text,
-                            context_size=self._sentence_context_window,
-                            predictive_size=self._sentence_predictive_window,
-                            num_of_sentences=story[
-                                "sentence_num"]):
-
-                    source_ner = " ".join(source_ner)
-                    target_ner = " ".join(target_ner)
-
-                    source_ner_tags.append(source_ner)
-                    target_ner_tags.append(target_ner)
 
 
-            #logging.info(f"${sentence_text} - ${ner_tags}")
-
-            for i, (source_sequence, target_sequence, absolute_position, relative_position) in enumerate(dual_window(sentence_text,
+            sentence_nums = [s["sentence_num"] for s in sentences]
+            for source_indices, target_indices, absolute_position, relative_position in dual_window(sentence_nums,
                                                                                                 context_size=self._sentence_context_window,
                                                                                                 predictive_size=self._sentence_predictive_window,
                                                                                                 num_of_sentences=story[
-                                                                                                    "sentence_num"])):
+                                                                                                    "sentence_num"]):
 
-                source_sequence = " ".join(source_sequence)
-                logging.debug(f"Source: '{source_sequence}', Target: '{target_sequence}'")
-
-                #logging.info(f"${source_sequence}, ${target_sequence}, ${source_tokens_ner}, ${target_tokens_ner}")
+                source_sequence = [sentences[i] for i in source_indices if i is not None]
+                target_sequence = [sentences[i] for i in target_indices if i is not None]
 
 
-                negative_sequence = None
+                source_text = " ".join([s["text"] for s in source_sequence])
+                target_text = " ".join([s["text"] for s in target_sequence])
+
+                source_ner = " ".join([s["ner_tags"] for s in source_sequence if "ner_tags" in s])
+                target_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
+
+                negative_text = None
                 negative_ner=None
                 if self._target_negative:
-                    negative_sequence = ""
+                    negative_text = ""
                     negative_ner = ""
                     for i in range(self._sentence_predictive_window):
                         negative_dict = next(negative_sampler)
-                        negative_sequence += " " + negative_dict["text"]
+                        negative_text += " " + negative_dict["text"]
 
                         if "ner_tags" in negative_dict:
                             negative_ner += " " + negative_dict["ner_tags"]
@@ -190,15 +176,8 @@ class WritingPromptsDatasetReader(DatasetReader):
                 metadata = {"story_id": story_id, "absolute_position": absolute_position,
                             "relative_position": relative_position, "sentence_number": story["sentence_num"]}
 
-                source_ner=None
-                if len(source_ner_tags) > 0:
-                    source_ner = source_ner_tags[i]
-                target_ner = None
-                if len(target_ner_tags) > 0:
-                    source_ner = target_ner_tags[i]
 
-
-                yield self.text_to_instance(source_sequence, target_sequence, negative_sequence,
+                yield self.text_to_instance(source_text, target_text, negative_text,
                                             source_ner=source_ner, target_ner=target_ner,
                                             negative_ner=negative_ner,
                                             metadata=metadata,
@@ -219,8 +198,10 @@ class WritingPromptsDatasetReader(DatasetReader):
 
             # If separate ner tags are provided then replace.
             if ner and len(ner) > 0:
-                for t, n in zip(tokenized_text, ner):
-                    t.ent_type_ = n
+
+                for t, n in zip(tokenized_text, ner.split()):
+                    ner_tag = n.split('-')[-1].strip()
+                    t.ent_type_ = ner_tag
 
             if self._add_start_end_token:
                 tokenized_text.insert(0, Token(START_SYMBOL))
@@ -238,6 +219,7 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
                                                self._source_token_indexers, source_ner)
+
         if target_tokens is not None:
             field_dict['target_tokens'] = tokenize(target_tokens, self._target_tokenizer.tokenize,
                                                    self._target_token_indexers, target_ner)
