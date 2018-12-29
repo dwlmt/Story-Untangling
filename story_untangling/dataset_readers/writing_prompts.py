@@ -11,7 +11,6 @@ from allennlp.data.fields import TextField, MetadataField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
-from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
@@ -66,7 +65,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         Max number of sentences a story must have to be included.
     positional_features : bool, (optional, default=True)
         Should encode positional features in the source.
-    truncate_sequence_length : int, (optional, default=500)
+    truncate_sequence_length : int, (optional, default=250)
         Target sequences longer than this value will be truncated to this value (cutting starting from the end).
         0 indicates length is unlimited. Value must be greater than or equal to 0.
     cuda_device : List[Int] (optional, default=-1)
@@ -91,7 +90,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  min_story_sentences: int = 0,
                  max_story_sentences: int = 10 * 6,
                  positional_features: bool = True,
-                 truncate_sequence_length: int = 500,
+                 truncate_sequence_length: int = 250,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -103,7 +102,6 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._sentence_context_window = sentence_context_window
         self._sentence_predictive_window = sentence_predictive_window
         self._target_negative: bool = target_negative
-        self._sentence_splitter = SpacySentenceSplitter()
         self._dataset_path = dataset_path
         self._use_existing_cached_db = use_existing_cached_db
         self._db_discriminator = db_discriminator
@@ -146,58 +144,107 @@ class WritingPromptsDatasetReader(DatasetReader):
 
             sentence_text = [s["text"] for s in sentences]
 
-            for source_sequence, target_sequence, absolute_count, relative_count in dual_window(sentence_text,
+            source_ner_tags = []
+            target_ner_tags = []
+            ner_tags = [s["ner_tags"].split('-')[-1].strip() for s in sentences if "ner_tags" in s and len(s["ner_tags"]) > 0]
+            if len(ner_tags) > 0:
+                for source_ner, target_ner, _, _ in dual_window(sentence_text,
+                            context_size=self._sentence_context_window,
+                            predictive_size=self._sentence_predictive_window,
+                            num_of_sentences=story[
+                                "sentence_num"]):
+
+                    source_ner = " ".join(source_ner)
+                    target_ner = " ".join(target_ner)
+
+                    source_ner_tags.append(source_ner)
+                    target_ner_tags.append(target_ner)
+
+
+            #logging.info(f"${sentence_text} - ${ner_tags}")
+
+            for i, (source_sequence, target_sequence, absolute_position, relative_position) in enumerate(dual_window(sentence_text,
                                                                                                 context_size=self._sentence_context_window,
                                                                                                 predictive_size=self._sentence_predictive_window,
                                                                                                 num_of_sentences=story[
-                                                                                                    "sentence_num"]):
+                                                                                                    "sentence_num"])):
+
                 source_sequence = " ".join(source_sequence)
                 logging.debug(f"Source: '{source_sequence}', Target: '{target_sequence}'")
 
+                #logging.info(f"${source_sequence}, ${target_sequence}, ${source_tokens_ner}, ${target_tokens_ner}")
+
+
                 negative_sequence = None
+                negative_ner=None
                 if self._target_negative:
                     negative_sequence = ""
+                    negative_ner = ""
                     for i in range(self._sentence_predictive_window):
                         negative_dict = next(negative_sampler)
                         negative_sequence += " " + negative_dict["text"]
 
-                metadata = {"story_id": story_id}
+                        if "ner_tags" in negative_dict:
+                            negative_ner += " " + negative_dict["ner_tags"]
 
-                yield self.text_to_instance(source_sequence, target_sequence, negative_sequence, metadata,
-                                            absolute_count, relative_count)
+                metadata = {"story_id": story_id, "absolute_position": absolute_position,
+                            "relative_position": relative_position, "sentence_number": story["sentence_num"]}
+
+                source_ner=None
+                if len(source_ner_tags) > 0:
+                    source_ner = source_ner_tags[i]
+                target_ner = None
+                if len(target_ner_tags) > 0:
+                    source_ner = target_ner_tags[i]
+
+
+                yield self.text_to_instance(source_sequence, target_sequence, negative_sequence,
+                                            source_ner=source_ner, target_ner=target_ner,
+                                            negative_ner=negative_ner,
+                                            metadata=metadata,
+                                            absolute_position=absolute_position, relative_position=relative_position)
 
     @overrides
     def text_to_instance(self, source_tokens: str, target_tokens: str = None,
-                         target_negative_tokens: str = None, metadata: Dict[str, any] = None,
+                         negative_tokens: str = None,
+                         source_ner: str = None, target_ner: str = None,
+                         negative_ner: str = None,
+                         metadata: Dict[str, any] = None,
                          absolute_position: int = 0, relative_position: float = 0.0) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
 
-        def tokenize(tokens, tokenizer, indexer):
-            tokenized_source = tokenizer(tokens)
+        def tokenize(tokens, tokenizer, indexer, ner):
+            tokenized_text = tokenizer(tokens)
+
+            # If separate ner tags are provided then replace.
+            if ner and len(ner) > 0:
+                for t, n in zip(tokenized_text, ner):
+                    t.ent_type_ = n
+
             if self._add_start_end_token:
-                tokenized_source.insert(0, Token(START_SYMBOL))
-                tokenized_source.append(Token(END_SYMBOL))
+                tokenized_text.insert(0, Token(START_SYMBOL))
+                tokenized_text.append(Token(END_SYMBOL))
 
-            if len(tokenized_source) > self._truncate_sequence_length and self._truncate_sequences:
-                tokenized_source = tokenized_source[:self._truncate_sequence_length]
+            if len(tokenized_text) > self._truncate_sequence_length and self._truncate_sequences:
+                tokenized_text = tokenized_text[:self._truncate_sequence_length]
 
-            token_field = TextField(tokenized_source, indexer)
+            token_field = TextField(tokenized_text, indexer)
 
-            if len(tokenized_source) == 0:
+            if len(tokenized_text) == 0:
                 token_field = token_field.empty_field()
 
             return token_field
 
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
-                                               self._source_token_indexers)
+                                               self._source_token_indexers, source_ner)
         if target_tokens is not None:
             field_dict['target_tokens'] = tokenize(target_tokens, self._target_tokenizer.tokenize,
-                                                   self._target_token_indexers)
+                                                   self._target_token_indexers, target_ner)
 
-        if target_negative_tokens is not None:
-            field_dict['negative_tokens'] = tokenize(target_negative_tokens, self._target_tokenizer.tokenize,
-                                                     self._target_token_indexers)
+        if negative_tokens is not None:
+            field_dict['negative_tokens'] = tokenize(negative_tokens, self._target_tokenizer.tokenize,
+                                                     self._target_token_indexers, negative_ner)
 
         # Wrap in an array there isn't a single value scalar field.
         source_features = []
@@ -208,6 +255,7 @@ class WritingPromptsDatasetReader(DatasetReader):
             source_features.append(relative_position)
         if len(source_features) > 0:
             field_dict["source_features"] = ArrayField(numpy.array(source_features))
+
 
         field_dict["metadata"] = MetadataField(metadata)
 

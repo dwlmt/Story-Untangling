@@ -120,7 +120,7 @@ class ReadingThoughts(Model):
             Global source features that are applied across the whole context.
         negative_features: ``Opt[Dict[str, Any]]``, optional
             Global source features that are applied across the whole context.
-        metdata: ``Opt[Dict[str, Any]]``, optional
+        metadata: ``Opt[Dict[str, Any]]``, optional
             metadata with story information.
         epoch: ``Opt[Dict[str, Any]]``, optional
             the epoch of the run.
@@ -140,6 +140,8 @@ class ReadingThoughts(Model):
             return encoded, size
 
         output_dict = {}
+
+        output_dict["metadata"] = metadata
 
         encoded_source, batch_size = reading_encoder(source_features, source_tokens,
                                                      self._source_embedder,
