@@ -83,21 +83,21 @@
       "hidden_size": 1024,
       "num_layers": 3,
       "dropout": 0.5
-    }/*,
+    },
     "source_feedforward": {
-      "input_dim": 1026,
+      "input_dim": 1029,
       "num_layers": 2,
       "hidden_dims": 512,
       "activations": "leaky_relu",
-      "dropout": 0.5
+      "dropout": 0.3
     },
     "target_feedforward": {
-      "input_dim": 1024,
+      "input_dim": 1027,
       "num_layers": 2,
       "hidden_dims": 512,
       "activations": "leaky_relu",
-      "dropout": 0.5
-    }*/
+      "dropout": 0.3
+    }
   },
   "iterator": {
     "type": "basic",

@@ -225,15 +225,50 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         # Wrap in an array there isn't a single value scalar field.
         source_features = []
+        target_features = []
+        negative_features = []
 
         # It only makes sense to include in the source features as otherwise it gives away the correct answers.
         if self._positional_features:
             source_features.append(metadata["absolute_position"])
             source_features.append(metadata["relative_position"])
+
+
+        if self._save_sentiment:
+            source_features.extend(self.construct_global_sentiment_features(
+                source_sequence))
+            target_features.extend(self.construct_global_sentiment_features(
+                target_sequence))
+
+            negative_features.extend(self.construct_global_sentiment_features(
+                negative_sequence))
+
         if len(source_features) > 0:
             field_dict["source_features"] = ArrayField(numpy.array(source_features))
+
+        if len(target_features) > 0:
+            field_dict["target_features"] = ArrayField(numpy.array(target_features))
+
+        if len(negative_features) > 0:
+            field_dict["negative_features"] = ArrayField(numpy.array(negative_features))
 
 
         field_dict["metadata"] = MetadataField(metadata)
 
         return Instance(field_dict)
+
+    def construct_global_sentiment_features(self, source_sequence):
+        vader_sentiment = 0.0
+        textblob_polarity = 0.0
+        textblob_subjectivity = 0.0
+        for s in source_sequence:
+            if "vader_sentiment" not in s or "textblob_polarity" not in s or "textblob_subjectivity" not in s:
+                continue
+
+            vader_sentiment += s["vader_sentiment"]
+            textblob_polarity += s["textblob_polarity"]
+            textblob_subjectivity += s["textblob_subjectivity"]
+        vader_sentiment /= len(source_sequence)
+        textblob_polarity /= len(source_sequence)
+        textblob_subjectivity /= len(source_sequence)
+        return textblob_polarity, textblob_subjectivity, vader_sentiment
