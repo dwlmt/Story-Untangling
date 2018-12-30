@@ -155,9 +155,6 @@ class ReadingThoughts(Model):
                                                 self._target_encoder,
                                                 self._target_feedforward)
 
-            output_dict["encoded_source"] = encoded_source
-            output_dict["encoded_target"] = encoded_target
-
             scores = torch.matmul(encoded_source, torch.t(encoded_target))
             loss += self._calculate_loss(batch_size, scores, output_dict)
 
@@ -173,8 +170,6 @@ class ReadingThoughts(Model):
                                                   self._target_embedder,
                                                   self._target_encoder,
                                                   self._target_feedforward)
-
-            output_dict["encoded_negative"] = encoded_negative
 
             # This is replacing one of the negative random samples with the correct output.
             # It is hacky but computationally efficient meaning one of the random samples isn't used.
@@ -215,8 +210,6 @@ class ReadingThoughts(Model):
             correct_log_probs = scores_softmax[correct_mask]
             correct_probs = torch.exp(correct_log_probs)
 
-            output_dict[f"{metrics_prefix}_scores"] = scores
-            output_dict[f"{metrics_prefix}_scores_log_softmax"] = scores_softmax
             output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
             output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
             output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs

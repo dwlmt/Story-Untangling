@@ -1,0 +1,1 @@
+from story_untangling.predictors import reading_thoughts_predictor

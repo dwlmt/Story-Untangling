@@ -161,7 +161,7 @@ class WritingPromptsDatasetReader(DatasetReader):
 
 
                 metadata = {"story_id": story_id, "absolute_position": absolute_position,
-                            "relative_position": relative_position, "sentence_number": story["sentence_num"]}
+                            "relative_position": relative_position, "number_of_sentences": story["sentence_num"]}
 
 
                 yield self.text_to_instance(source_sequence, target_sequence, negative_sequence,
@@ -207,6 +207,9 @@ class WritingPromptsDatasetReader(DatasetReader):
         target_tokens = " ".join([s["text"] for s in target_sequence])
         target_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
 
+        metadata["source_text"] = source_tokens
+        metadata["target_text"] = target_tokens
+
 
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
                                                self._source_token_indexers, source_ner)
@@ -216,9 +219,11 @@ class WritingPromptsDatasetReader(DatasetReader):
                                                    self._target_token_indexers, target_ner)
 
 
-        if self._target_negative:
+        if self._target_negative and negative_sequence:
             negative_tokens = " ".join([s["text"] for s in negative_sequence])
             negative_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
+
+            metadata["negative_text"] = source_tokens
 
             field_dict['negative_tokens'] = tokenize(negative_tokens, self._target_tokenizer.tokenize,
                                                      self._target_token_indexers, negative_ner)
@@ -240,8 +245,10 @@ class WritingPromptsDatasetReader(DatasetReader):
             target_features.extend(self.construct_global_sentiment_features(
                 target_sequence))
 
-            negative_features.extend(self.construct_global_sentiment_features(
-                negative_sequence))
+            if self._target_negative and negative_sequence:
+
+                negative_features.extend(self.construct_global_sentiment_features(
+                    negative_sequence))
 
         if len(source_features) > 0:
             field_dict["source_features"] = ArrayField(numpy.array(source_features))
