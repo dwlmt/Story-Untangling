@@ -7,6 +7,7 @@ from allennlp.common.util import get_spacy_model
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
 from allennlp.predictors.predictor import Predictor
+from more_itertools import chunked
 
 from story_untangling.dataset_readers.dataset_utils import dual_window
 
@@ -52,13 +53,14 @@ class ReadingThoughtsPredictor(Predictor):
         return instances
 
     def predict_json(self, inputs: JsonDict) -> JsonDict:
+        batch_size = inputs.get("batch_size", 100)
         instances = self._json_to_instance(inputs)
+        batch_instances = chunked(instances, batch_size)
         results_list = []
         results = {"results" : results_list}
 
-        for instance in instances:
-            results_list.append(self.predict_instance(instance))
-
+        for instances in batch_instances:
+            results_list.extend(self.predict_batch_instance(instances))
         return results
 
 
