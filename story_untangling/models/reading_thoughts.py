@@ -1,16 +1,14 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 
 import torch
 import torch.nn as nn
 from allennlp.data import Vocabulary
 from allennlp.models import Model
 from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder, FeedForward, SimilarityFunction
-from allennlp.modules.similarity_functions import DotProductSimilarity
 from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
-from allennlp.common.checks import check_dimensions_match
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -66,6 +64,9 @@ class ReadingThoughts(Model):
         self._target_encoder = target_encoder or source_encoder
         self._target_feedforward = target_feedforward or source_feedforward
 
+        self._cosine_similarity = nn.CosineSimilarity()
+        self._l2_distance = nn.PairwiseDistance(p=2)
+        self._l1_distance = nn.PairwiseDistance(p=1)
         self._similarity_function = similarity_function
 
         # TODO: Rework to allow other similarity based functions to be used.
@@ -79,14 +80,17 @@ class ReadingThoughts(Model):
             "neighbour_correct_score_avg": Average(),
             "neighbour_correct_log_prob_avg": Average(),
             "neighbour_correct_prob_avg": Average(),
-            "neighbour_correct_similarity_avg": Average(),
+            "neighbour_correct_similarity_cosine_avg": Average(),
+            "neighbour_correct_distance_l1_avg": Average(),
+            "neighbour_correct_distance_l2_avg": Average(),
             "negative_accuracy": CategoricalAccuracy(),
             "negative_accuracy3": CategoricalAccuracy(top_k=3),
             "negative_accuracy5": CategoricalAccuracy(top_k=5),
             "negative_correct_score_avg": Average(),
             "negative_correct_log_prob_avg": Average(),
             "negative_correct_prob_avg": Average(),
-            "negative_correct_similarity_avg": Average(),
+            "negative_correct_distance_l1_avg": Average(),
+            "negative_correct_distance_l2_avg": Average(),
         }
 
         initializer(self)
@@ -159,11 +163,7 @@ class ReadingThoughts(Model):
             loss += self._calculate_loss(batch_size, scores, output_dict)
 
             # If there is a custom similarity defined then output using this similarity.
-            if self._similarity_function:
-                with torch.no_grad():
-                    sim = self._similarity_function(encoded_source, encoded_target)
-                    output_dict[f"neighbour_correct_similarity"] = sim
-                    self.metrics[f"neighbour_correct_similarity_avg"](sim.mean().item())
+            self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
 
         if negative_tokens:
             encoded_negative, _ = reading_encoder(negative_features, negative_tokens,
@@ -182,16 +182,26 @@ class ReadingThoughts(Model):
 
             loss += self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative")
 
-            # If there is a custom similarity defined then output using this similarity.
-            if self._similarity_function:
-                with torch.no_grad():
-                    sim = self._similarity_function(encoded_source, encoded_negative)
-                    output_dict[f"negative_correct_similarity"] = sim
-                    self.metrics[f"negative_correct_similarity_avg"](sim.mean().item())
+            self.similarity_metrics(encoded_source, encoded_target, "negative", output_dict)
 
         output_dict["loss"] = loss
 
         return output_dict
+
+    def similarity_metrics(self, encoded_source, encoded_target, name, output_dict):
+        if self._similarity_function:
+            with torch.no_grad():
+                sim = self._cosine_similarity(encoded_source, encoded_target)
+                output_dict[f"{name}_correct_similarity_cosine"] = sim
+                self.metrics[f"{name}_correct_similarity_cosine_avg"](sim.mean().item())
+
+                dist_l1 = self._l1_distance(encoded_source, encoded_target)
+                output_dict[f"{name}_correct_distance_l1"] = dist_l1
+                self.metrics[f"{name}_correct_distance_l1_avg"](dist_l1.mean().item())
+
+                dist_l2 = self._l2_distance(encoded_source, encoded_target)
+                output_dict[f"{name}_correct_distance_l2"] = dist_l2
+                self.metrics[f"{name}_correct_distance_l2_avg"](dist_l2.mean().item())
 
     def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour"):
 
