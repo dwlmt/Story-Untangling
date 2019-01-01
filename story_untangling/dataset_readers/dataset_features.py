@@ -189,6 +189,7 @@ async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[Lis
             line = line.replace("<newline>", "")
             lines.append(line)
             story_nums.append(line_count)
+            story_nums += 1
             if len(lines) == batch_size:
                 yield lines, story_nums
                 lines = []
