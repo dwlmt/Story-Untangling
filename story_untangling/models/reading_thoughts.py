@@ -33,13 +33,13 @@ class ReadingThoughts(Model):
        target_encoder : ``Seq2VecEncoder``, (optional, default=source_encoder)
            The encoder for the target sequence, if not specified used the target one.
        source_feedforward : ``FeedForward``
-        The source feedfoward network for projection and merging the context for the source to merge global and
+           The source feedfoward network for projection and merging the context for the source to merge global and
         sequence based features.
        target_feedforward : ``FeedForward``
         The target feedfoward network for projection and merging the context for the source to merge global and
         sequence based features.
        initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
-        Used to initialize the model parameters.
+           Used to initialize the model parameters.
        """
 
     def __init__(self,
@@ -68,6 +68,7 @@ class ReadingThoughts(Model):
         self._l2_distance = nn.PairwiseDistance(p=2)
         self._l1_distance = nn.PairwiseDistance(p=1)
         self._similarity_function = similarity_function
+
 
         # TODO: Rework to allow other similarity based functions to be used.
         self._log_softmax = nn.LogSoftmax(dim=1)
@@ -128,7 +129,6 @@ class ReadingThoughts(Model):
             metadata with story information.
         epoch: ``Opt[Dict[str, Any]]``, optional
             the epoch of the run.
-
         """
 
         # TODO: Refactor in separate module when more stable.
@@ -145,12 +145,19 @@ class ReadingThoughts(Model):
 
         output_dict = {}
 
+
         output_dict["metadata"] = metadata
 
         encoded_source, batch_size = reading_encoder(source_features, source_tokens,
                                                      self._source_embedder,
                                                      self._source_encoder,
                                                      self._source_feedforward)
+
+        # Use the first metadata set of values as the full score is applied across the batch.
+        full_output_score = False
+        if metadata is not None:
+            full_output_score = "full_output_score" in metadata[0] and metadata[0]["full_output_score"]
+
         loss = torch.tensor(0.0).to(encoded_source.device)
 
         if target_tokens:
@@ -160,7 +167,7 @@ class ReadingThoughts(Model):
                                                 self._target_feedforward)
 
             scores = torch.matmul(encoded_source, torch.t(encoded_target))
-            loss += self._calculate_loss(batch_size, scores, output_dict)
+            loss += self._calculate_loss(batch_size, scores, output_dict, full_output_score=full_output_score)
 
             # If there is a custom similarity defined then output using this similarity.
             self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
@@ -180,7 +187,8 @@ class ReadingThoughts(Model):
             comb_scores += scores * identity.float()
             comb_scores += neg_scores * neg_identity.float()
 
-            loss += self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative")
+            loss += self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative",
+                                         full_output_score=full_output_score)
 
             self.similarity_metrics(encoded_source, encoded_target, "negative", output_dict)
 
@@ -203,7 +211,7 @@ class ReadingThoughts(Model):
                 output_dict[f"{name}_correct_distance_l2"] = dist_l2
                 self.metrics[f"{name}_correct_distance_l2_avg"](dist_l2.mean().item())
 
-    def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour"):
+    def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour", full_output_score=False):
 
         # The correct answer should correspond to the same position in the batch.
         identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
@@ -223,6 +231,12 @@ class ReadingThoughts(Model):
             output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
             output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
             output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
+
+            if full_output_score:
+                output_dict[f"{metrics_prefix}_scores"] = scores
+                output_dict[f"{metrics_prefix}_log_probs"] = scores_softmax
+                output_dict[f"{metrics_prefix}_probs"] = torch.exp(scores_softmax)
+
 
             self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
