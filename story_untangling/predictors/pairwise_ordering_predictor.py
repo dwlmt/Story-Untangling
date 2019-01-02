@@ -1,16 +1,13 @@
 from typing import List, Any, Dict
 
-from overrides import overrides
 
 from allennlp.common.util import JsonDict
 from allennlp.common.util import get_spacy_model
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
 from allennlp.predictors.predictor import Predictor
-from more_itertools import chunked
 from scipy.stats import stats
 
-from story_untangling.dataset_readers.dataset_utils import dual_window
 from story_untangling.predictors.welford import Welford
 
 
@@ -27,8 +24,15 @@ class ReadingThoughtsPredictor(Predictor):
         self._spearmanr_wel = Welford()
         self._kendalls_tau_wel = Welford()
 
+        self._pmr_correct = 0.0
+        self._pmr_total = 0.0
+
+        self._pos_acc_correct = 0.0
+        self._pos_acc_total = 0.0
+
         self._spearmanr_p_values = []
         self._kendalls_tau_p_values = []
+
 
 
     def predict(self, story: Dict[str, Any]) -> JsonDict:
@@ -84,8 +88,11 @@ class ReadingThoughtsPredictor(Predictor):
         # Based on the indices select the sentence number.
         predicted_sentence_order = [initial_sentence_order[i] for i in predicted_sentence_indices]
 
-        kendalls_tau, kendalls_tau_p_value = stats.kendalltau(gold_order, predicted_sentence_order)
-        spearmanr, spearmanr_p_value = stats.spearmanr(gold_order, predicted_sentence_order)
+        gold_order_not_first = gold_order[1:]
+        predicted_sentence_order_not_first = predicted_sentence_order[1:]
+
+        kendalls_tau, kendalls_tau_p_value = stats.kendalltau(gold_order_not_first, predicted_sentence_order_not_first)
+        spearmanr, spearmanr_p_value = stats.spearmanr(gold_order_not_first, predicted_sentence_order_not_first)
 
         self._spearmanr_wel(spearmanr)
         self._kendalls_tau_wel(kendalls_tau)
@@ -93,9 +100,17 @@ class ReadingThoughtsPredictor(Predictor):
         self._spearmanr_p_values.append(spearmanr_p_value)
         self._kendalls_tau_p_values.append(kendalls_tau_p_value)
 
+        if gold_order_not_first == predicted_sentence_order_not_first:
+            self._pmr_correct += 1.0
+        self._pmr_total += 1.0
+
+        self._pos_acc_correct += [a == b for a, b in
+                                  zip(gold_order_not_first, predicted_sentence_order_not_first)].count(True)
+        self._pos_acc_total += len(gold_order_not_first)
+
 
         results["initial_ordering"] = initial_sentence_order
-        results["gold_ordering"] = [g for g, i in gold_index]
+        results["gold_ordering"] = [g for g, _ in gold_index]
         results["predicted_ordering"] = predicted_sentence_order
         results["gold_text"] = gold_order
         results["predicted_text"] = [initial_sentence_order_text[i] for i in predicted_sentence_indices]
@@ -107,6 +122,8 @@ class ReadingThoughtsPredictor(Predictor):
 
         results["kendalls_tau_culm_avg"], results["kendalls_tau_culm_std"] = self._kendalls_tau_wel.meanfull
         results["spearmanr_culm_avg"], results["spearmanr_culm_std"] = self._spearmanr_wel.meanfull
+        results["perfect_match_ratio_culm"] = self._pmr_correct / self._pmr_total
+        results["position_accuracy_culm"] = self._pos_acc_correct / self._pos_acc_total
 
         return results
 
