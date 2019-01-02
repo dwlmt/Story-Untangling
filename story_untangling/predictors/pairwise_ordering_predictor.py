@@ -8,8 +8,10 @@ from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
 from allennlp.predictors.predictor import Predictor
 from more_itertools import chunked
+from scipy.stats import stats
 
 from story_untangling.dataset_readers.dataset_utils import dual_window
+from story_untangling.predictors.welford import Welford
 
 
 @Predictor.register("pairwise_ordering_predictor")
@@ -21,6 +23,13 @@ class ReadingThoughtsPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
         self._spacy = get_spacy_model(language, pos_tags=True, parse=True, ner=False)
+
+        self._spearmanr_wel = Welford()
+        self._kendalls_tau_wel = Welford()
+
+        self._spearmanr_p_values = []
+        self._kendalls_tau_p_values = []
+
 
     def predict(self, story: Dict[str, Any]) -> JsonDict:
         """
@@ -52,6 +61,7 @@ class ReadingThoughtsPredictor(Predictor):
         initial_sentence_order = [s["sentence_num"] for s in sentences]
         initial_sentence_order_text = [s["text"] for s in sentences]
         gold_index = sorted(((v, i) for i, v in enumerate(initial_sentence_order)))
+        gold_order = [initial_sentence_order_text[i] for i, i in gold_index]
 
         instances = self._json_to_instance(inputs)
 
@@ -74,11 +84,29 @@ class ReadingThoughtsPredictor(Predictor):
         # Based on the indices select the sentence number.
         predicted_sentence_order = [initial_sentence_order[i] for i in predicted_sentence_indices]
 
+        kendalls_tau, kendalls_tau_p_value = stats.kendalltau(gold_order, predicted_sentence_order)
+        spearmanr, spearmanr_p_value = stats.spearmanr(gold_order, predicted_sentence_order)
+
+        self._spearmanr_wel(spearmanr)
+        self._kendalls_tau_wel(kendalls_tau)
+
+        self._spearmanr_p_values.append(spearmanr_p_value)
+        self._kendalls_tau_p_values.append(kendalls_tau_p_value)
+
+
         results["initial_ordering"] = initial_sentence_order
         results["gold_ordering"] = [g for g, i in gold_index]
         results["predicted_ordering"] = predicted_sentence_order
-        results["gold_text"] = [initial_sentence_order_text[i] for i, i in gold_index]
+        results["gold_text"] = gold_order
         results["predicted_text"] = [initial_sentence_order_text[i] for i in predicted_sentence_indices]
+
+        results["kendalls_tau"] = kendalls_tau
+        results["kendalls_tau_p_value"] = kendalls_tau_p_value
+        results["spearmanr"] = spearmanr
+        results["spearmanr_p_value"] = spearmanr_p_value
+
+        results["kendalls_tau_culm_avg"], results["kendalls_tau_culm_std"] = self._kendalls_tau_wel.meanfull
+        results["spearmanr_culm_avg"], results["spearmanr_culm_std"] = self._spearmanr_wel.meanfull
 
         return results
 
