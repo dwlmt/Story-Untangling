@@ -90,6 +90,7 @@ class ReadingThoughts(Model):
             "negative_correct_score_avg": Average(),
             "negative_correct_log_prob_avg": Average(),
             "negative_correct_prob_avg": Average(),
+            "negative_correct_similarity_cosine_avg": Average(),
             "negative_correct_distance_l1_avg": Average(),
             "negative_correct_distance_l2_avg": Average(),
         }
