@@ -197,19 +197,18 @@ class ReadingThoughts(Model):
         return output_dict
 
     def similarity_metrics(self, encoded_source, encoded_target, name, output_dict):
-        if self._similarity_function:
-            with torch.no_grad():
-                sim = self._cosine_similarity(encoded_source, encoded_target)
-                output_dict[f"{name}_correct_similarity_cosine"] = sim
-                self.metrics[f"{name}_correct_similarity_cosine_avg"](sim.mean().item())
+        with torch.no_grad():
+            sim = self._cosine_similarity(encoded_source, encoded_target)
+            output_dict[f"{name}_correct_similarity_cosine"] = sim
+            self.metrics[f"{name}_correct_similarity_cosine_avg"](sim.mean().item())
 
-                dist_l1 = self._l1_distance(encoded_source, encoded_target)
-                output_dict[f"{name}_correct_distance_l1"] = dist_l1
-                self.metrics[f"{name}_correct_distance_l1_avg"](dist_l1.mean().item())
+            dist_l1 = self._l1_distance(encoded_source, encoded_target)
+            output_dict[f"{name}_correct_distance_l1"] = dist_l1
+            self.metrics[f"{name}_correct_distance_l1_avg"](dist_l1.mean().item())
 
-                dist_l2 = self._l2_distance(encoded_source, encoded_target)
-                output_dict[f"{name}_correct_distance_l2"] = dist_l2
-                self.metrics[f"{name}_correct_distance_l2_avg"](dist_l2.mean().item())
+            dist_l2 = self._l2_distance(encoded_source, encoded_target)
+            output_dict[f"{name}_correct_distance_l2"] = dist_l2
+            self.metrics[f"{name}_correct_distance_l2_avg"](dist_l2.mean().item())
 
     def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour", full_output_score=False):
 
