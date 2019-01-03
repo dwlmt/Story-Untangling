@@ -170,8 +170,8 @@ class WritingPromptsDatasetReader(DatasetReader):
     @overrides
     def text_to_instance(self,
                          source_sequence: Dict[str,Any],
-                         target_sequence: Dict[str, Any],
-                         negative_sequence: Dict[str, Any],
+                         target_sequence: Dict[str, Any] = None,
+                         negative_sequence: Dict[str, Any] = None,
                          metadata: Dict[str, Any] = None) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
