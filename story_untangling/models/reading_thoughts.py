@@ -10,6 +10,8 @@ from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
 
+from story_untangling.modules.dynamic_entity import DynamicEntity
+
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
@@ -38,6 +40,10 @@ class ReadingThoughts(Model):
        target_feedforward : ``FeedForward``
         The target feedfoward network for projection and merging the context for the source to merge global and
         sequence based features.
+       story_embedder : ``TextFieldEmbedder``, optional
+           Embedder for the story as a whole.
+       story_embedding_dim : ``int``, optional
+           Embedder for the story as a whole.
        initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
            Used to initialize the model parameters.
        """
@@ -50,6 +56,9 @@ class ReadingThoughts(Model):
                  target_encoder: Seq2VecEncoder = None,
                  source_feedforward: FeedForward = None,
                  target_feedforward: FeedForward = None,
+                 story_embedder: TextFieldEmbedder = None,
+                 story_embedding_dim: int = None,
+                 context_dim: int = None,
                  similarity_function: SimilarityFunction = None,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  ) -> None:
@@ -63,6 +72,11 @@ class ReadingThoughts(Model):
         self._target_embedder = target_embedder or source_embedder
         self._target_encoder = target_encoder or source_encoder
         self._target_feedforward = target_feedforward or source_feedforward
+
+        if story_embedder:
+            self._story_encoder = DynamicEntity(story_embedder, story_embedding_dim, context_dim)
+        else:
+            self._story_encoder = None
 
         self._cosine_similarity = nn.CosineSimilarity()
         self._l2_distance = nn.PairwiseDistance(p=2)
@@ -100,6 +114,7 @@ class ReadingThoughts(Model):
     def forward(self,  # type: ignore
                 source_tokens: Dict[str, torch.LongTensor],
                 target_tokens: Dict[str, torch.LongTensor],
+                story: Dict[str, torch.LongTensor] = None,
                 negative_tokens: Optional[Dict[str, torch.LongTensor]] = None,
                 source_features: Optional[Dict[str, Any]] = None,
                 target_features: Optional[Dict[str, Any]] = None,
@@ -116,6 +131,10 @@ class ReadingThoughts(Model):
             The output of ``TextField.as_array()`` applied on the source
             ``TextField``. This will be passed through a ``TextFieldEmbedder``
             and then through an encoder. These are the correct target sentences and neighbouring sentences in the text.
+        story: ``Dict[str, torch.LongTensor]``
+            The output of ``TextField.as_array()`` applied on the source
+            ``TextField``. This will be passed through a ``TextFieldEmbedder``
+            and then through an encoder.
         negative_tokens: ``Dict[str, torch.LongTensor]``
             The output of ``TextField.as_array()`` applied on the source
             ``TextField``. This will be passed through a ``TextFieldEmbedder``
@@ -133,26 +152,38 @@ class ReadingThoughts(Model):
         """
 
         # TODO: Refactor in separate module when more stable.
-        def reading_encoder(features=None, tokens=None, embedder=None, encoder=None, feedforward=None):
+        def reading_encoder(features=None, tokens=None, story=None, embedder=None, encoder=None, feedforward=None,
+                            story_encoder=None,
+                            ):
             embedded_source = embedder(tokens)
-            size, _, _ = embedded_source.size()
+            batch_size, _, _ = embedded_source.size()
             source_mask = get_text_field_mask(tokens)
             encoded = encoder(embedded_source, source_mask)
+
+            if features is not None:
+                encoded = torch.cat((encoded, features), dim=-1)
+
+            if story_encoder and story:
+                story_encoded = story_encoder(story, encoded)
+
+                # Concat the existing encoded features with the dynamic story embedding.
+                encoded = torch.cat((encoded, story_encoded), dim=-1)
+
             if feedforward:
-                if features is not None:
-                    encoded = torch.cat((encoded, features), dim=-1)
                 encoded = feedforward(encoded)
-            return encoded, size
+
+            return encoded, batch_size
 
         output_dict = {}
 
 
         output_dict["metadata"] = metadata
 
-        encoded_source, batch_size = reading_encoder(source_features, source_tokens,
-                                                     self._source_embedder,
-                                                     self._source_encoder,
-                                                     self._source_feedforward)
+        encoded_source, batch_size = reading_encoder(features=source_features, tokens=source_tokens, story=story,
+                                                     embedder=self._source_embedder,
+                                                     encoder=self._source_encoder,
+                                                     feedforward=self._source_feedforward,
+                                                     story_encoder=self._story_encoder)
 
         # Use the first metadata set of values as the full score is applied across the batch.
         full_output_score = False
@@ -162,10 +193,10 @@ class ReadingThoughts(Model):
         loss = torch.tensor(0.0).to(encoded_source.device)
 
         if target_tokens:
-            encoded_target, _ = reading_encoder(target_features, target_tokens,
-                                                self._target_embedder,
-                                                self._target_encoder,
-                                                self._target_feedforward)
+            encoded_target, _ = reading_encoder(features=target_features, tokens=target_tokens,
+                                                embedder=self._target_embedder,
+                                                encoder=self._target_encoder,
+                                                feedforward=self._target_feedforward)
 
             scores = torch.matmul(encoded_source, torch.t(encoded_target))
             loss += self._calculate_loss(batch_size, scores, output_dict, full_output_score=full_output_score)
@@ -174,10 +205,10 @@ class ReadingThoughts(Model):
             self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
 
         if negative_tokens:
-            encoded_negative, _ = reading_encoder(negative_features, negative_tokens,
-                                                  self._target_embedder,
-                                                  self._target_encoder,
-                                                  self._target_feedforward)
+            encoded_negative, _ = reading_encoder(features=target_features, tokens=target_tokens,
+                                                  embedder=self._target_embedder,
+                                                  encoder=self._target_encoder,
+                                                  feedforward=self._target_feedforward)
 
             # This is replacing one of the negative random samples with the correct output.
             # It is hacky but computationally efficient meaning one of the random samples isn't used.

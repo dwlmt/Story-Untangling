@@ -11,6 +11,7 @@ from allennlp.data.fields import TextField, MetadataField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
+from allennlp.semparse.contexts.knowledge_graph import KnowledgeGraph
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
@@ -68,10 +69,16 @@ class WritingPromptsDatasetReader(DatasetReader):
     truncate_sequence_length : int, (optional, default=250)
         Target sequences longer than this value will be truncated to this value (cutting starting from the end).
         0 indicates length is unlimited. Value must be greater than or equal to 0.
+    story_embedding : bool, (optional, default=False)
+        Provide a single vector per story to represent changes as it progresses through each sentence.
+     : bool, (optional, default=False)
+    sentence_first_batching : bool, (optional, default=False)
+        Order by sentence number in a story rather than by a story which enables better parallel running of dynamic entity updates.
+     : bool, (optional, default=False)
+        Provide a single vector per story to represent changes as it progresses through each sentence.
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
-
     def __init__(self,
                  source_tokenizer: Tokenizer = None,
                  target_tokenizer: Tokenizer = None,
@@ -91,6 +98,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  max_story_sentences: int = 10 * 6,
                  positional_features: bool = True,
                  truncate_sequence_length: int = 250,
+                 story_embedding: bool = False,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -113,6 +121,11 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._positional_features = positional_features
         self._truncate_sequence_length = truncate_sequence_length
         self._truncate_sequences = (truncate_sequence_length != 0)
+        self._story_embedding = story_embedding
+
+        # For now just use a default indexer. In future look to cluster and reuse.
+        self._story_token_indexer = SingleIdTokenIndexer(namespace="story")
+
         self._cuda_device = cuda_device
 
     @overrides
@@ -238,6 +251,12 @@ class WritingPromptsDatasetReader(DatasetReader):
             source_features.append(metadata["absolute_position"])
             source_features.append(metadata["relative_position"])
 
+        # If a story embedding is used then add a token as a separate story indexer.
+        if self._story_embedding:
+            # Use the same tokenizer although as the id is a number it will only be a single number.
+            tokenized_text = self._source_tokenizer.tokenize(str(metadata["story_id"]))
+            story_field = TextField(tokenized_text, {"story": self._story_token_indexer})
+            field_dict["story"] = story_field
 
         if self._save_sentiment:
             source_features.extend(self.construct_global_sentiment_features(
