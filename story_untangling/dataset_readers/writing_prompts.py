@@ -154,9 +154,14 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         negative_sampler = negative_sentence_sampler(db)
 
+        # If interleaving then best to sort batches of stories by length so there are fewer left over sentences.
+        if self._interleave_story_sentences:
+            order_story = "sentence_num"
+        else:
+            order_story = "id"
         stories = db.query(
             f'SELECT * FROM story  WHERE sentence_num >= {self._min_story_sentences} '
-            f'AND sentence_num <= {self._max_story_sentences} ORDER BY id')
+            f'AND sentence_num <= {self._max_story_sentences} ORDER BY {order_story}')
 
         chunked_stories = more_itertools.chunked(stories, self._story_chunking)
 
