@@ -1,8 +1,10 @@
 import asyncio
 import logging
+from time import sleep
 from typing import Dict, List, Union, Any
 
 import dataset
+import more_itertools
 import numpy
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data import Token
@@ -72,13 +74,16 @@ class WritingPromptsDatasetReader(DatasetReader):
     story_embedding : bool, (optional, default=False)
         Provide a single vector per story to represent changes as it progresses through each sentence.
      : bool, (optional, default=False)
-    sentence_first_batching : bool, (optional, default=False)
+    interleave_story_sentences : bool, (optional, default=False)
         Order by sentence number in a story rather than by a story which enables better parallel running of dynamic entity updates.
      : bool, (optional, default=False)
         Provide a single vector per story to represent changes as it progresses through each sentence.
+    story_chunking : int, (optional, default=100)
+        How many stories to chunk together. will be read in sentence order.
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
+
     def __init__(self,
                  source_tokenizer: Tokenizer = None,
                  target_tokenizer: Tokenizer = None,
@@ -99,6 +104,8 @@ class WritingPromptsDatasetReader(DatasetReader):
                  positional_features: bool = True,
                  truncate_sequence_length: int = 250,
                  story_embedding: bool = False,
+                 story_chunking: int = 100,
+                 interleave_story_sentences: bool = False,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -122,6 +129,9 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._truncate_sequence_length = truncate_sequence_length
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_embedding = story_embedding
+
+        self._story_chunking = story_chunking
+        self._interleave_story_sentences = interleave_story_sentences
 
         # For now just use a default indexer. In future look to cluster and reuse.
         self._story_token_indexer = SingleIdTokenIndexer(namespace="story")
@@ -147,42 +157,60 @@ class WritingPromptsDatasetReader(DatasetReader):
         stories = db.query(
             f'SELECT * FROM story  WHERE sentence_num >= {self._min_story_sentences} '
             f'AND sentence_num <= {self._max_story_sentences} ORDER BY id')
-        for story in stories:
-            story_id = story["id"]
-            # Id will be the same as the sentence num as they are inserted as a batch in sequence.
-            sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} ORDER BY id')]
-            if len(sentences) == 0:
-                logging.warning(f"Story has no sentences: {story_id}")
-                continue
 
+        chunked_stories = more_itertools.chunked(stories, self._story_chunking)
 
+        for chunks in chunked_stories:
+            chunk_instances = []
+            for story in chunks:
 
-            sentence_nums = [s["sentence_num"] for s in sentences]
-            for source_indices, target_indices, absolute_position, relative_position in dual_window(sentence_nums,
-                                                                                                context_size=self._sentence_context_window,
-                                                                                                predictive_size=self._sentence_predictive_window,
-                                                                                                num_of_sentences=story[
-                                                                                                    "sentence_num"]):
+                story_instances = []
 
-                source_sequence = [sentences[i] for i in source_indices if i is not None]
-                target_sequence = [sentences[i] for i in target_indices if i is not None]
+                story_id = story["id"]
 
-                if self._target_negative:
-                    negative_sequence = []
-                    for i in range(self._sentence_predictive_window):
-                        negative_sequence.append(next(negative_sampler))
+                # Id will be the same as the sentence num as they are inserted as a batch in sequence.
+                sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} ORDER BY id')]
+                if len(sentences) == 0:
+                    logging.warning(f"Story has no sentences: {story_id}")
+                    continue
 
+                sentence_nums = [s["sentence_num"] for s in sentences]
+                for source_indices, target_indices, absolute_position, relative_position in dual_window(sentence_nums,
+                                                                                                        context_size=self._sentence_context_window,
+                                                                                                        predictive_size=self._sentence_predictive_window,
+                                                                                                        num_of_sentences=
+                                                                                                        story[
+                                                                                                            "sentence_num"]):
 
-                metadata = {"story_id": story_id, "absolute_position": absolute_position,
-                            "relative_position": relative_position, "number_of_sentences": story["sentence_num"]}
+                    source_sequence = [sentences[i] for i in source_indices if i is not None]
+                    target_sequence = [sentences[i] for i in target_indices if i is not None]
 
+                    if self._target_negative:
+                        negative_sequence = []
+                        for i in range(self._sentence_predictive_window):
+                            negative_sequence.append(next(negative_sampler))
 
-                yield self.text_to_instance(source_sequence, target_sequence, negative_sequence,
-                                            metadata=metadata)
+                    metadata = {"story_id": story_id, "absolute_position": absolute_position,
+                                "relative_position": relative_position, "number_of_sentences": story["sentence_num"]}
+
+                    story_instances.append((source_sequence, target_sequence, negative_sequence, metadata))
+
+                chunk_instances.append(story_instances)
+
+            if not self._interleave_story_sentences:
+                # Just flatten in the normal order.
+                sorted_instances = more_itertools.flatten(chunk_instances)
+            else:
+                # Reorder the sentences so one sentence per batch is in sentence order.
+                interleaved = more_itertools.interleave_longest(chunk_instances)
+                sorted_instances = more_itertools.flatten(interleaved)
+
+            for instance in sorted_instances:
+                yield self.text_to_instance(instance[0], instance[1], instance[2], instance[3])
 
     @overrides
     def text_to_instance(self,
-                         source_sequence: Dict[str,Any],
+                         source_sequence: Dict[str, Any],
                          target_sequence: Dict[str, Any] = None,
                          negative_sequence: Dict[str, Any] = None,
                          metadata: Dict[str, Any] = None) -> Instance:  # type: ignore
@@ -223,14 +251,12 @@ class WritingPromptsDatasetReader(DatasetReader):
         metadata["source_text"] = source_tokens
         metadata["target_text"] = target_tokens
 
-
         field_dict['source_tokens'] = tokenize(source_tokens, self._source_tokenizer.tokenize,
                                                self._source_token_indexers, source_ner)
 
         if target_tokens is not None:
             field_dict['target_tokens'] = tokenize(target_tokens, self._target_tokenizer.tokenize,
                                                    self._target_token_indexers, target_ner)
-
 
         if self._target_negative and negative_sequence:
             negative_tokens = " ".join([s["text"] for s in negative_sequence])
@@ -265,7 +291,6 @@ class WritingPromptsDatasetReader(DatasetReader):
                 target_sequence))
 
             if self._target_negative and negative_sequence:
-
                 negative_features.extend(self.construct_global_sentiment_features(
                     negative_sequence))
 
@@ -277,7 +302,6 @@ class WritingPromptsDatasetReader(DatasetReader):
 
         if len(negative_features) > 0:
             field_dict["negative_features"] = ArrayField(numpy.array(negative_features))
-
 
         field_dict["metadata"] = MetadataField(metadata)
 
