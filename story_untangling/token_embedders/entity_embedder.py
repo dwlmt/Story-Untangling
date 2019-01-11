@@ -112,7 +112,6 @@ class EntityEmbedding(Embedding):
                 # Separate from computational graph and transfer to CPU so as not to run out of memory.
                 self.embeddings_history[i.item()].append(ent.clone().detach().cpu())
 
-                print("length", i, len(self.embeddings_history[i.item()]))
 
     @classmethod
     def from_params(cls, vocab: Vocabulary, params: Params) -> 'Embedding':  # type: ignore

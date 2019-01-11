@@ -206,9 +206,9 @@ class WritingPromptsDatasetReader(DatasetReader):
                 # Just flatten in the normal order.
                 sorted_instances = more_itertools.flatten(chunk_instances)
             else:
+
                 # Reorder the sentences so one sentence per batch is in sentence order.
-                interleaved = more_itertools.interleave_longest(chunk_instances)
-                sorted_instances = more_itertools.flatten(interleaved)
+                sorted_instances = more_itertools.interleave_longest(*chunk_instances)
 
             for instance in sorted_instances:
                 yield self.text_to_instance(instance[0], instance[1], instance[2], instance[3])
