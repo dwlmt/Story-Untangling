@@ -62,7 +62,7 @@ class DynamicEntity(torch.nn.Module):
         entity_updated = entity_delta * embedded_flat + (1.0 - entity_delta) * context_transformed
         norm_entity_delta = torch.nn.functional.normalize(entity_updated, p=self._norm_type, dim=-1)
 
-        for key, embedded in self._embedder._token_embedders.items():
-            embedded.update(inputs[key], norm_entity_delta)
+        for key, embedder in self._embedder._token_embedders.items():
+            embedder.update(inputs[key], norm_entity_delta)
 
         return norm_entity_delta

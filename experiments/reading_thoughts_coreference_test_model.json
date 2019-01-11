@@ -23,7 +23,7 @@
     "max_story_sentences": 500,
     "story_embedding": true,
     "interleave_story_sentences": true,
-    "cuda_device": 3,
+    "cuda_device": 0,
     "lazy": true
   },
   "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -47,7 +47,8 @@
       "story": {
         "type": "entity_embedding",
         "embedding_dim": 1000,
-        "vocab_namespace": "story"
+        "vocab_namespace": "story",
+        "keep_history": 100
       }
     },
     "story_embedding_dim": 1000,
@@ -89,7 +90,7 @@
     "num_epochs": 1,
     "patience": 10,
     "cuda_device": [
-      3
+      0
     ],
     "optimizer": {
       "type": "adam",

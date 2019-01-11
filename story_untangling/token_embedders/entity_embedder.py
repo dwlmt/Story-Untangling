@@ -5,7 +5,7 @@ import re
 import logging
 import warnings
 import itertools
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Optional, Tuple, Sequence, cast, IO, Iterator, Any, NamedTuple
 
 from allennlp.modules import Embedding
@@ -60,7 +60,7 @@ class EntityEmbedding(Embedding):
                  weight: torch.FloatTensor = None,
                  padding_index: int = None,
                  norm_type: float = 2.,
-                 keep_history: int = 0
+                 keep_history: int = None
                  ) -> None:
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
@@ -82,9 +82,13 @@ class EntityEmbedding(Embedding):
         if self.padding_index is not None:
             self.weight.data[self.padding_index].fill_(0)
 
+        # Regardless of history keep the first.
+        self.embeddings_initial = {i: e.clone().detach().cpu() for i, e in enumerate(self.weight.data)}
+
         self.output_dim = embedding_dim
 
-        self.embeddings_history = defaultdict(list)
+        self.embeddings_history = defaultdict(lambda: deque(maxlen=self.keep_history))
+
 
     @overrides
     def forward(self, inputs):
@@ -101,7 +105,14 @@ class EntityEmbedding(Embedding):
     def update(self, indices, updated_entities):
 
         for i, ent in zip(indices, updated_entities):
+
             self.weight.data[i, :] = ent
+
+            if self.keep_history > 0:
+                # Separate from computational graph and transfer to CPU so as not to run out of memory.
+                self.embeddings_history[i.item()].append(ent.clone().detach().cpu())
+
+                print("length", i, len(self.embeddings_history[i.item()]))
 
     @classmethod
     def from_params(cls, vocab: Vocabulary, params: Params) -> 'Embedding':  # type: ignore
