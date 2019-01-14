@@ -47,7 +47,6 @@ class ReadingThoughts(Model):
        initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
            Used to initialize the model parameters.
        """
-
     def __init__(self,
                  vocab: Vocabulary,
                  source_embedder: TextFieldEmbedder,
@@ -58,7 +57,10 @@ class ReadingThoughts(Model):
                  target_feedforward: FeedForward = None,
                  story_embedder: TextFieldEmbedder = None,
                  story_embedding_dim: int = None,
-                 context_dim: int = None,
+                 entity_context_dim: int = None,
+                 entity_embedder: TextFieldEmbedder = None,
+                 entity_embedding_dim: int = None,
+                 entity_encoder: Seq2VecEncoder = None,
                  similarity_function: SimilarityFunction = None,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  ) -> None:
@@ -74,9 +76,17 @@ class ReadingThoughts(Model):
         self._target_feedforward = target_feedforward or source_feedforward
 
         if story_embedder:
-            self._story_encoder = DynamicEntity(story_embedder, story_embedding_dim, context_dim)
+            self._story_encoder = DynamicEntity(embedder=story_embedder, embedding_dim=story_embedding_dim,
+                                                context_dim=entity_context_dim)
         else:
             self._story_encoder = None
+
+        if entity_embedder:
+            self._entity_encoder = DynamicEntity(embedder=entity_embedder, embedding_dim=entity_embedding_dim,
+                                                 context_dim=entity_context_dim,
+                                                 entity_encoder=entity_encoder)
+        else:
+            self._entity_encoder = None
 
         self._cosine_similarity = nn.CosineSimilarity()
         self._l2_distance = nn.PairwiseDistance(p=2)
@@ -115,6 +125,7 @@ class ReadingThoughts(Model):
                 source_tokens: Dict[str, torch.LongTensor],
                 target_tokens: Dict[str, torch.LongTensor],
                 story: Dict[str, torch.LongTensor] = None,
+                source_coreferences: Dict[str, torch.LongTensor] = None,
                 negative_tokens: Optional[Dict[str, torch.LongTensor]] = None,
                 source_features: Optional[Dict[str, Any]] = None,
                 target_features: Optional[Dict[str, Any]] = None,
@@ -152,22 +163,27 @@ class ReadingThoughts(Model):
         """
 
         # TODO: Refactor in separate module when more stable.
-        def reading_encoder(features=None, tokens=None, story=None, embedder=None, encoder=None, feedforward=None,
-                            story_encoder=None,
+        def reading_encoder(features=None, tokens=None, story=None, coreferences=None, embedder=None, encoder=None,
+                            feedforward=None,
+                            story_encoder=None, entity_encoder=None
                             ):
+
             embedded_source = embedder(tokens)
             batch_size, _, _ = embedded_source.size()
             source_mask = get_text_field_mask(tokens)
             encoded = encoder(embedded_source, source_mask)
+            orig_encoded = encoded
 
             if features is not None:
                 encoded = torch.cat((encoded, features), dim=-1)
 
             if story_encoder and story:
-                story_encoded = story_encoder(story, encoded)
-
-                # Concat the existing encoded features with the dynamic story embedding.
+                story_encoded = story_encoder(story, orig_encoded)
                 encoded = torch.cat((encoded, story_encoded), dim=-1)
+
+            if entity_encoder and coreferences:
+                entity_encoded = entity_encoder(coreferences, orig_encoded)
+                encoded = torch.cat((encoded, entity_encoded), dim=-1)
 
             if feedforward:
                 encoded = feedforward(encoded)
@@ -176,14 +192,17 @@ class ReadingThoughts(Model):
 
         output_dict = {}
 
-
         output_dict["metadata"] = metadata
 
-        encoded_source, batch_size = reading_encoder(features=source_features, tokens=source_tokens, story=story,
+        encoded_source, batch_size = reading_encoder(features=source_features,
+                                                     tokens=source_tokens,
+                                                     story=story,
+                                                     coreferences=source_coreferences,
                                                      embedder=self._source_embedder,
                                                      encoder=self._source_encoder,
                                                      feedforward=self._source_feedforward,
-                                                     story_encoder=self._story_encoder)
+                                                     story_encoder=self._story_encoder,
+                                                     entity_encoder=self._entity_encoder)
 
         # Use the first metadata set of values as the full score is applied across the batch.
         full_output_score = False

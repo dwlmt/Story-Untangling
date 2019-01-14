@@ -17,13 +17,14 @@
     "use_existing_cached_db": true,
     "target_negative": true,
     "save_sentiment": false,
-    "positional_features": false,
+    "positional_features": true,
     "ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.08.31.tar.gz",
     "coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
     "max_story_sentences": 500,
     "story_embedding": true,
     "interleave_story_sentences": true,
-    "cuda_device": 0,
+    "named_entity_embeddings": true,
+    "cuda_device": 2,
     "lazy": true
   },
   "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -46,51 +47,67 @@
     "story_embedder": {
       "story": {
         "type": "entity_embedding",
-        "embedding_dim": 1000,
+        "embedding_dim": 500,
         "vocab_namespace": "story",
         "keep_history": 100
       }
     },
-    "story_embedding_dim": 1000,
-    "context_dim": 1024,
+    "entity_embedder": {
+      "coreferences": {
+        "type": "entity_embedding",
+        "embedding_dim": 500,
+        "vocab_namespace": "coreferences",
+        "keep_history": 100
+      }
+    },
+    "story_embedding_dim": 500,
+    "entity_embedding_dim": 500,
+    "entity_context_dim": 1024,
+    "entity_encoder": {
+      "type": "gru",
+      "input_size": 500,
+      "hidden_size": 500,
+      "num_layers": 1,
+      "dropout": 0.25
+    },
     "source_encoder": {
       "type": "gru",
       "input_size": 1024,
       "hidden_size": 1024,
       "num_layers": 3,
-      "dropout": 0.3
+      "dropout": 0.25
     },
     "target_encoder": {
       "type": "gru",
       "input_size": 1024,
       "hidden_size": 1024,
       "num_layers": 3,
-      "dropout": 0.3
+      "dropout": 0.25
     },
     "source_feedforward": {
-      "input_dim": 2024,
+      "input_dim": 2026,
       "num_layers": 2,
       "hidden_dims": 1024,
       "activations": "leaky_relu",
-      "dropout": 0.5
+      "dropout": 0.25
     },
     "target_feedforward": {
       "input_dim": 1024,
       "num_layers": 2,
       "hidden_dims": 1024,
       "activations": "leaky_relu",
-      "dropout": 0.5
+      "dropout": 0.25
     }
   },
   "iterator": {
     "type": "basic",
-    "batch_size": 50
+    "batch_size": 100
   },
   "trainer": {
-    "num_epochs": 1,
+    "num_epochs": 10,
     "patience": 10,
     "cuda_device": [
-      0
+      2
     ],
     "optimizer": {
       "type": "adam",

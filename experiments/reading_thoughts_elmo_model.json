@@ -45,42 +45,44 @@
       "input_size": 1024,
       "hidden_size": 1024,
       "num_layers": 3,
-      "dropout": 0.3
-    },
-    "target_encoder": {
-     "type": "gru",
-      "input_size": 1024,
-      "hidden_size": 1024,
-      "num_layers": 3,
-      "dropout": 0.3
-    }/*,
-    "source_feedforward": {
-      "input_dim": 1026,
-      "num_layers": 2,
-      "hidden_dims": 512,
-      "activations": "leaky_relu",
-      "dropout": 0.5
-    },
-    "target_feedforward": {
-      "input_dim": 1024,
-      "num_layers": 2,
-      "hidden_dims": 512,
-      "activations": "leaky_relu",
-      "dropout": 0.5
-    }*/
+      "dropout": 0.25
+    }
+    /*,
+        "target_encoder": {
+         "type": "gru",
+          "input_size": 1024,
+          "hidden_size": 1024,
+          "num_layers": 3,
+          "dropout": 0.25
+        }*/
+    /*,
+        "source_feedforward": {
+          "input_dim": 1026,
+          "num_layers": 2,
+          "hidden_dims": 512,
+          "activations": "leaky_relu",
+          "dropout": 0.25
+        },
+        "target_feedforward": {
+          "input_dim": 1024,
+          "num_layers": 2,
+          "hidden_dims": 512,
+          "activations": "leaky_relu",
+          "dropout": 0.25
+        }*/
   },
   "iterator": {
     "type": "basic",
-    "batch_size": 200
+    "batch_size": 100
   },
   "trainer": {
     "num_epochs": 20,
     "patience": 10,
     "cuda_device": [
       0,
-      1,
-      2,
-      3
+      1
+      //2,
+      //3
     ],
     "optimizer": {
       "type": "adam",

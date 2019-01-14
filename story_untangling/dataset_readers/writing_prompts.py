@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import OrderedDict
 from time import sleep
 from typing import Dict, List, Union, Any
 
@@ -74,6 +75,8 @@ class WritingPromptsDatasetReader(DatasetReader):
     story_embedding : bool, (optional, default=False)
         Provide a single vector per story to represent changes as it progresses through each sentence.
      : bool, (optional, default=False)
+    named_entity_embeddings: bool, (optional, default=False)
+        Return indexed representations for named entities. Currently will use all but TODO screen fro types or split the representations.
     interleave_story_sentences : bool, (optional, default=False)
         Order by sentence number in a story rather than by a story which enables better parallel running of dynamic entity updates.
      : bool, (optional, default=False)
@@ -83,7 +86,6 @@ class WritingPromptsDatasetReader(DatasetReader):
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
-
     def __init__(self,
                  source_tokenizer: Tokenizer = None,
                  target_tokenizer: Tokenizer = None,
@@ -104,6 +106,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  positional_features: bool = True,
                  truncate_sequence_length: int = 250,
                  story_embedding: bool = False,
+                 named_entity_embeddings: bool = False,
                  story_chunking: int = 100,
                  interleave_story_sentences: bool = False,
                  cuda_device: Union[List[int], int] = -1,
@@ -129,12 +132,13 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._truncate_sequence_length = truncate_sequence_length
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_embedding = story_embedding
-
+        self._named_entity_embeddings = named_entity_embeddings
         self._story_chunking = story_chunking
         self._interleave_story_sentences = interleave_story_sentences
 
         # For now just use a default indexer. In future look to cluster and reuse.
         self._story_token_indexer = SingleIdTokenIndexer(namespace="story")
+        self._entity_token_indexer = SingleIdTokenIndexer(namespace="coreferences")
 
         self._cuda_device = cuda_device
 
@@ -179,6 +183,9 @@ class WritingPromptsDatasetReader(DatasetReader):
                     logging.warning(f"Story has no sentences: {story_id}")
                     continue
 
+                if self._named_entity_embeddings:
+                    self.encode_named_entities(story_id, sentences, db)
+
                 sentence_nums = [s["sentence_num"] for s in sentences]
                 for source_indices, target_indices, absolute_position, relative_position in dual_window(sentence_nums,
                                                                                                         context_size=self._sentence_context_window,
@@ -193,7 +200,11 @@ class WritingPromptsDatasetReader(DatasetReader):
                     if self._target_negative:
                         negative_sequence = []
                         for i in range(self._sentence_predictive_window):
-                            negative_sequence.append(next(negative_sampler))
+                            sentence = next(negative_sampler)
+                            negative_sequence.append(sentence)
+
+                        if self._named_entity_embeddings:
+                            self.encode_named_entities(story_id, negative_sequence, db)
 
                     metadata = {"story_id": story_id, "absolute_position": absolute_position,
                                 "relative_position": relative_position, "number_of_sentences": story["sentence_num"]}
@@ -289,6 +300,11 @@ class WritingPromptsDatasetReader(DatasetReader):
             story_field = TextField(tokenized_text, {"story": self._story_token_indexer})
             field_dict["story"] = story_field
 
+        if self._named_entity_embeddings:
+            tokenized_text = self._source_tokenizer.tokenize(" ".join([s["coreferences"] for s in source_sequence]))
+            entity_field = TextField(tokenized_text, {"coreferences": self._entity_token_indexer})
+            field_dict["source_coreferences"] = entity_field
+
         if self._save_sentiment:
             source_features.extend(self.construct_global_sentiment_features(
                 source_sequence))
@@ -327,3 +343,22 @@ class WritingPromptsDatasetReader(DatasetReader):
         textblob_polarity /= len(source_sequence)
         textblob_subjectivity /= len(source_sequence)
         return textblob_polarity, textblob_subjectivity, vader_sentiment
+
+    def encode_named_entities(self, story_id, sentences, db):
+        for sentence in sentences:
+            # TODO: Allow filtering in types and ultimately duplication of the entities training from different perspectives.
+            coreferences = [s for s in db.query(
+                f'SELECT * FROM coreference WHERE story_id = {story_id} AND start_span >= {sentence[
+                    "start_span"]} AND end_span <= {sentence["end_span"]} ORDER BY id')]
+
+            coreferences_encoded = []  # [str(0)] * sentence["sentence_len"]
+            for coref in coreferences:
+                coref_id = int(story_id) * 1000000 + int(coref["id"])
+                coreferences_encoded.append(str(coref_id))
+            if len(coreferences_encoded) == 0:
+                coreferences_encoded = ["0"]
+            else:
+                # Keep one unique reference to each entity in order of last scene.
+                # TODO: More options for the max recent entities, keep duplicates, etc,
+                coreferences_encoded = reversed(list(more_itertools.unique_everseen(reversed(coreferences_encoded))))
+            sentence["coreferences"] = " ".join(coreferences_encoded)
