@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Union
 
 import dataset
+import more_itertools
 import nltk
 from aiofile import AIOFile, LineReader
 from allennlp.data.tokenizers import SentenceSplitter, WordTokenizer
@@ -161,7 +162,8 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_devi
             logger.info(f"Named Entity Tags Saved")
 
 
-async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None, save_batch_size: int = 4):
+async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None,
+                            save_batch_size: int = 4, sentence_chunks: int = 200):
     with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
         coref_table = db.create_table('coreference')
@@ -193,22 +195,25 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
             tasks = []
             for story in db['story']:
 
-                sentence_text = " ".join([s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')])
+                sentence_list = [s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')]
 
-                tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
+                for sentence_chunk in more_itertools.chunked(sentence_list, n=sentence_chunks):
+                    sentence_text = " ".join(sentence_chunk)
 
-                if len(tasks) == save_batch_size:
-                    results = await asyncio.gather(*tasks)
+                    tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
 
-                    for coref_to_save in results:
-                        try:
-                            db.begin()
-                            coref_table.insert_many(coref_to_save)
-                            db.commit()
-                        except Exception as e:
-                            logging.error(e)
-                            db.rollback()
-                    tasks = []
+                    if len(tasks) == save_batch_size:
+                        results = await asyncio.gather(*tasks)
+
+                        for coref_to_save in results:
+                            try:
+                                db.begin()
+                                coref_table.insert_many(coref_to_save)
+                                db.commit()
+                            except Exception as e:
+                                logging.error(e)
+                                db.rollback()
+                        tasks = []
 
             results = await asyncio.gather(*tasks)
 
