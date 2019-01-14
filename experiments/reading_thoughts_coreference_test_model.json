@@ -13,10 +13,10 @@
       }
     },
     //"/disk/scratch/s1569885/writing_prompts_dataset_ner"
-    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text_ner",
+    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text_ner_test",
     "use_existing_cached_db": true,
     "target_negative": true,
-    "save_sentiment": false,
+    "save_sentiment": true,
     "positional_features": true,
     "ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.08.31.tar.gz",
     "coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
@@ -24,7 +24,7 @@
     "story_embedding": true,
     "interleave_story_sentences": true,
     "named_entity_embeddings": true,
-    "cuda_device": 2,
+    "cuda_device": [0, 1, 2, 3],
     "lazy": true
   },
   "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -85,14 +85,14 @@
       "dropout": 0.25
     },
     "source_feedforward": {
-      "input_dim": 2026,
+      "input_dim": 2029,
       "num_layers": 2,
       "hidden_dims": 1024,
       "activations": "leaky_relu",
       "dropout": 0.25
     },
     "target_feedforward": {
-      "input_dim": 2024,
+      "input_dim": 2027,
       "num_layers": 2,
       "hidden_dims": 1024,
       "activations": "leaky_relu",
@@ -101,13 +101,13 @@
   },
   "iterator": {
     "type": "basic",
-    "batch_size": 100
+    "batch_size": 200
   },
   "trainer": {
     "num_epochs": 10,
     "patience": 10,
     "cuda_device": [
-      2
+      0, 1, 2, 3
     ],
     "optimizer": {
       "type": "adam",

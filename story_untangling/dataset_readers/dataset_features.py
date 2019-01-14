@@ -1,7 +1,8 @@
 import asyncio
+import itertools
 import logging
 import os
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Union
 
@@ -84,11 +85,11 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             if should_save_sentiment:
                 await save_sentiment(batch_size, dataset_db, executor, loop)
 
-            if ner_model:
-                await save_ner(ner_model, batch_size, dataset_db, cuda_device=cuda_device)
+        if ner_model:
+            await save_ner(ner_model, batch_size, dataset_db, cuda_device=cuda_device)
 
-            if coreference_model:
-                await save_coreferences(coreference_model, dataset_db, cuda_device=cuda_device)
+        if coreference_model:
+            await save_coreferences(coreference_model, dataset_db, cuda_device=cuda_device)
 
     return dataset_db
 
@@ -113,27 +114,54 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
         logger.info(f"Sentiment saved")
 
 
-async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None):
+async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None, save_batch_size: int = 16):
     with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
         db["sentence"].create_column('ner_tags', db.types.text)
-        ner_processor = NERProcessor(ner_model, dataset_db, cuda_device=cuda_device)
         ner_batch = []
 
-        for sentence in db['sentence']:
-            ner_batch.append(sentence)
+        gpu_max_workers = 1
 
-            if len(ner_batch) == batch_size:
-                ner_data_to_save = ner_processor(ner_batch)
+        if isinstance(cuda_device, (list, tuple)):
+            gpu_max_workers = len(cuda_device)
+            gpus = cuda_device
+        else:
+            gpus = [cuda_device]
+
+        loop = asyncio.get_event_loop()
+
+        with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
+
+            processors = []
+            for gpu in gpus:
+                processors.append(NERProcessor(ner_model, dataset_db, cuda_device=gpu))
+            processors_cycle = itertools.cycle(processors)
+
+            tasks = []
+
+            for sentence in db['sentence']:
+                ner_batch.append(sentence)
+
+                if len(ner_batch) == batch_size:
+                    tasks.append(loop.run_in_executor(executor, next(processors_cycle), ner_batch))
+
+                    if len(tasks) == save_batch_size:
+                        results = await asyncio.gather(*tasks)
+                        for ner_data_to_save in results:
+                            update_table_on_id(db, "sentence", ner_data_to_save)
+                        tasks = []
+                    ner_batch = []
+
+            tasks.append(
+                loop.run_in_executor(executor, next(processors_cycle),
+                                     ner_batch))
+            results = await asyncio.gather(*tasks)
+            for ner_data_to_save in results:
                 update_table_on_id(db, "sentence", ner_data_to_save)
-                ner_batch = []
 
-        ner_data_to_save = ner_processor(ner_batch)
-        update_table_on_id(db, "sentence", ner_data_to_save)
-
-        logger.info(f"Named Entity Tags Saved")
+            logger.info(f"Named Entity Tags Saved")
 
 
-async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None):
+async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None, save_batch_size: int = 4):
     with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
         coref_table = db.create_table('coreference')
@@ -144,24 +172,56 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
         coref_table.create_index(['start_span'])
         coref_table.create_index(['end_span'])
 
-    coreference_processor = CoreferenceProcessor(coreference_model, dataset_db, cuda_device=cuda_device)
+        gpu_max_workers = 1
 
-    sentence_table = db["sentence"]
-    for story in db['story']:
+        if isinstance(cuda_device, (list, tuple)):
+            gpu_max_workers = len(cuda_device)
+            gpus = cuda_device
+        else:
+            gpus = [cuda_device]
 
-        sentence_text = " ".join([s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')])
+        loop = asyncio.get_event_loop()
 
-        coref_to_save = coreference_processor(sentence_text, story["id"])
+        with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
 
-        try:
-            db.begin()
-            coref_table.insert_many(coref_to_save)
-            db.commit()
-        except Exception as e:
-            logging.error(e)
-            db.rollback()
+            processors = []
+            for gpu in gpus:
+                processors.append(CoreferenceProcessor(coreference_model, dataset_db, cuda_device=gpu))
+            processors_cycle = itertools.cycle(processors)
 
-    logger.info(f"Coreferences Saved")
+            sentence_table = db["sentence"]
+            tasks = []
+            for story in db['story']:
+
+                sentence_text = " ".join([s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')])
+
+                tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
+
+                if len(tasks) == save_batch_size:
+                    results = await asyncio.gather(*tasks)
+
+                    for coref_to_save in results:
+                        try:
+                            db.begin()
+                            coref_table.insert_many(coref_to_save)
+                            db.commit()
+                        except Exception as e:
+                            logging.error(e)
+                            db.rollback()
+                    tasks = []
+
+            results = await asyncio.gather(*tasks)
+
+            for coref_to_save in results:
+                try:
+                    db.begin()
+                    coref_table.insert_many(coref_to_save)
+                    db.commit()
+                except Exception as e:
+                    logging.error(e)
+                    db.rollback()
+
+            logger.info(f"Coreferences Saved")
 
 
 def update_table_on_id(db, table, data):
