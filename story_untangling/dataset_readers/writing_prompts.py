@@ -305,6 +305,16 @@ class WritingPromptsDatasetReader(DatasetReader):
             entity_field = TextField(tokenized_text, {"coreferences": self._entity_token_indexer})
             field_dict["source_coreferences"] = entity_field
 
+            tokenized_text = self._source_tokenizer.tokenize(" ".join([s["coreferences"] for s in target_sequence]))
+            entity_field = TextField(tokenized_text, {"coreferences": self._entity_token_indexer})
+            field_dict["target_coreferences"] = entity_field
+
+            if self._target_negative and negative_sequence:
+                tokenized_text = self._source_tokenizer.tokenize(" ".join([s["coreferences"] for s in negative_sequence]))
+                entity_field = TextField(tokenized_text, {"coreferences": self._entity_token_indexer})
+                field_dict["negative_coreferences"] = entity_field
+
+
         if self._save_sentiment:
             source_features.extend(self.construct_global_sentiment_features(
                 source_sequence))
@@ -348,8 +358,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         for sentence in sentences:
             # TODO: Allow filtering in types and ultimately duplication of the entities training from different perspectives.
             coreferences = [s for s in db.query(
-                f'SELECT * FROM coreference WHERE story_id = {story_id} AND start_span >= {sentence[
-                    "start_span"]} AND end_span <= {sentence["end_span"]} ORDER BY id')]
+                f'SELECT * FROM coreference WHERE story_id = {story_id} AND start_span >= {sentence["start_span"]} AND end_span <= {sentence["end_span"]} ORDER BY id')]
 
             coreferences_encoded = []  # [str(0)] * sentence["sentence_len"]
             for coref in coreferences:

@@ -92,7 +92,7 @@
       "dropout": 0.25
     },
     "target_feedforward": {
-      "input_dim": 1024,
+      "input_dim": 2024,
       "num_layers": 2,
       "hidden_dims": 1024,
       "activations": "leaky_relu",

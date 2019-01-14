@@ -74,7 +74,7 @@ class EntityEmbedding(Embedding):
             self.weight = torch.nn.Parameter(weight, requires_grad=False)
             torch.nn.init.normal_(self.weight)
             self.weight.data = torch.nn.functional.normalize(input=self.weight, p=self.norm_type, dim=1)
-            self.weight = self.weight.cpu()
+            self.weight = self.weight
         else:
             if weight.size() != (num_embeddings, embedding_dim):
                 raise ConfigurationError("A weight matrix was passed with contradictory embedding shapes.")
@@ -109,7 +109,7 @@ class EntityEmbedding(Embedding):
                                                  updated_entities.shape[2])
 
         for i, ent in zip(indices, updated_entities):
-            self.weight.data[i.item():] = ent.cpu()
+            self.weight.data[i.item():] = ent
 
             if self.keep_history > 0:
                 # Separate from computational graph and transfer to CPU so as not to run out of memory.
