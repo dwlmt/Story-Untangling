@@ -107,9 +107,18 @@
     "cuda_device": [
       0
     ],
+    "validation_metric": "+neighbour_accuracy",
+    "num_serialized_models_to_keep": 3,
     "optimizer": {
       "type": "adam",
-      "lr": 0.001
-    }
+      "lr": 0.001,
+      "amsgrad": true
+    },
+    "learning_rate_scheduler": {
+            "type": "reduce_on_plateau",
+            "factor": 0.5,
+            "mode": "max",
+            "patience": 0
+        }
   }
 }
