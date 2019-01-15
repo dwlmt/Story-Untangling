@@ -104,12 +104,12 @@ class EntityEmbedding(Embedding):
         return embedded
 
     def update(self, indices, updated_entities):
-        indices = indices.view(indices.shape[0] * indices.shape[1])
+        indices = indices.view(indices.shape[0] * indices.shape[1]).long()
         updated_entities = updated_entities.view(updated_entities.shape[0] * updated_entities.shape[1],
                                                  updated_entities.shape[2])
 
+        self.weight.data[indices, :] = updated_entities.to(self.weight.device)
         for i, ent in zip(indices, updated_entities):
-            self.weight.data[i.item():] = ent
 
             if self.keep_history > 0:
                 # Separate from computational graph and transfer to CPU so as not to run out of memory.

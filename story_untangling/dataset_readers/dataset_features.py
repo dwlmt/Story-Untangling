@@ -163,7 +163,7 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_devi
 
 
 async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None,
-                            save_batch_size: int = 4, sentence_chunks: int = 200):
+                            save_batch_size: int = 4, sentence_chunks: int = 100):
     with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
 
         coref_table = db.create_table('coreference')
@@ -193,7 +193,8 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
 
             sentence_table = db["sentence"]
             tasks = []
-            for story in db['story']:
+            # Order by shortest to longest so possible failures are at the end.
+            for story in db['story'].find(order_by=['sentence_num','id']):
 
                 sentence_list = [s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')]
 
@@ -388,6 +389,4 @@ class CoreferenceProcessor(object):
         clusters = result["clusters"]
         for i, cluster in enumerate(clusters):
             for span in cluster:
-                coreference_clusters.append(dict(coref_id=i, story_id=story_id, start_span=span[0], end_span=span[1]))
-
-        return coreference_clusters
+                coreference_clusters.ap

@@ -76,7 +76,7 @@ class DynamicEntity(torch.nn.Module):
 
         if self._entity_encoder:
             mask = get_text_field_mask(inputs)
-            entities_updated_norm = self._entity_encoder(entities_updated_norm, mask)
+            entities_updated_norm = self._entity_encoder(entities_updated_norm, mask).to(entities_updated_norm.device)
         else:
             entities_updated_norm = torch.squeeze(entities_updated_norm, dim=1)
 
