@@ -219,9 +219,10 @@ class ReadingThoughts(Model):
                                                      update_dynamic_entities=True)
 
         # Use the first metadata set of values as the full score is applied across the batch.
-        full_output_score = False
+        full_output_score = True
         if metadata is not None:
-            full_output_score = "full_output_score" in metadata[0] and metadata[0]["full_output_score"]
+            if "full_output_score" in metadata[0] and metadata[0]["full_output_score"] == False:
+                full_output_score = False
 
         loss = torch.tensor(0.0).to(encoded_source.device)
 

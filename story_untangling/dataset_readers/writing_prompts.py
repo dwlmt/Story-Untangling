@@ -371,3 +371,8 @@ class WritingPromptsDatasetReader(DatasetReader):
                 # TODO: More options for the max recent entities, keep duplicates, etc,
                 coreferences_encoded = reversed(list(more_itertools.unique_everseen(reversed(coreferences_encoded))))
             sentence["coreferences"] = " ".join(coreferences_encoded)
+
+
+    def create_temp_dataset(self, temp_db_location):
+        self._dataset_path = temp_db_location
+        self._use_existing_cached_db = False
