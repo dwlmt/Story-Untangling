@@ -44,6 +44,8 @@ class ReadingThoughts(Model):
            Embedder for the story as a whole.
        story_embedding_dim : ``int``, optional
            Embedder for the story as a whole.
+       full_output_score : ``bool``, (optional, default=False)
+           Embedder for the story as a whole.
        initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
            Used to initialize the model parameters.
        """
@@ -62,6 +64,7 @@ class ReadingThoughts(Model):
                  entity_embedding_dim: int = None,
                  entity_encoder: Seq2VecEncoder = None,
                  similarity_function: SimilarityFunction = None,
+                 full_output_score: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  ) -> None:
         super().__init__(vocab)
@@ -92,6 +95,8 @@ class ReadingThoughts(Model):
         self._l2_distance = nn.PairwiseDistance(p=2)
         self._l1_distance = nn.PairwiseDistance(p=1)
         self._similarity_function = similarity_function
+
+        self._full_output_score = full_output_score
 
 
         # TODO: Rework to allow other similarity based functions to be used.
@@ -218,11 +223,6 @@ class ReadingThoughts(Model):
                                                      dynamic_entity_encoder=self._entity_encoder,
                                                      update_dynamic_entities=True)
 
-        # Use the first metadata set of values as the full score is applied across the batch.
-        full_output_score = True
-        if metadata is not None:
-            if "full_output_score" in metadata[0] and metadata[0]["full_output_score"] == False:
-                full_output_score = False
 
         loss = torch.tensor(0.0).to(encoded_source.device)
 
@@ -240,7 +240,7 @@ class ReadingThoughts(Model):
                                                 )
 
             scores = torch.matmul(encoded_source, torch.t(encoded_target))
-            loss += self._calculate_loss(batch_size, scores, output_dict, full_output_score=full_output_score)
+            loss += self._calculate_loss(batch_size, scores, output_dict, full_output_score=self._full_output_score)
 
             # If there is a custom similarity defined then output using this similarity.
             self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
@@ -267,7 +267,7 @@ class ReadingThoughts(Model):
             comb_scores += neg_scores * neg_identity.float()
 
             loss += self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative",
-                                         full_output_score=full_output_score)
+                                         full_output_score=self._full_output_score)
 
             self.similarity_metrics(encoded_source, encoded_target, "negative", output_dict)
 
