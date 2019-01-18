@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import itertools
 import logging
 import os
@@ -22,6 +23,8 @@ nltk.download('vader_lexicon')
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
+engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 300, "check_same_thread": False}}
+
 
 async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
                             sentence_splitter: SentenceSplitter = SpacySentenceSplitter(),
@@ -29,7 +32,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                             ner_model: str = None,
                             coreference_model: str = None,
                             batch_size: int = 100,
-                            max_workers: int = 12,
+                            max_workers: int = 16,
                             truncate_sequence_length : int = 250,
                             cuda_device: Union[List[int], int] = None) -> str:
     file_name = os.path.basename(file_path)
@@ -98,7 +101,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
 
 async def save_sentiment(batch_size, dataset_db, executor, loop):
-    with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
         db["sentence"].create_column('vader_sentiment', db.types.float)
         db["sentence"].create_column('textblob_polarity', db.types.float)
         db["sentence"].create_column('textblob_subjectivity', db.types.float)
@@ -118,57 +121,63 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
 
 
 async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None,
-                   save_batch_size: int = 16):
-    with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+                   save_batch_size: int = 50):
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
+        #db.begin()
         db["sentence"].create_column('ner_tags', db.types.text)
-        ner_batch = []
+        #db.commit()
 
-        gpu_max_workers = 1
+    ner_batch = []
 
-        if isinstance(cuda_device, (list, tuple)):
-            gpu_max_workers = len(cuda_device)
-            gpus = cuda_device
-        else:
-            gpus = [cuda_device]
+    gpu_max_workers = 1
 
-        loop = asyncio.get_event_loop()
+    if isinstance(cuda_device, (list, tuple)):
+        gpu_max_workers = len(cuda_device)
+        gpus = cuda_device
+    else:
+        gpus = [cuda_device]
 
-        with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
+    loop = asyncio.get_event_loop()
 
-            processors = []
-            for gpu in gpus:
-                processors.append(NERProcessor(ner_model, dataset_db, cuda_device=gpu))
-            processors_cycle = itertools.cycle(processors)
+    with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
 
-            tasks = []
+        processors = []
+        for gpu in gpus:
+            processors.append(NERProcessor(ner_model, dataset_db, cuda_device=gpu))
+        processors_cycle = itertools.cycle(processors)
 
-            for sentence in db['sentence']:
-                ner_batch.append(sentence)
+        tasks = []
 
-                if len(ner_batch) == batch_size:
-                    tasks.append(loop.run_in_executor(executor, next(processors_cycle), ner_batch))
+        for sentence in db['sentence']:
+            ner_batch.append(sentence)
 
-                    if len(tasks) == save_batch_size:
-                        results = await asyncio.gather(*tasks)
-                        for ner_data_to_save in results:
-                            update_table_on_id(db, "sentence", ner_data_to_save)
-                        tasks = []
-                    ner_batch = []
+            if len(ner_batch) == batch_size:
+                tasks.append(loop.run_in_executor(executor, next(processors_cycle), ner_batch))
 
-            tasks.append(
-                loop.run_in_executor(executor, next(processors_cycle),
-                                     ner_batch))
-            results = await asyncio.gather(*tasks)
-            for ner_data_to_save in results:
+                if len(tasks) == save_batch_size:
+                    results = await asyncio.gather(*tasks)
+                    for ner_data_to_save in results:
+                        update_table_on_id(db, "sentence", ner_data_to_save)
+                    tasks = []
+                ner_batch = []
+
+        tasks.append(
+            loop.run_in_executor(executor, next(processors_cycle),
+                                 ner_batch))
+        results = await asyncio.gather(*tasks)
+        for ner_data_to_save in results:
+            with dataset.connect(dataset_db,
+                                 engine_kwargs=engine_kwargs) as db:
                 update_table_on_id(db, "sentence", ner_data_to_save)
 
-            logger.info(f"Named Entity Tags Saved")
+        logger.info(f"Named Entity Tags Saved")
 
 
 async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None,
-                            save_batch_size: int = 4, sentence_chunks: int = 100):
-    with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+                            save_batch_size: int = 50, sentence_chunks: int = 100):
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
+        #db.begin()
         coref_table = db.create_table('coreference')
         coref_table.create_column('story_id', db.types.integer)
         coref_table.create_column('start_span', db.types.integer)
@@ -176,74 +185,81 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
         coref_table.create_index(['story_id'])
         coref_table.create_index(['start_span'])
         coref_table.create_index(['end_span'])
+        #db.commit()
 
-        gpu_max_workers = 1
+    gpu_max_workers = 1
 
-        if isinstance(cuda_device, (list, tuple)):
-            gpu_max_workers = len(cuda_device)
-            gpus = cuda_device
-        else:
-            gpus = [cuda_device]
+    if isinstance(cuda_device, (list, tuple)):
+        gpu_max_workers = len(cuda_device)
+        gpus = cuda_device
+    else:
+        gpus = [cuda_device]
 
-        loop = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
 
-        with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
 
-            processors = []
-            for gpu in gpus:
-                processors.append(CoreferenceProcessor(coreference_model, dataset_db, cuda_device=gpu))
-            processors_cycle = itertools.cycle(processors)
+        processors = []
+        for gpu in gpus:
+            processors.append(CoreferenceProcessor(coreference_model, dataset_db, cuda_device=gpu))
+        processors_cycle = itertools.cycle(processors)
 
-            sentence_table = db["sentence"]
-            tasks = []
-            # Order by shortest to longest so possible failures are at the end.
-            for story in db['story'].find(order_by=['sentence_num','id']):
+        tasks = []
+        # Order by shortest to longest so possible failures are at the end.
+        for story in db['story'].find(order_by=['sentence_num','id']):
 
-                sentence_list = [s["text"] for s in sentence_table.find(story_id=story["id"], order_by='id')]
+            sentence_list = [s["text"] for s in db["sentence"].find(story_id=story["id"], order_by='id')]
 
-                for sentence_chunk in more_itertools.chunked(sentence_list, n=sentence_chunks):
-                    sentence_text = " ".join(sentence_chunk)
+            for sentence_chunk in more_itertools.chunked(sentence_list, n=sentence_chunks):
+                sentence_text = " ".join(sentence_chunk)
 
-                    tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
+                tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
 
-                    if len(tasks) == save_batch_size:
-                        results = await asyncio.gather(*tasks)
+                if len(tasks) == save_batch_size:
+                    results = await asyncio.gather(*tasks)
 
-                        for coref_to_save in results:
+
+                    for coref_to_save in results:
+                        with dataset.connect(dataset_db,
+                                             engine_kwargs=engine_kwargs) as db:
                             try:
-                                db.begin()
-                                coref_table.insert_many(coref_to_save)
-                                db.commit()
+
+                                #db.begin()
+                                db["coreference"].insert_many(copy.deepcopy(coref_to_save))
+                                #db.commit()
                             except Exception as e:
                                 logging.error(e)
-                                db.rollback()
-                        tasks = []
+                                #db.rollback()
+                    tasks = []
 
-            results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
 
-            for coref_to_save in results:
+
+        for coref_to_save in results:
+            with dataset.connect(dataset_db,
+                                 engine_kwargs=engine_kwargs) as db:
                 try:
-                    db.begin()
-                    coref_table.insert_many(coref_to_save)
-                    db.commit()
+                    #db.begin()
+                    db["coreference"].insert_many(coref_to_save)
+                    #db.commit()
                 except Exception as e:
                     logging.error(e)
-                    db.rollback()
+                    #db.rollback()
 
-            logger.info(f"Coreferences Saved")
+        logger.info(f"Coreferences Saved")
 
 
 def update_table_on_id(db, table, data):
     try:
-        db.begin()
+        #db.begin()
         sentence_table = db[table]
         for sent_dict in data:
             sentence_table.update(sent_dict, ["id"])
-        db.commit()
+        #db.commit()
 
     except Exception as e:
         logging.error(e)
-        db.rollback()
+        #db.rollback()
 
 
 async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
@@ -290,7 +306,7 @@ class SentimentDatabaseFeatures:
             sents_to_save.append(sentiment_dict)
 
         with dataset.connect(self._dataset_db,
-                             engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+                             engine_kwargs=engine_kwargs) as db:
             update_table_on_id(db, "sentence", sents_to_save)
 
 
@@ -304,10 +320,10 @@ class SaveStoryToDatabase:
         story_ids = []
         for sentences, story_num in zip(story_sentences, story_nums):
             with dataset.connect(self._dataset_db,
-                                 engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+                                 engine_kwargs=engine_kwargs) as db:
 
                 try:
-                    db.begin()
+                    #db.begin()
                     story_table = db['story']
                     sentence_table = db['sentence']
                     story = dict(story_num=story_num)
@@ -336,11 +352,11 @@ class SaveStoryToDatabase:
                     story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
                                        ['id'])
                     story_ids.append(story_id)
-                    db.commit()
+                    #db.commit()
 
                 except Exception as e:
                     logging.error(e)
-                    db.rollback()
+                    #db.rollback()
                     
         return story_ids
 
