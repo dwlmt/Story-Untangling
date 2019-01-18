@@ -152,6 +152,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                               file_path=file_path, use_existing_database=self._use_existing_cached_db,
                               ner_model=self._ner_model,
                               coreference_model=self._coreference_model,
+                              truncate_sequence_length=self._truncate_sequence_length,
                               cuda_device=self._cuda_device))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
