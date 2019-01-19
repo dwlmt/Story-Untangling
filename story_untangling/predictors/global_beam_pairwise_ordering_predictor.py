@@ -27,7 +27,7 @@ class ReadingThoughtsGlobalBeamPredictor(ReadingThoughtsLocalGreedyPredictor):
         super().__init__(model, dataset_reader, language)
         self._beam_size = beam_size
         self._model._full_output_score = True
-        self._exclude_first = True
+        self._exclude_first = False
 
 
     def search(self, gold_order, predicted_sentence_lookup, shuffled_instances):
