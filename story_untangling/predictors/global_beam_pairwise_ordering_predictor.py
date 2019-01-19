@@ -34,7 +34,7 @@ class ReadingThoughtsGlobalBeamPredictor(ReadingThoughtsLocalGreedyPredictor):
 
         instance_results = self._model.forward_on_instances(shuffled_instances)
 
-        probs = [p["neighbour_probs"].tolist() for p in instance_results]
+        probs = [p["neighbour_log_probs"].tolist() for p in instance_results]
 
         sequences = [[list(), 1.0]]
 
@@ -45,11 +45,11 @@ class ReadingThoughtsGlobalBeamPredictor(ReadingThoughtsLocalGreedyPredictor):
                 seq, score = sequences[i]
                 for j in range(len(row)):
                     if j not in set(seq):
-                        candidate = [seq + [j], score * -log(row[j])]
+                        candidate = [seq + [j], score + row[j]]
                         all_candidates.append(candidate)
 
 
-            ordered = sorted(all_candidates, key=lambda tup: tup[1])
+            ordered = sorted(all_candidates, key=lambda tup: tup[1], reverse=True)
 
             sequences = ordered[:self._beam_size]
 
