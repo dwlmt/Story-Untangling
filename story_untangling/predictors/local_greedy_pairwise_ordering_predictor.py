@@ -29,6 +29,7 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
         self._spearmanr_wel = Welford()
         self._kendalls_tau_wel = Welford()
+        self._pearsonr_wel = Welford()
 
         self._pmr_correct = 0.0
         self._pmr_total = 0.0
@@ -38,14 +39,14 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
         self._spearmanr_p_values = []
         self._kendalls_tau_p_values = []
+        self._pearsonr_p_values = []
 
         self._exclude_first = True
 
     def predict_batch_instance(self, instances: List[Instance]) -> List[JsonDict]:
 
-        gold_instances = instances
-
-        shuffled_instances = instances.copy()
+        gold_instances = copy.copy(instances)
+        shuffled_instances = copy.copy(instances)
 
         if self._exclude_first:
             shuffled_tail = shuffled_instances[2:]
@@ -73,7 +74,7 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
         results = {}
 
-        predicted_order = self.search(gold_order,  predicted_sentence_lookup, shuffled_instances)
+        predicted_order = self.search(predicted_sentence_lookup, shuffled_instances)
 
         if self._exclude_first:
             gold_order_to_eval = gold_order[1:]
@@ -85,12 +86,15 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
         kendalls_tau, kendalls_tau_p_value = stats.kendalltau(gold_order_to_eval, predicted_order_to_eval)
         spearmanr, spearmanr_p_value = stats.spearmanr(gold_order_to_eval, predicted_order_to_eval)
+        pearsonr, pearsonr_p_value = stats.pearsonr(gold_order_to_eval, predicted_order_to_eval)
 
         self._spearmanr_wel(spearmanr)
         self._kendalls_tau_wel(kendalls_tau)
+        self._pearsonr_wel(pearsonr)
 
         self._spearmanr_p_values.append(spearmanr_p_value)
         self._kendalls_tau_p_values.append(kendalls_tau_p_value)
+        self._pearsonr_p_values.append(pearsonr_p_value)
 
         if gold_order_to_eval == predicted_order_to_eval:
             self._pmr_correct += 1.0
@@ -104,27 +108,32 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
         results["initial_ordering"] = shuffled_sentence_order
         results["gold_ordering"] = gold_order
         results["predicted_ordering"] = predicted_order
-        results["text_reference"] = OrderedDict({i["metadata"]["absolute_position"] : i["metadata"]["source_text"] for i in gold_instances})
+
+        results["source_text"] = OrderedDict({i["metadata"]["absolute_position"]: i["metadata"]["source_text"] for i in gold_instances})
+        results["target_text"] = OrderedDict({i["metadata"]["absolute_position"] : i["metadata"]["target_text"] for i in gold_instances})
 
         results["kendalls_tau"] = kendalls_tau
         results["kendalls_tau_p_value"] = kendalls_tau_p_value
         results["spearmanr"] = spearmanr
         results["spearmanr_p_value"] = spearmanr_p_value
+        results["pearsonr"] = pearsonr
+        results["pearsonr_p_value"] = pearsonr_p_value
 
         results["kendalls_tau_culm_avg"], results["kendalls_tau_culm_std"] = self._kendalls_tau_wel.meanfull
         results["spearmanr_culm_avg"], results["spearmanr_culm_std"] = self._spearmanr_wel.meanfull
+        results["pearsonr_culm_avg"], results["pearsonr_culm_std"] = self._pearsonr_wel.meanfull
         results["perfect_match_ratio_culm"] = self._pmr_correct / self._pmr_total
         results["position_accuracy_culm"] = self._pos_acc_correct / self._pos_acc_total
 
         return [results]
 
-    def search(self, gold_order, predicted_sentence_lookup,  shuffled_instances):
+    def search(self, predicted_sentence_lookup,  shuffled_instances):
 
         predicted_order = []
         predicted_order.append(shuffled_instances[0]["metadata"]["absolute_position"])
 
         instance_results = self._model.forward_on_instances(shuffled_instances)
-        while len(predicted_order) < len(gold_order):
+        while len(predicted_order) < len(shuffled_instances):
             last_predicted_index = predicted_order[-1]
 
             neighbour_scores = instance_results[predicted_sentence_lookup[last_predicted_index]]["neighbour_scores"]

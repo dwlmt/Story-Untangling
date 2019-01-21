@@ -30,30 +30,30 @@ class ReadingThoughtsGlobalBeamPredictor(ReadingThoughtsLocalGreedyPredictor):
         self._exclude_first = False
 
 
-    def search(self, gold_order, predicted_sentence_lookup, shuffled_instances):
+    def search(self, predicted_sentence_lookup, shuffled_instances):
 
         instance_results = self._model.forward_on_instances(shuffled_instances)
 
-        probs = [p["neighbour_log_probs"].tolist() for p in instance_results]
+        all_probs = [p["neighbour_log_probs"].tolist() for p in instance_results]
 
-        sequences = [[list(), 1.0]]
+        print(all_probs)
 
-        for row in probs:
-            all_candidates = list()
-
-            for i in range(len(sequences)):
-                seq, score = sequences[i]
-                for j in range(len(row)):
-                    if j not in set(seq):
-                        candidate = [seq + [j], score + row[j]]
-                        all_candidates.append(candidate)
+        # Put all initial starting positions into the list
+        hypotheses = [([r], 0.0) for r in range(len(shuffled_instances))]
 
 
-            ordered = sorted(all_candidates, key=lambda tup: tup[1], reverse=True)
+        # Go to the required length.
+        for i in range(len(shuffled_instances) - 1):
+            fringe_sequences = []
+            for seq, score in hypotheses:
+                for j, prob in [(i, p) for i, p in enumerate(all_probs[seq[-1]]) if i not in set(seq)]:
+                    fringe_candidate = (seq + [j], score + prob)
 
-            sequences = ordered[:self._beam_size]
+                    fringe_sequences.append(fringe_candidate)
+            ordered = sorted(fringe_sequences, key=lambda tup: tup[1], reverse=True)
+            hypotheses = ordered[:self._beam_size]
 
-        best_sequence = sequences[0][0]
+        best_sequence, _ = hypotheses[0]
 
         predicted_order = [shuffled_instances[s]["metadata"]["absolute_position"] for s in best_sequence]
 
