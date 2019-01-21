@@ -33,14 +33,9 @@ class ReadingThoughtsGlobalBeamPredictor(ReadingThoughtsLocalGreedyPredictor):
     def search(self, predicted_sentence_lookup, shuffled_instances):
 
         instance_results = self._model.forward_on_instances(shuffled_instances)
-
         all_probs = [p["neighbour_log_probs"].tolist() for p in instance_results]
-
-        print(all_probs)
-
         # Put all initial starting positions into the list
         hypotheses = [([r], 0.0) for r in range(len(shuffled_instances))]
-
 
         # Go to the required length.
         for i in range(len(shuffled_instances) - 1):
