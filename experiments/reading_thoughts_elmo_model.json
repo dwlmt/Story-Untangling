@@ -21,15 +21,16 @@
     "ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.12.21.tar.gz",
     "coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
     "max_story_sentences": 500,
-    "cuda_device": 1,
+    "cuda_device": [ 0, 1, 2, 3],
     "lazy": true
   },
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  //"train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
-  //"validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
-  //"test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  //"train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
+  //"validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
+  //"test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
+  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
+  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  "evaluate_on_test": true,
   "model": {
     "type": "reading_thoughts",
     "source_embedder": {
@@ -74,16 +75,16 @@
   },
   "iterator": {
     "type": "basic",
-    "batch_size": 100
+    "batch_size": 200
   },
   "trainer": {
-    "num_epochs": 5,
+    "num_epochs": 3,
     "patience": 3,
     "cuda_device": [
       0,
-      1
-      //2,
-      //3
+      1,
+      2,
+      3
     ],
     "validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

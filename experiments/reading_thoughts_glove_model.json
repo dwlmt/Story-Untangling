@@ -18,6 +18,7 @@
   "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
   "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
   "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  "evaluate_on_test": true,
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/writingPrompts/first_500",
   "model": {
     "type": "reading_thoughts",
