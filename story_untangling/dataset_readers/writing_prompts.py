@@ -59,6 +59,8 @@ class WritingPromptsDatasetReader(DatasetReader):
         Allow multiple databases to be kept separate rather than wiping over each other.
     save_sentiment: bool (optional, default=True)
         Whether to save sentence level sentiment when creating the dataset.
+    sentiment_features: bool (optional, default=False)
+        Whether to add sentiment as a feature.
     ner_model : str (optional, default=None)
         AllenNLP NER model to run for features.
     coreference_model : str (optional, default=None)
@@ -99,6 +101,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
                  save_sentiment: bool = True,
+                 sentiment_features: bool = True,
                  ner_model: str = None,
                  coreference_model: str = None,
                  min_story_sentences: int = 0,
@@ -124,6 +127,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         self._use_existing_cached_db = use_existing_cached_db
         self._db_discriminator = db_discriminator
         self._save_sentiment = save_sentiment
+        self._sentiment_features = sentiment_features
         self._ner_model = ner_model
         self._coreference_model = coreference_model
         self._min_story_sentences = min_story_sentences
@@ -209,6 +213,9 @@ class WritingPromptsDatasetReader(DatasetReader):
 
                     metadata = {"story_id": story_id, "absolute_position": absolute_position,
                                 "relative_position": relative_position, "number_of_sentences": story["sentence_num"]}
+
+                    if len(source_sequence) == None or (len(target_sequence) == 0 and len(negative_sequence) == 0):
+                        continue
 
                     story_instances.append((source_sequence, target_sequence, negative_sequence, metadata))
 
@@ -316,7 +323,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                 field_dict["negative_coreferences"] = entity_field
 
 
-        if self._save_sentiment:
+        if self._sentiment_features:
             source_features.extend(self.construct_global_sentiment_features(
                 source_sequence))
             target_features.extend(self.construct_global_sentiment_features(
