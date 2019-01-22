@@ -214,7 +214,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                     metadata = {"story_id": story_id, "absolute_position": absolute_position,
                                 "relative_position": relative_position, "number_of_sentences": story["sentence_num"]}
 
-                    if len(source_sequence) == None or (len(target_sequence) == 0 and len(negative_sequence) == 0):
+                    if len(source_sequence) == 0 or (len(target_sequence) == 0 and len(negative_sequence) == 0):
                         continue
 
                     story_instances.append((source_sequence, target_sequence, negative_sequence, metadata))
