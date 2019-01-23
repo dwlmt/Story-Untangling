@@ -1,1 +1,1 @@
-from story_untangling.predictors import reading_thoughts_predictor, global_beam_pairwise_ordering_predictor, local_greedy_pairwise_ordering_predictor
+from story_untangling.predictors import reading_thoughts_predictor, global_beam_pairwise_ordering_predictor, local_beam_pairwise_ordering_predictor

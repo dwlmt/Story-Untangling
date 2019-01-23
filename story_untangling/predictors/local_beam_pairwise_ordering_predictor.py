@@ -16,7 +16,7 @@ from scipy.stats import stats
 from story_untangling.predictors.welford import Welford
 
 
-@Predictor.register("local_greedy_pairwise_ordering_predictor")
+@Predictor.register("local_beam_pairwise_ordering_predictor")
 class ReadingThoughtsLocalGreedyPredictor(Predictor):
     """
     Predictor for the :class:`~allennlp.models.coreference_resolution.ReadingThoughtsPredictor(` model.
@@ -26,6 +26,7 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
         super().__init__(model, dataset_reader)
         self._spacy = get_spacy_model(language, pos_tags=True, parse=True, ner=False)
         self._model._full_output_score = True
+        self._beam_size = 10000
 
         self._spearmanr_wel = Welford()
         self._kendalls_tau_wel = Welford()
@@ -74,7 +75,7 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
         results = {}
 
-        predicted_order = self.search(predicted_sentence_lookup, shuffled_instances)
+        predicted_order = self.search(shuffled_instances)
 
         if self._exclude_first:
             gold_order_to_eval = gold_order[1:]
@@ -127,20 +128,29 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
         return [results]
 
-    def search(self, predicted_sentence_lookup,  shuffled_instances):
-
-        predicted_order = []
-        predicted_order.append(shuffled_instances[0]["metadata"]["absolute_position"])
+    def search(self, shuffled_instances):
 
         instance_results = self._model.forward_on_instances(shuffled_instances)
-        while len(predicted_order) < len(shuffled_instances):
-            last_predicted_index = predicted_order[-1]
+        all_probs = [p["neighbour_log_probs"].tolist() for p in instance_results]
+        # Put all initial starting positions into the list
+        if self._exclude_first:
+            hypotheses = [([0], 0.0)]
+        else:
+            hypotheses = [([r], 0.0) for r in range(len(shuffled_instances))]
 
-            neighbour_scores = instance_results[predicted_sentence_lookup[last_predicted_index]]["neighbour_scores"]
-            # Don't link a sentence with itself.
-            predicted_sentence_indices = [predicted_sentence_lookup[i] for i in predicted_order]
-            max_score = max([ns for i, ns in enumerate(neighbour_scores) if i not in predicted_sentence_indices])
-            max_index = numpy.where(neighbour_scores == max_score)
-            predicted_order.append(shuffled_instances[numpy.asscalar(max_index[0])]["metadata"]["absolute_position"])
+        # Go to the required length.
+        for i in range(len(shuffled_instances) - 1):
+            fringe_sequences = []
+            for seq, score in hypotheses:
+                for j, prob in [(i, p) for i, p in enumerate(all_probs[seq[-1]]) if i not in set(seq)]:
+                    fringe_candidate = (seq + [j], score + prob)
+
+                    fringe_sequences.append(fringe_candidate)
+            ordered = sorted(fringe_sequences, key=lambda tup: tup[1], reverse=True)
+            hypotheses = ordered[:self._beam_size]
+
+        best_sequence, _ = hypotheses[0]
+
+        predicted_order = [shuffled_instances[s]["metadata"]["absolute_position"] for s in best_sequence]
 
         return predicted_order
