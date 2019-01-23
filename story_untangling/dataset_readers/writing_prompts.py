@@ -286,7 +286,7 @@ class WritingPromptsDatasetReader(DatasetReader):
             negative_tokens = " ".join([s["text"] for s in negative_sequence])
             negative_ner = " ".join([s["ner_tags"] for s in target_sequence if "ner_tags" in s])
 
-            metadata["negative_text"] = source_tokens
+            metadata["negative_text"] = negative_tokens
 
             field_dict['negative_tokens'] = tokenize(negative_tokens, self._target_tokenizer.tokenize,
                                                      self._target_token_indexers, negative_ner)
