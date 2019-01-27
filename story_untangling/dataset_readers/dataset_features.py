@@ -193,6 +193,8 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
         else:
             gpus = [cuda_device]
 
+        word_tokenizer = WordTokenizer()
+
         loop = asyncio.get_event_loop()
 
         with ThreadPoolExecutor(max_workers=gpu_max_workers) as executor:
@@ -207,9 +209,16 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
             for story in db['story'].find(order_by=['sentence_num','id']):
 
                 sentence_list = [s["text"] for s in db["sentence"].find(story_id=story["id"], order_by='id')]
+                sentence_tokens = word_tokenizer.batch_tokenize(sentence_list)
 
-                for sentence_chunk in more_itertools.chunked(sentence_list, n=sentence_chunks):
-                    sentence_text = " ".join(sentence_chunk)
+                for sentence_chunk in more_itertools.chunked(sentence_tokens, n=sentence_chunks):
+
+                    sentence_chunk_flat = list(more_itertools.flatten(sentence_chunk))
+
+                    if len(sentence_chunk_flat) < 10:
+                        continue
+
+                    sentence_text = " ".join(s.text for s in sentence_chunk_flat)
 
                     tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
 

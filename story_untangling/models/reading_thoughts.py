@@ -9,6 +9,7 @@ from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder, FeedForward, Sim
 from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
+from pandas import *
 
 from story_untangling.modules.dynamic_entity import DynamicEntity
 
@@ -46,6 +47,8 @@ class ReadingThoughts(Model):
            Embedder for the story as a whole.
        full_output_score : ``bool``, (optional, default=False)
            Embedder for the story as a whole.
+       full_output_embeddings : ``bool``, (optional, default=False)
+           Output the embedding vectors in the output.
        initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
            Used to initialize the model parameters.
        """
@@ -65,6 +68,7 @@ class ReadingThoughts(Model):
                  entity_encoder: Seq2VecEncoder = None,
                  similarity_function: SimilarityFunction = None,
                  full_output_score: bool = False,
+                 full_output_embeddings: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  ) -> None:
         super().__init__(vocab)
@@ -97,6 +101,7 @@ class ReadingThoughts(Model):
         self._similarity_function = similarity_function
 
         self._full_output_score = full_output_score
+        self._full_output_embeddings = full_output_embeddings
 
 
         # TODO: Rework to allow other similarity based functions to be used.
@@ -223,6 +228,8 @@ class ReadingThoughts(Model):
                                                      dynamic_entity_encoder=self._entity_encoder,
                                                      update_dynamic_entities=True)
 
+        if self._full_output_embeddings:
+            output_dict["source_embeddings"] = encoded_source.tolist()
 
         loss = torch.tensor(0.0).to(encoded_source.device)
 
@@ -239,7 +246,10 @@ class ReadingThoughts(Model):
                                                 update_dynamic_entities=False
                                                 )
 
-            scores = torch.matmul(encoded_source, torch.t(encoded_target))
+            if self._full_output_embeddings:
+                output_dict["target_embeddings"] = encoded_target.tolist()
+            encoded_target_t = torch.t(encoded_target)
+            scores = torch.matmul(encoded_source, encoded_target_t)
             loss += self._calculate_loss(batch_size, scores, output_dict, full_output_score=self._full_output_score)
 
             # If there is a custom similarity defined then output using this similarity.
@@ -257,9 +267,13 @@ class ReadingThoughts(Model):
                                                 update_dynamic_entities=False
                                                 )
 
+            if self._full_output_embeddings:
+                output_dict["negative_embeddings"] = encoded_negative.tolist()
+
             # This is replacing one of the negative random samples with the correct output.
             # It is hacky but computationally efficient meaning one of the random samples isn't used.
-            neg_scores = torch.matmul(encoded_source, torch.t(encoded_negative))
+            encoded_negative_t = torch.t(encoded_target)
+            neg_scores = torch.matmul(encoded_source, encoded_negative_t)
             identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
             neg_identity = (identity != 1)
             comb_scores = torch.zeros(scores.shape).to(scores.device)
@@ -291,10 +305,13 @@ class ReadingThoughts(Model):
 
     def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour", full_output_score=False):
 
+        #print(DataFrame(scores.cpu().numpy()))
+
         # The correct answer should correspond to the same position in the batch.
         identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
         target_classes = torch.argmax(identity, dim=1)  # Get indices and NLLLoss needs these.
         # Calculate the loss
+
         scores_softmax = self._log_softmax(scores)
 
         loss = self._nll_loss(scores_softmax, target_classes)
@@ -314,7 +331,6 @@ class ReadingThoughts(Model):
                 output_dict[f"{metrics_prefix}_scores"] = scores
                 output_dict[f"{metrics_prefix}_log_probs"] = scores_softmax
                 output_dict[f"{metrics_prefix}_probs"] = torch.exp(scores_softmax)
-
 
             self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
