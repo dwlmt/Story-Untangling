@@ -121,7 +121,7 @@ class ReadingThoughts(Model):
             "neighbour_accuracy": CategoricalAccuracy(),
             "neighbour_accuracy5": CategoricalAccuracy(top_k=5),
             "neighbour_accuracy3": CategoricalAccuracy(top_k=3),
-            "neighbour_correct_score_avg": Average(),
+            "neighbour_correct_dot_product_avg": Average(),
             "neighbour_correct_log_prob_avg": Average(),
             "neighbour_correct_prob_avg": Average(),
             "neighbour_correct_similarity_cosine_avg": Average(),
@@ -130,7 +130,7 @@ class ReadingThoughts(Model):
             "negative_accuracy": CategoricalAccuracy(),
             "negative_accuracy3": CategoricalAccuracy(top_k=3),
             "negative_accuracy5": CategoricalAccuracy(top_k=5),
-            "negative_correct_score_avg": Average(),
+            "negative_correct_dot_product_avg": Average(),
             "negative_correct_log_prob_avg": Average(),
             "negative_correct_prob_avg": Average(),
             "negative_correct_similarity_cosine_avg": Average(),
@@ -325,16 +325,17 @@ class ReadingThoughts(Model):
 
         loss = torch.tensor(0.0).to(encoded_source.device)
 
-        if self._cosine_loss:
+        if self._dot_product_loss:
             scores_softmax = self._log_softmax(dot_product_scores)
             loss += self._nll_loss(scores_softmax, target_classes)
 
-        if self._dot_product_loss:
+        if self._cosine_loss:
             source_norm = encoded_source.norm(dim=-1, keepdim=True)
             target_norm = encoded_target.norm(dim=-1, keepdim=True)
             norm_a_times_b = torch.matmul(source_norm, torch.t(target_norm))
 
-            cosine_scores_softmax = self._log_softmax(dot_product_scores / norm_a_times_b)
+            cosine_scores = dot_product_scores / norm_a_times_b
+            cosine_scores_softmax = self._log_softmax(cosine_scores)
             loss += self._nll_loss(cosine_scores_softmax, target_classes)
 
         with torch.no_grad():
@@ -351,14 +352,17 @@ class ReadingThoughts(Model):
             output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
 
             if full_output_score:
-                output_dict[f"{metrics_prefix}_scores"] = dot_product_scores
+                output_dict[f"{metrics_prefix}_dot_products"] = dot_product_scores
                 output_dict[f"{metrics_prefix}_log_probs"] = scores_softmax
-                output_dict[f"{metrics_prefix}_probs"] = torch.exp(scores_softmax)
+
+                if self._cosine_loss:
+                    output_dict[f"{metrics_prefix}_cosines"] = dot_product_scores
+
 
             self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
-            self.metrics[f"{metrics_prefix}_correct_score_avg"](correct_scores.mean().item())
+            self.metrics[f"{metrics_prefix}_correct_dot_product_avg"](correct_scores.mean().item())
             self.metrics[f"{metrics_prefix}_correct_prob_avg"](correct_probs.mean().item())
             self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](correct_log_probs.mean().item())
 
