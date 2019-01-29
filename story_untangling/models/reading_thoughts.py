@@ -45,6 +45,10 @@ class ReadingThoughts(Model):
            Embedder for the story as a whole.
        story_embedding_dim : ``int``, optional
            Embedder for the story as a whole.
+       dot_product_loss : ``bool``, (optional, default=True)
+           Use dot product when calculating the Quick Thoughts based loss.
+       cosine_product_loss : ``bool``, (optional, default=True)
+           Use cosine when calculating the Quick Thoughts based loss.
        full_output_score : ``bool``, (optional, default=False)
            Embedder for the story as a whole.
        full_output_embeddings : ``bool``, (optional, default=False)
@@ -52,6 +56,7 @@ class ReadingThoughts(Model):
        initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
            Used to initialize the model parameters.
        """
+
     def __init__(self,
                  vocab: Vocabulary,
                  source_embedder: TextFieldEmbedder,
@@ -67,6 +72,8 @@ class ReadingThoughts(Model):
                  entity_embedding_dim: int = None,
                  entity_encoder: Seq2VecEncoder = None,
                  similarity_function: SimilarityFunction = None,
+                 dot_product_loss: bool = True,
+                 cosine_loss: bool = True,
                  full_output_score: bool = False,
                  full_output_embeddings: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
@@ -95,6 +102,9 @@ class ReadingThoughts(Model):
         else:
             self._entity_encoder = None
 
+        self._dot_product_loss = dot_product_loss
+        self._cosine_loss = cosine_loss
+
         self._cosine_similarity = nn.CosineSimilarity()
         self._l2_distance = nn.PairwiseDistance(p=2)
         self._l1_distance = nn.PairwiseDistance(p=1)
@@ -102,7 +112,6 @@ class ReadingThoughts(Model):
 
         self._full_output_score = full_output_score
         self._full_output_embeddings = full_output_embeddings
-
 
         # TODO: Rework to allow other similarity based functions to be used.
         self._log_softmax = nn.LogSoftmax(dim=1)
@@ -250,22 +259,24 @@ class ReadingThoughts(Model):
                 output_dict["target_embeddings"] = encoded_target.tolist()
             encoded_target_t = torch.t(encoded_target)
             scores = torch.matmul(encoded_source, encoded_target_t)
-            loss += self._calculate_loss(batch_size, scores, output_dict, full_output_score=self._full_output_score)
+
+            loss += self._calculate_loss(batch_size, scores, encoded_source, encoded_target, output_dict,
+                                         full_output_score=self._full_output_score)
 
             # If there is a custom similarity defined then output using this similarity.
             self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
 
         if negative_tokens:
             encoded_negative, _ = reading_encoder(features=negative_features, tokens=negative_tokens,
-                                                embedder=self._target_embedder,
-                                                encoder=self._target_encoder,
-                                                coreferences=negative_coreferences,
-                                                story=story,
-                                                feedforward=self._target_feedforward,
-                                                story_encoder=self._story_encoder,
-                                                dynamic_entity_encoder=self._entity_encoder,
-                                                update_dynamic_entities=False
-                                                )
+                                                  embedder=self._target_embedder,
+                                                  encoder=self._target_encoder,
+                                                  coreferences=negative_coreferences,
+                                                  story=story,
+                                                  feedforward=self._target_feedforward,
+                                                  story_encoder=self._story_encoder,
+                                                  dynamic_entity_encoder=self._entity_encoder,
+                                                  update_dynamic_entities=False
+                                                  )
 
             if self._full_output_embeddings:
                 output_dict["negative_embeddings"] = encoded_negative.tolist()
@@ -280,7 +291,8 @@ class ReadingThoughts(Model):
             comb_scores += scores * identity.float()
             comb_scores += neg_scores * neg_identity.float()
 
-            loss += self._calculate_loss(batch_size, comb_scores, output_dict, metrics_prefix="negative",
+            loss += self._calculate_loss(batch_size, comb_scores, encoded_source, encoded_negative, output_dict,
+                                         metrics_prefix="negative",
                                          full_output_score=self._full_output_score)
 
             self.similarity_metrics(encoded_source, encoded_target, "negative", output_dict)
@@ -303,23 +315,34 @@ class ReadingThoughts(Model):
             output_dict[f"{name}_correct_distance_l2"] = dist_l2
             self.metrics[f"{name}_correct_distance_l2_avg"](dist_l2.mean().item())
 
-    def _calculate_loss(self, batch_size, scores, output_dict, metrics_prefix="neighbour", full_output_score=False):
-
-        #print(DataFrame(scores.cpu().numpy()))
+    def _calculate_loss(self, batch_size, dot_product_scores, encoded_source, encoded_target, output_dict,
+                        metrics_prefix="neighbour", full_output_score=False):
 
         # The correct answer should correspond to the same position in the batch.
-        identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
+        identity = torch.eye(batch_size, dtype=torch.long).to(dot_product_scores.device)
         target_classes = torch.argmax(identity, dim=1)  # Get indices and NLLLoss needs these.
         # Calculate the loss
 
-        scores_softmax = self._log_softmax(scores)
+        loss = torch.tensor(0.0).to(encoded_source.device)
 
-        loss = self._nll_loss(scores_softmax, target_classes)
+        if self._cosine_loss:
+            scores_softmax = self._log_softmax(dot_product_scores)
+            loss += self._nll_loss(scores_softmax, target_classes)
+
+        if self._dot_product_loss:
+            source_norm = encoded_source.norm(dim=-1, keepdim=True)
+            target_norm = encoded_target.norm(dim=-1, keepdim=True)
+            norm_a_times_b = torch.matmul(source_norm, torch.t(target_norm))
+
+            cosine_scores_softmax = self._log_softmax(dot_product_scores / norm_a_times_b)
+            loss += self._nll_loss(cosine_scores_softmax, target_classes)
 
         with torch.no_grad():
+
             # Some extra work just for metrics.
-            correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(scores.device) + identity) == 1
-            correct_scores = scores[correct_mask]
+            correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(
+                dot_product_scores.device) + identity) == 1
+            correct_scores = dot_product_scores[correct_mask]
             correct_log_probs = scores_softmax[correct_mask]
             correct_probs = torch.exp(correct_log_probs)
 
@@ -328,7 +351,7 @@ class ReadingThoughts(Model):
             output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
 
             if full_output_score:
-                output_dict[f"{metrics_prefix}_scores"] = scores
+                output_dict[f"{metrics_prefix}_scores"] = dot_product_scores
                 output_dict[f"{metrics_prefix}_log_probs"] = scores_softmax
                 output_dict[f"{metrics_prefix}_probs"] = torch.exp(scores_softmax)
 
