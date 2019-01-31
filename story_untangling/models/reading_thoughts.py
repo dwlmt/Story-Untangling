@@ -51,8 +51,8 @@ class ReadingThoughts(Model):
            Regularizer that encourages the source and target vectors to be the same length.
        length_regularizer_weight : ``float``, (optional, default=1.0)
            Weight for the regularizer in the loss function.
-       cosine_product_loss : ``bool``, (optional, default=False)
-           Use cosine when calculating the Quick Thoughts based loss.
+       cosine_loss : ``bool``, (optional, default=False)
+           Use cosine when calculating the Quick Thoughts loss instead of plain dot product.
        full_output_score : ``bool``, (optional, default=False)
            Embedder for the story as a whole.
        full_output_embeddings : ``bool``, (optional, default=False)
@@ -76,7 +76,6 @@ class ReadingThoughts(Model):
                  entity_embedding_dim: int = None,
                  entity_encoder: Seq2VecEncoder = None,
                  similarity_function: SimilarityFunction = None,
-                 dot_product_loss: bool = True,
                  cosine_loss: bool = False,
                  length_regularizer: bool = True,
                  length_regularizer_weight: float = 1.0,
@@ -108,7 +107,6 @@ class ReadingThoughts(Model):
         else:
             self._entity_encoder = None
 
-        self._dot_product_loss = dot_product_loss
         self._cosine_loss = cosine_loss
 
         self._length_regularizer = length_regularizer
@@ -266,11 +264,11 @@ class ReadingThoughts(Model):
 
             if self._full_output_embeddings:
                 output_dict["target_embeddings"] = encoded_target.tolist()
-            encoded_target_t = torch.t(encoded_target)
-            scores = torch.matmul(encoded_source, encoded_target_t)
 
-            loss += self._calculate_loss(batch_size, scores, encoded_source, encoded_target, output_dict,
+            batch_loss, scores = self._calculate_loss(batch_size, encoded_source, encoded_target, output_dict,
                                          full_output_score=self._full_output_score)
+            loss += batch_loss
+
 
             # If there is a custom similarity defined then output using this similarity.
             self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
@@ -290,19 +288,11 @@ class ReadingThoughts(Model):
             if self._full_output_embeddings:
                 output_dict["negative_embeddings"] = encoded_negative.tolist()
 
-            # This is replacing one of the negative random samples with the correct output.
-            # It is hacky but computationally efficient meaning one of the random samples isn't used.
-            encoded_negative_t = torch.t(encoded_target)
-            neg_scores = torch.matmul(encoded_source, encoded_negative_t)
-            identity = torch.eye(batch_size, dtype=torch.long).to(scores.device)
-            neg_identity = (identity != 1)
-            comb_scores = torch.zeros(scores.shape).to(scores.device)
-            comb_scores += scores * identity.float()
-            comb_scores += neg_scores * neg_identity.float()
 
-            loss += self._calculate_loss(batch_size, comb_scores, encoded_source, encoded_negative, output_dict,
-                                         metrics_prefix="negative",
-                                         full_output_score=self._full_output_score)
+
+            batch_loss, scores = self._calculate_loss(batch_size, encoded_source, encoded_negative, output_dict,
+                                                      metrics_prefix="negative", full_output_score=self._full_output_score, existing_scores=scores)
+            loss += batch_loss
 
             self.similarity_metrics(encoded_source, encoded_target, "negative", output_dict)
 
@@ -311,6 +301,8 @@ class ReadingThoughts(Model):
         return output_dict
 
     def similarity_metrics(self, encoded_source, encoded_target, name, output_dict):
+        # If using cosine similarity then these will be calculated on the unnormalised vectors. Since the measure don't make sense on the
+        # normalised ones.
         with torch.no_grad():
             sim = self._cosine_similarity(encoded_source, encoded_target)
             output_dict[f"{name}_correct_similarity_cosine"] = sim
@@ -324,8 +316,28 @@ class ReadingThoughts(Model):
             output_dict[f"{name}_correct_distance_l2"] = dist_l2
             self.metrics[f"{name}_correct_distance_l2_avg"](dist_l2.mean().item())
 
-    def _calculate_loss(self, batch_size, dot_product_scores, encoded_source, encoded_target, output_dict,
-                        metrics_prefix="neighbour", full_output_score=False):
+    def _calculate_loss(self, batch_size, encoded_source, encoded_target, output_dict,
+                        metrics_prefix="neighbour", full_output_score=False, existing_scores=None):
+
+        # The dot product L2 normalised dot roduct is the equivalent of
+        if self._cosine_loss:
+            encoded_source = torch.nn.functional.normalize(encoded_source, dim=-1)
+            encoded_target = torch.nn.functional.normalize(encoded_target, dim=-1)
+
+        if not metrics_prefix == "negative":
+            dot_product_scores = torch.matmul(encoded_source, torch.t(encoded_target))
+        else:
+
+            # This is replacing one of the negative random samples with the correct output.
+            # It is hacky but computationally efficient meaning one of the random samples isn't used.
+            neg_scores = torch.matmul(encoded_source, torch.t(encoded_target))
+            identity = torch.eye(batch_size, dtype=torch.long).to(existing_scores.device)
+            neg_identity = (identity != 1)
+            comb_scores = torch.zeros(existing_scores.shape).to(existing_scores.device)
+            comb_scores += existing_scores * identity.float()
+            comb_scores += neg_scores * neg_identity.float()
+            dot_product_scores = comb_scores
+
 
         # The correct answer should correspond to the same position in the batch.
         identity = torch.eye(batch_size, dtype=torch.long).to(dot_product_scores.device)
@@ -334,63 +346,34 @@ class ReadingThoughts(Model):
 
         loss = torch.tensor(0.0).to(encoded_source.device)
 
-        if self._dot_product_loss:
-            scores_softmax = self._log_softmax(dot_product_scores)
-            loss += self._nll_loss(scores_softmax, target_classes)
-
-        if self._length_regularizer or self._cosine_loss:
-            source_norm = encoded_source.norm(dim=-1, keepdim=True)
-            target_norm = encoded_target.norm(dim=-1, keepdim=True)
+        scores_softmax = self._log_softmax(dot_product_scores)
+        loss += self._nll_loss(scores_softmax, target_classes)
 
         # The length regularizer penalizes cases where the correct source and targets aren't the same length.
-        if self._length_regularizer:
-            loss += ((torch.squeeze(source_norm, dim=-1) - torch.squeeze(target_norm,
-                                                                         dim=-1)) ** 2 * self._length_regularizer_weight).sum() / batch_size
+        # Redundant when applying a cosine loss as the vectors will be normalized for length anyway.
+        if self._length_regularizer and not self._cosine_loss:
 
-        if self._cosine_loss:
-            norm_a_times_b = torch.matmul(source_norm, torch.t(target_norm))
+            source_norm = encoded_source.norm(dim=-1)
+            target_norm = encoded_target.norm(dim=-1)
 
-            cosine_scores = dot_product_scores / norm_a_times_b
-            cosine_scores_softmax = self._log_softmax(cosine_scores)
-            loss += self._nll_loss(cosine_scores_softmax, target_classes)
+            loss += ((source_norm - target_norm) ** 2 * self._length_regularizer_weight).sum() / batch_size
 
         with torch.no_grad():
 
-            if self._dot_product_loss:
+            # Some extra work just for metrics.
+            correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(
+                dot_product_scores.device) + identity) == 1
+            correct_scores = dot_product_scores[correct_mask]
+            correct_log_probs = scores_softmax[correct_mask]
+            correct_probs = torch.exp(correct_log_probs)
 
-                # Some extra work just for metrics.
-                correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(
-                    dot_product_scores.device) + identity) == 1
-                correct_scores = dot_product_scores[correct_mask]
-                correct_log_probs = scores_softmax[correct_mask]
-                correct_probs = torch.exp(correct_log_probs)
+            output_dict[f"{metrics_prefix}_correct_dot_product"] = correct_scores
+            output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
+            output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
 
-                output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
-                output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
-                output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
-
-                if full_output_score:
-                    output_dict[f"{metrics_prefix}_dot_products"] = dot_product_scores
-                    output_dict[f"{metrics_prefix}_log_probs"] = scores_softmax
-
-            if self._cosine_loss:
-                output_dict[f"{metrics_prefix}_cosines"] = dot_product_scores
-
-                if full_output_score:
-                    output_dict[f"{metrics_prefix}_cosines"] = cosine_scores
-
-                # If the dot product is not calculated then use the cosine for probabilities.
-                if not self._dot_product_loss:
-                    # Some extra work just for metrics.
-                    correct_mask = (torch.zeros(batch_size, batch_size, dtype=torch.long).to(
-                        cosine_scores.device) + identity) == 1
-                    correct_scores = cosine_scores[correct_mask]
-                    correct_log_probs = scores_softmax[correct_mask]
-                    correct_probs = torch.exp(correct_log_probs)
-
-                    output_dict[f"{metrics_prefix}_correct_score"] = correct_scores
-                    output_dict[f"{metrics_prefix}_correct_log_probs"] = correct_log_probs
-                    output_dict[f"{metrics_prefix}_correct_probs"] = correct_probs
+            if full_output_score:
+                output_dict[f"{metrics_prefix}_dot_products"] = dot_product_scores
+                output_dict[f"{metrics_prefix}_log_probs"] = scores_softmax
 
             self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
@@ -399,7 +382,7 @@ class ReadingThoughts(Model):
             self.metrics[f"{metrics_prefix}_correct_prob_avg"](correct_probs.mean().item())
             self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](correct_log_probs.mean().item())
 
-        return loss
+        return loss, dot_product_scores
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {metric_name: metric.get_metric(reset) for metric_name, metric in self.metrics.items()}
