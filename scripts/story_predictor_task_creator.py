@@ -25,21 +25,30 @@ def main(args):
     buckets_map = OrderedDict({i: v for i, v in enumerate(buckets)})
 
     story_buckets_map = defaultdict(lambda: defaultdict(lambda: list()))
+    story_text_map = defaultdict(lambda: defaultdict(lambda: list()))
 
     with jsonlines.open(args["source_json"], mode='r') as reader:
         for json_obj in reader:
+
+            story_id = json_obj["metadata"]["story_id"]
+
+            source_text = json_obj["metadata"]["source_text"]
+            target_text = json_obj["metadata"]["target_text"]
+            source_len = len(word_tokenizer.tokenize(source_text))
+            target_len = len(word_tokenizer.tokenize(target_text))
+
+            story_text_map[story_id]["source_text"] = source_text
+            story_text_map[story_id]["target_text"] = target_text
 
             attribute = float(json_obj[attribute_to_use])
             # TODO: Restrict to in length.
             for i, bucket in buckets_map.items():
                 if attribute >= bucket.lower_bound and attribute < bucket.upper_bound:
 
-                    source_len = len(word_tokenizer.tokenize(json_obj["metadata"]["source_text"]))
-                    target_len = len(word_tokenizer.tokenize(json_obj["metadata"]["target_text"]))
                     if source_len < args["min_word_length"] or target_len < args["min_word_length"]:
                         continue
 
-                    story_buckets_map[json_obj["metadata"]["story_id"]][i].append(json_obj)
+                    story_buckets_map[story_id][i].append(json_obj)
 
     with jsonlines.open(args["target_json"], mode='w') as writer:
         for story_id, buckets in story_buckets_map.items():
@@ -48,10 +57,11 @@ def main(args):
                 selection = []
                 for i, contexts in buckets.items():
                     selected = random.choice(contexts)
-                    selected["gold_order"] = i
+                    selected["bucket"] = i
                     selection.append(selected)
 
-                task_map = {"story_id": story_id, "selection": selection}
+                random.shuffle(selection)
+                task_map = {"story_id": story_id, "all_story_text": story_text_map[story_id], "selection": selection}
                 print(task_map)
                 writer.write(task_map)
 
@@ -63,7 +73,7 @@ parser.add_argument('--target-json', required=True, type=str, help="The target J
 parser.add_argument('--attribute-to-use', type=str, default="neighbour_correct_score_percentile",
                     help="Which attribute to use to bucket the task.")
 parser.add_argument('--buckets',
-                    default=["0.75-1.01", "0.25-0.75", "0.0-0.25"], type=float, nargs='+',
+                    default=["0.0-0.25", "0.25-0.50", "0.5-0.75", "0.75-1.01"], type=float, nargs='+',
                     help="A list percentile pairs. Do as pairs as may not want to select every bucket. Define from largest to smallest.")
 parser.add_argument('--min-word-length', default=5, type=int, help="")
 
