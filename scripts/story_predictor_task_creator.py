@@ -4,6 +4,7 @@ from collections import defaultdict, namedtuple, OrderedDict
 
 import jsonlines
 from allennlp.data.tokenizers import WordTokenizer
+from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
 
 BucketTuple = namedtuple('Bucket', ['lower_bound', 'upper_bound'])
 
@@ -14,6 +15,7 @@ def main(args):
     attribute_to_use = args["attribute_to_use"]
 
     word_tokenizer = WordTokenizer()
+    sentence_splitter = SpacySentenceSplitter()
 
     buckets = []
 
@@ -37,8 +39,10 @@ def main(args):
             source_len = len(word_tokenizer.tokenize(source_text))
             target_len = len(word_tokenizer.tokenize(target_text))
 
-            story_text_map[story_id]["source_text"] = source_text
-            story_text_map[story_id]["target_text"] = target_text
+            # Reconstruct the complete text of the story for completeness.
+            if json_obj["metadata"]["absolute_position"] == 1:
+                story_text_map[story_id]["text"].extend(sentence_splitter.split_sentences(source_text))
+            story_text_map[story_id]["text"].append(source_text)
 
             attribute = float(json_obj[attribute_to_use])
             # TODO: Restrict to in length.
