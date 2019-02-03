@@ -19,7 +19,7 @@ def main(args):
 
     buckets = []
 
-    bucket_strings = [i.split('-') for i in args['buckets']]
+    bucket_strings = [i.split(':') for i in args['buckets']]
 
     for lower, upper in bucket_strings:
         buckets.append(BucketTuple(lower_bound=float(lower), upper_bound=float(upper)))
@@ -77,7 +77,7 @@ parser.add_argument('--target-json', required=True, type=str, help="The target J
 parser.add_argument('--attribute-to-use', type=str, default="neighbour_correct_score_percentile",
                     help="Which attribute to use to bucket the task.")
 parser.add_argument('--buckets',
-                    default=["0.0-0.25", "0.25-0.50", "0.5-0.75", "0.75-1.01"], type=float, nargs='+',
+                    default=["0.0:0.25", "0.25:0.50", "0.5:0.75", "0.75:1.01"], type=str, nargs='+',
                     help="A list percentile pairs. Do as pairs as may not want to select every bucket. Define from largest to smallest.")
 parser.add_argument('--min-word-length', default=5, type=int, help="")
 
