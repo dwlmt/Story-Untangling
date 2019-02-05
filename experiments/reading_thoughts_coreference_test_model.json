@@ -12,8 +12,9 @@
         "type": "elmo_characters"
       }
     },
-    //"/disk/scratch/s1569885/writing_prompts_dataset_ner"
-    "dataset_path": "/disk/scratch/s1569885/writing_prompts_dataset_ner_coref" ,//"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text_ner_test",
+    //"/disk/scratch/s1569885/writing_prompts_dataset_entity"
+    "dataset_path": "/disk/scratch/s1569885/writing_prompts_dataset_entity_coref",
+    //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text_ner_test",
     "use_existing_cached_db": true,
     "target_negative": true,
     "save_sentiment": true,
@@ -24,7 +25,10 @@
     "story_embedding": true,
     "interleave_story_sentences": true,
     "named_entity_embeddings": true,
-    "cuda_device": [0, 1, 2, 3],
+    "cuda_device": [
+      0,
+      1
+    ],
     "lazy": true
   },
   //"train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -108,7 +112,8 @@
     "num_epochs": 1,
     "patience": 10,
     "cuda_device": [
-      0, 1, 2, 3
+      0,
+      1
     ],
     "validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
