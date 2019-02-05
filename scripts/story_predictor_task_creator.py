@@ -74,7 +74,7 @@ parser = argparse.ArgumentParser(
     description='Reads an Story Predictor output and adds buckets into the precentile output')
 parser.add_argument('--source-json', required=True, type=str, help="The source JSON lines file.")
 parser.add_argument('--target-json', required=True, type=str, help="The target JSON lines file.")
-parser.add_argument('--attribute-to-use', type=str, default="correct_similarity_cosine_percentile",
+parser.add_argument('--attribute-to-use', type=str, default="neighbour_correct_similarity_cosine_percentile",
                     help="Which attribute to use to bucket the task.")
 parser.add_argument('--buckets',
                     default=["0.0:0.25", "0.25:0.50", "0.5:0.75", "0.75:1.01"], type=str, nargs='+',
