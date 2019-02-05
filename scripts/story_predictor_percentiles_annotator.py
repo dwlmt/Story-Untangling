@@ -47,7 +47,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('--source-json', required=True, type=str, help="The source JSON lines file.")
 parser.add_argument('--target-json', required=True, type=str, help="The target JSON lines file.")
 parser.add_argument('--attributes_to_bucket',
-                    default=["neighbour_correct_score", "neighbour_correct_score", "neighbour_correct_log_probs",
+                    default=["neighbour_correct_dot_product", "neighbour_correct_log_probs",
                              "neighbour_correct_similarity_cosine", "neighbour_correct_distance_l1",
                              "neighbour_correct_distance_l2"], type=str, nargs='+',
                     help="A list of attributes to bucket into the percentiles.")
