@@ -25,10 +25,14 @@ def main(args):
     results_dir = args["results_dir"]
 
     if not os.path.exists(results_dir):
-        os.mkdir(results_dir)
+        os.makedirs(results_dir)
 
     source_embeddings_arr, target_embeddings_arr, story_ids, absolute_positions, story_ids_and_pos, story_id_map, positions_map = process_source_json(
         args)
+
+    # CCA
+    # cca = CCA(n_components=args["cca-components"])
+    # cca_components = cca.fit(source_embeddings_arr, target_embeddings_arr)
 
     random_indices = numpy.random.choice(source_embeddings_arr.shape[0],
                                          size=min(args["vis_points"], source_embeddings_arr.shape[0]), )
@@ -75,7 +79,7 @@ def main(args):
         Y = vis_data[:, 1]
 
         plot_scatter(X, Y, colors=cluster_colors[random_indices],
-                     plot_name=f'{results_dir}/{embeddings_name}_scatter.pdf', size=2)
+                     plot_name=f'{results_dir}/{embeddings_name}_scatter.pdf', size=0.5)
 
         ax = clusterer.condensed_tree_.plot(select_clusters=True, selection_palette=sns.color_palette())
         fig = ax.get_figure()
@@ -84,53 +88,60 @@ def main(args):
         plt.close(fig)
 
         for story_id, indices in story_id_map.items():
-            story_embeddings = embeddings[indices]
-            story_positions = absolute_positions[indices]
-            story_cluster_colors = cluster_colors[indices]
 
-            if not args["visualise_tsne"]:
-                vis_data = UMAP(n_neighbors=args["umap_n_neighbours"],  # min_dist=["umap_min_dist"],
-                                n_components=args["umap_n_components"], metric=args["similarity_metric"]).fit_transform(
-                    story_embeddings)
-            else:
-                vis_data = TSNE().fit_transform(story_embeddings)
+            try:
+                story_embeddings = embeddings[indices]
+                story_positions = absolute_positions[indices]
+                story_cluster_colors = cluster_colors[indices]
 
-            X = vis_data[:, 0]
-            Y = vis_data[:, 1]
+                if not args["visualise_tsne"]:
+                    vis_data = UMAP(n_neighbors=args["umap_n_neighbours"],  # min_dist=["umap_min_dist"],
+                                    n_components=args["umap_n_components"],
+                                    metric=args["similarity_metric"]).fit_transform(
+                        story_embeddings)
+                else:
+                    vis_data = TSNE().fit_transform(story_embeddings)
 
-            plot_scatter(X, Y, colors=story_cluster_colors,
-                         plot_name=f'{results_dir}/{embeddings_name}_{story_id}_scatter.pdf', labels=story_positions)
+                X = vis_data[:, 0]
+                Y = vis_data[:, 1]
 
-            # If there are less datapoint than the dimensions then shrink the dimensions to allow clustering.
-            if len(indices) <= args["dim_reduction_components"]:
-                dim_components = max(min(len(indices), args["dim_reduction_components"]) - 2, 2)
-                story_embeddings = UMAP(n_neighbors=args["umap_n_neighbours"],  # min_dist=args["umap_min_dist"],
-                                        n_components=dim_components, metric=args["similarity_metric"]).fit_transform(
-                    story_embeddings)
+                plot_scatter(X, Y, colors=story_cluster_colors,
+                             plot_name=f'{results_dir}/{embeddings_name}_{story_id}_scatter.pdf',
+                             labels=story_positions)
 
-            story_clusterer = HDBSCAN(algorithm='best', metric=args["clustering_metric"],
-                                      min_cluster_size=args["min_cluster_size"], approx_min_span_tree=False,
-                                      gen_min_span_tree=True)
-            story_clusterer.fit(story_embeddings)
+                # If there are less datapoint than the dimensions then shrink the dimensions to allow clustering.
+                if len(indices) <= args["dim_reduction_components"]:
+                    dim_components = max(min(len(indices), args["dim_reduction_components"]) - 2, 2)
+                    story_embeddings = UMAP(n_neighbors=args["umap_n_neighbours"],  # min_dist=args["umap_min_dist"],
+                                            n_components=dim_components,
+                                            metric=args["similarity_metric"]).fit_transform(
+                        story_embeddings)
 
-            ax = story_clusterer.minimum_spanning_tree_.plot()
+                story_clusterer = HDBSCAN(algorithm='best', metric=args["clustering_metric"],
+                                          min_cluster_size=args["min_cluster_size"], approx_min_span_tree=False,
+                                          gen_min_span_tree=True)
+                story_clusterer.fit(story_embeddings)
 
-            d = ax.collections[0]
+                ax = story_clusterer.minimum_spanning_tree_.plot()
 
-            d.set_offset_position('data')
-            points = d.get_offsets()
+                d = ax.collections[0]
 
-            ymin, ymax = ax.get_ylim()
-            color = "black"  # choose a color
-            bonus = (ymax - ymin) / 50
-            for point, name in zip(points, story_positions):
-                x, y = point
-                ax.text(x, y + bonus, name, color=color)
+                d.set_offset_position('data')
+                points = d.get_offsets()
 
-            fig = ax.get_figure()
-            fig.savefig(f'{results_dir}/{embeddings_name}_{story_id}_mst.pdf')
-            fig.clear()
-            plt.close(fig)
+                ymin, ymax = ax.get_ylim()
+                color = "black"  # choose a color
+                bonus = (ymax - ymin) / 50
+                for point, name in zip(points, story_positions):
+                    x, y = point
+                    ax.text(x, y + bonus, name, color=color)
+
+                fig = ax.get_figure()
+                fig.savefig(f'{results_dir}/{embeddings_name}_{story_id}_mst.pdf')
+                fig.clear()
+                plt.close(fig)
+            except:
+                pass
 
 
 def plot_scatter(X, Y, colors=None, plot_name=None, labels=None, size=None):
@@ -147,7 +158,7 @@ def plot_scatter(X, Y, colors=None, plot_name=None, labels=None, size=None):
         ymin, ymax = ax.get_ylim()
         bonus = (ymax - ymin) / 50
         for x, y, name, color in zip(X, Y, labels, colors):
-            ax.text(x, y + bonus, name, color=color)
+            ax.text(x, y + bonus, name, color='black')
     fig = ax.get_figure()
     fig.savefig(plot_name)
 
@@ -196,7 +207,9 @@ parser.add_argument('--source-json', required=True, type=str, help="The source d
 parser.add_argument('--results-dir', default="./embedding_visualisation/", type=str, help="The source data csv.")
 parser.add_argument('--cache', default="./disk/scratch/s1569885", type=str, help="The cache for clustering")
 parser.add_argument('--dim-reduction-components', default=50, type=int, help="The number of PCA components.")
-parser.add_argument('--vis-points', default=20000, type=int, help="Max number of points for visualisation")
+parser.add_argument('--cca-components', default=50, type=int,
+                    help="The number of CCA components between the source and target.")
+parser.add_argument('--vis-points', default=50000, type=int, help="Max number of points for visualisation")
 parser.add_argument('--umap-n-neighbours', default=25, type=int, help="The number of neighbours.")
 parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
 parser.add_argument('--umap-n-components', default=2, type=int, help="Number of components to reduce to.")
