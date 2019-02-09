@@ -62,16 +62,20 @@ def main(args):
                 writer.write({"story_id": int(story_id), "absolute_position": int(pos), "cluster": int(label),
                               "probability": float(prob), "outlier_score": outlier})
 
+        sampled_embeddings = embeddings[random_indices]
         if not args["visualise_tsne"]:
             vis_data = UMAP(n_neighbors=args["umap_n_neighbours"],  # min_dist=args["umap_min_dist"],
                             n_components=args["umap_n_components"], metric=args["similarity_metric"]).fit_transform(
-                embeddings)
+                sampled_embeddings)
 
         else:
-            vis_data = TSNE().fit_transform(embeddings)
+            vis_data = TSNE().fit_transform(sampled_embeddings)
 
         X = vis_data[:, 0]
         Y = vis_data[:, 1]
+
+        plot_scatter(X, Y, colors=cluster_colors[random_indices],
+                     plot_name=f'{results_dir}/{embeddings_name}_scatter.pdf', size=2)
 
         ax = clusterer.condensed_tree_.plot(select_clusters=True, selection_palette=sns.color_palette())
         fig = ax.get_figure()
@@ -79,13 +83,9 @@ def main(args):
         fig.clear()
         plt.close(fig)
 
-        plot_scatter(X, Y, clusters=cluster_labels[random_indices], colors=cluster_colors[random_indices],
-                     plot_name=f'{results_dir}/{embeddings_name}_scatter.pdf')
-
         for story_id, indices in story_id_map.items():
             story_embeddings = embeddings[indices]
             story_positions = absolute_positions[indices]
-            story_cluster_labels = cluster_labels[indices]
             story_cluster_colors = cluster_colors[indices]
 
             if not args["visualise_tsne"]:
@@ -98,7 +98,7 @@ def main(args):
             X = vis_data[:, 0]
             Y = vis_data[:, 1]
 
-            plot_scatter(X, Y, clusters=story_cluster_labels, colors=story_cluster_colors,
+            plot_scatter(X, Y, colors=story_cluster_colors,
                          plot_name=f'{results_dir}/{embeddings_name}_{story_id}_scatter.pdf', labels=story_positions)
 
             # If there are less datapoint than the dimensions then shrink the dimensions to allow clustering.
@@ -133,10 +133,13 @@ def main(args):
             plt.close(fig)
 
 
-def plot_scatter(X, Y, clusters=None, colors=None, plot_name=None, labels=None):
+def plot_scatter(X, Y, colors=None, plot_name=None, labels=None, size=None):
     fig, ax = plt.subplots()
     # sns.scatterplot(x=X, y=Y, legend=False, ax=ax, facecolors=colors)
-    ax.scatter(X, Y, color=colors)
+    if size:
+        ax.scatter(X, Y, color=colors, s=size)
+    else:
+        ax.scatter(X, Y, color=colors)
     ax.set(yticks=[])
     ax.set(xticks=[])
 
@@ -193,9 +196,9 @@ parser.add_argument('--source-json', required=True, type=str, help="The source d
 parser.add_argument('--results-dir', default="./embedding_visualisation/", type=str, help="The source data csv.")
 parser.add_argument('--cache', default="./disk/scratch/s1569885", type=str, help="The cache for clustering")
 parser.add_argument('--dim-reduction-components', default=50, type=int, help="The number of PCA components.")
-parser.add_argument('--vis-points', default=5000, type=int, help="Max number of points for visualisation")
+parser.add_argument('--vis-points', default=20000, type=int, help="Max number of points for visualisation")
 parser.add_argument('--umap-n-neighbours', default=25, type=int, help="The number of neighbours.")
-# parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
+parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
 parser.add_argument('--umap-n-components', default=2, type=int, help="Number of components to reduce to.")
 parser.add_argument('--similarity-metric', default="euclidean", type=str, help="The similarity measure to use.")
 parser.add_argument('--clustering-metric', default="euclidean", type=str, help="The similarity measure to use.")
