@@ -10,7 +10,7 @@ import numpy as np
 import seaborn as sns
 from hdbscan import HDBSCAN
 from jsonlines import jsonlines
-from sklearn import preprocessing
+from sklearn import preprocessing, decomposition
 from sklearn.manifold import TSNE
 from umap import UMAP
 
@@ -31,14 +31,18 @@ def main(args):
         args)
 
     # CCA
-    # cca = CCA(n_components=args["cca-components"])
+    # cca = CCA(n_components=args["cca_components"])
     # cca_components = cca.fit(source_embeddings_arr, target_embeddings_arr)
 
     random_indices = numpy.random.choice(source_embeddings_arr.shape[0],
                                          size=min(args["vis_points"], source_embeddings_arr.shape[0]), )
 
-    dim_red = UMAP(n_neighbors=args["umap_n_neighbours"],
-                   n_components=args["dim_reduction_components"], metric=args["similarity_metric"])
+    if not args["pca"]:
+        dim_red = UMAP(n_neighbors=args["umap_n_neighbours"],
+                       n_components=args["dim_reduction_components"], metric=args["similarity_metric"])
+    else:
+
+        dim_red = decomposition.PCA(n_components=args["dim_reduction_components"])
 
     source_dim_red = da.from_array(dim_red.fit_transform(source_embeddings_arr), chunks=(1000, 1000))
     target_dim_red = da.from_array(dim_red.fit_transform(target_embeddings_arr), chunks=(1000, 1000))
@@ -105,22 +109,39 @@ def main(args):
                 X = vis_data[:, 0]
                 Y = vis_data[:, 1]
 
+                # If there are less datapoint than the dimensions then shrink the dimensions to allow clustering.
+                if len(indices) <= args["dim_reduction_components"]:
+                    dim_components = max(min(len(indices), args["dim_reduction_components"]) - 2, 2)
+
+                    if not args["pca"]:
+                        story_embeddings = UMAP(n_neighbors=args["umap_n_neighbours"],
+                                                # min_dist=args["umap_min_dist"],
+                                                n_components=dim_components,
+                                                metric=args["similarity_metric"]).fit_transform(
+                            story_embeddings)
+                    else:
+
+                        story_embeddings = decomposition.PCA(
+                            n_components=args["dim_reduction_components"]).fit_transform(story_embeddings)
+
+
+                story_clusterer = HDBSCAN(algorithm='best', metric=args["clustering_metric"],
+                                          min_cluster_size=args["min_cluster_size"], approx_min_span_tree=False,
+                                          gen_min_span_tree=True, )
+                story_clusterer.fit(story_embeddings)
+
+                local_story_cluster_colors = np.array([sns.desaturate(palette[col], sat)
+                                                       if col >= 0 else (0.5, 0.5, 0.5) for col, sat in
+                                                       zip(story_clusterer.labels_, story_clusterer.probabilities_)])
+
                 plot_scatter(X, Y, colors=story_cluster_colors,
                              plot_name=f'{results_dir}/{embeddings_name}_{story_id}_scatter.pdf',
                              labels=story_positions)
 
-                # If there are less datapoint than the dimensions then shrink the dimensions to allow clustering.
-                if len(indices) <= args["dim_reduction_components"]:
-                    dim_components = max(min(len(indices), args["dim_reduction_components"]) - 2, 2)
-                    story_embeddings = UMAP(n_neighbors=args["umap_n_neighbours"],  # min_dist=args["umap_min_dist"],
-                                            n_components=dim_components,
-                                            metric=args["similarity_metric"]).fit_transform(
-                        story_embeddings)
+                plot_scatter(X, Y, colors=local_story_cluster_colors,
+                             plot_name=f'{results_dir}/{embeddings_name}_{story_id}_scatter_local_cluster.pdf',
+                             labels=story_positions)
 
-                story_clusterer = HDBSCAN(algorithm='best', metric=args["clustering_metric"],
-                                          min_cluster_size=args["min_cluster_size"], approx_min_span_tree=False,
-                                          gen_min_span_tree=True)
-                story_clusterer.fit(story_embeddings)
 
                 ax = story_clusterer.minimum_spanning_tree_.plot()
 
@@ -210,7 +231,7 @@ parser.add_argument('--dim-reduction-components', default=50, type=int, help="Th
 parser.add_argument('--cca-components', default=50, type=int,
                     help="The number of CCA components between the source and target.")
 parser.add_argument('--vis-points', default=50000, type=int, help="Max number of points for visualisation")
-parser.add_argument('--umap-n-neighbours', default=25, type=int, help="The number of neighbours.")
+parser.add_argument('--umap-n-neighbours', default=15, type=int, help="The number of neighbours.")
 parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
 parser.add_argument('--umap-n-components', default=2, type=int, help="Number of components to reduce to.")
 parser.add_argument('--similarity-metric', default="euclidean", type=str, help="The similarity measure to use.")
@@ -218,6 +239,7 @@ parser.add_argument('--clustering-metric', default="euclidean", type=str, help="
 parser.add_argument('--min-cluster-size', default=5, type=int, help="Min size fo each cluster.")
 parser.add_argument('--normalize', default=False, action='store_true', help="Normalize to mean of zero and std of 1")
 parser.add_argument('--visualise-tsne', default=False, action='store_true', help="If not set then use UMAP.")
+parser.add_argument('--pca', default=False, action='store_true', help="If not set then use UMAP.")
 
 args = parser.parse_args()
 
