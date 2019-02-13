@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional
 
 import torch
 import torch.nn as nn
@@ -9,7 +9,6 @@ from allennlp.modules import TextFieldEmbedder, Seq2VecEncoder, FeedForward, Sim
 from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy, Average
-from pandas import *
 
 from story_untangling.modules.dynamic_entity import DynamicEntity
 
@@ -134,6 +133,7 @@ class ReadingThoughts(Model):
             "neighbour_correct_similarity_cosine_avg": Average(),
             "neighbour_correct_distance_l1_avg": Average(),
             "neighbour_correct_distance_l2_avg": Average(),
+            "neighbour_entropy_avg": Average(),
             "negative_accuracy": CategoricalAccuracy(),
             "negative_accuracy3": CategoricalAccuracy(top_k=3),
             "negative_accuracy5": CategoricalAccuracy(top_k=5),
@@ -143,6 +143,7 @@ class ReadingThoughts(Model):
             "negative_correct_similarity_cosine_avg": Average(),
             "negative_correct_distance_l1_avg": Average(),
             "negative_correct_distance_l2_avg": Average(),
+            "negative_entropy_avg": Average(),
         }
 
         initializer(self)
@@ -378,6 +379,12 @@ class ReadingThoughts(Model):
             self.metrics[f"{metrics_prefix}_accuracy"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy3"](scores_softmax, target_classes)
             self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
+
+            probs = torch.exp(scores_softmax)
+            entropy = -torch.sum(probs * torch.log2(probs), dim=1)
+            self.metrics[f"{metrics_prefix}_entropy_avg"](entropy.mean().item())
+            output_dict[f"{metrics_prefix}_entropy"] = entropy
+
             self.metrics[f"{metrics_prefix}_correct_dot_product_avg"](correct_scores.mean().item())
             self.metrics[f"{metrics_prefix}_correct_prob_avg"](correct_probs.mean().item())
             self.metrics[f"{metrics_prefix}_correct_log_prob_avg"](correct_log_probs.mean().item())
