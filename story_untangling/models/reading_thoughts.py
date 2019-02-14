@@ -381,7 +381,10 @@ class ReadingThoughts(Model):
             self.metrics[f"{metrics_prefix}_accuracy5"](scores_softmax, target_classes)
 
             probs = torch.exp(scores_softmax)
-            entropy = -torch.sum(probs * torch.log2(probs), dim=1)
+            probs += 1e-12
+            entropy_mat = torch.mul(probs, torch.log2(probs))
+            entropy = -torch.sum(entropy_mat, 1)
+
             self.metrics[f"{metrics_prefix}_entropy_avg"](entropy.mean().item())
             output_dict[f"{metrics_prefix}_entropy"] = entropy
 
