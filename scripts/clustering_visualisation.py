@@ -179,7 +179,7 @@ def plot_scatter(X, Y, colors=None, plot_name=None, labels=None, size=None):
         ymin, ymax = ax.get_ylim()
         bonus = (ymax - ymin) / 50
         for x, y, name, color in zip(X, Y, labels, colors):
-            ax.text(x, y + bonus, name, color='black')
+            ax.text(x, y + bonus, name, color='gray')
     fig = ax.get_figure()
     fig.savefig(plot_name)
 
