@@ -25,7 +25,7 @@ def main(args):
 
     for story_id, story_data in source_stories.items():
         X_abs = [d[0] for d in story_data]
-        X_rel = [d[1] for d in story_data]
+        X_rel = [round(d[1], 0) for d in story_data]
         Y = [d[2] for d in story_data]
 
         data = pd.DataFrame.from_dict({"position": X_abs, "attribute": Y})
