@@ -19,7 +19,7 @@ class ReadingThoughtsPredictor(Predictor):
     """
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
-        self._model._full_output_embeddings = True
+        self._model._full_output_embeddings = False
 
     def _json_to_instance(self, json_dict: JsonDict) -> Instance:
         """

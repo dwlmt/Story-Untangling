@@ -28,7 +28,7 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
         super().__init__(model, dataset_reader)
         self._spacy = get_spacy_model(language, pos_tags=True, parse=True, ner=False)
         self._model._full_output_score = True
-        self._beam_size = 1000
+        self._beam_size = 1
         self._best_n = 5
 
         self._spearmanr_wel = Welford()

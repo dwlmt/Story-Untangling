@@ -71,7 +71,7 @@ class WritingPromptsDatasetReader(DatasetReader):
         Max number of sentences a story must have to be included.
     positional_features : bool, (optional, default=True)
         Should encode positional features in the source.
-    truncate_sequence_length : int, (optional, default=250)
+    truncate_sequence_length : int, (optional, default=200)
         Target sequences longer than this value will be truncated to this value (cutting starting from the end).
         0 indicates length is unlimited. Value must be greater than or equal to 0.
     story_embedding : bool, (optional, default=False)
@@ -107,7 +107,7 @@ class WritingPromptsDatasetReader(DatasetReader):
                  min_story_sentences: int = 0,
                  max_story_sentences: int = 10 * 6,
                  positional_features: bool = True,
-                 truncate_sequence_length: int = 250,
+                 truncate_sequence_length: int = 200,
                  story_embedding: bool = False,
                  named_entity_embeddings: bool = False,
                  story_chunking: int = 100,

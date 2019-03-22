@@ -53,13 +53,13 @@
     "source_encoder": {
       "type": "cnn",
       "embedding_dim": 1024,
-      "num_filters": 12,
+      "num_filters": 6,
       "output_dim": 1024
     },
     "target_encoder": {
       "type": "cnn",
       "embedding_dim": 1024,
-      "num_filters": 12,
+      "num_filters": 6,
       "output_dim": 1024
     }
   },

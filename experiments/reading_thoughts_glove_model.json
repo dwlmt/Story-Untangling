@@ -50,8 +50,8 @@
     "batch_size": 200
   },
   "trainer": {
-    "num_epochs": 20,
-    "patience": 10,
+    "num_epochs": 10,
+    "patience": 3,
     "cuda_device": [
       0,
       1,
