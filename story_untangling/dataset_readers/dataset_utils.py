@@ -1,7 +1,7 @@
-from itertools import islice, tee
+from typing import Tuple, Iterable
 
-from typing import List, Tuple, Iterable
 from more_itertools import windowed
+
 
 def dual_window(seq: Iterable[str], context_size: int = 2, predictive_size: int = 1, num_of_sentences: int = 1, step: int = 1) -> \
         Tuple[Iterable[str], Iterable[str], int, float]:
@@ -20,5 +20,3 @@ def dual_window(seq: Iterable[str], context_size: int = 2, predictive_size: int 
                 target_win = [target_win]
 
             yield source_win, target_win, abs_pos, rel_pos
-
-    raise StopIteration
