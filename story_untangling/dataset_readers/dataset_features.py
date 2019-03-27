@@ -57,8 +57,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
         loop = asyncio.get_event_loop()
 
-        f"{dataset_db}?mode=ro&cache=shared"
-        with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600, "connect_args": {'timeout': 300}}) as db:
+        with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
             
             # Create the main tables and columns that need indexing.
