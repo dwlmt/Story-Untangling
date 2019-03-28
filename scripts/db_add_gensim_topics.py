@@ -82,7 +82,6 @@ parser = argparse.ArgumentParser(
     description='Add per sentence sentiment information to the database.')
 parser.add_argument('--database', required=True, type=str, help="Output the saved weights of the Topic Model")
 parser.add_argument('--topic-model', required=True, type=str, help="Path to the HDP Gensim Topic Model")
-parser.add_argument('--max-workers', type=int, default=4, help="Max number of concurrent workers. Default: 12")
 parser.add_argument('--batch-size', type=int, default=100, help="Output the saved weights of the Topic Model")
 parser.add_argument('--num-topics', type=int, default=50, help="Number of topics to use from HDP. Default: 50")
 parser.add_argument('--num-terms', type=int, default=20, help="Top N number of terms to extract. Default: 20")
