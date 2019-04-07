@@ -125,14 +125,16 @@ def process_annotations(args):
         t = AnnotationTask(data=triples, distance=interval_distance)
         stats_dict[col]["krippendorff_alpha"] = t.alpha()
 
+    pandas.DataFrame.from_dict(stats_dict, orient="index").to_csv(f"{args['target']}_stats.csv")
+
+    genre_dict = defaultdict(dict)
     genre_desc_count = source_csv[genre_column].value_counts(normalize=False)
     genre_desc = source_csv[genre_column].value_counts(normalize=True)
     for (n, v), (nc, vc) in zip(genre_desc.iteritems(), genre_desc_count.iteritems()):
-        stats_dict[genre_column][n] = {"count": vc, "proportion": v}
+        genre_dict[n]["count"] = vc
+        genre_dict[n]["proportion"] = v
 
-    flattened_stats = flatten(stats_dict, sep=".")
-
-    pandas.DataFrame.from_dict(flattened_stats, orient="index").to_csv(f"{args['target']}_stats.csv")
+    pandas.DataFrame.from_dict(genre_dict, orient="index").to_csv(f"{args['target']}_genres.csv")
 
     corr_cov_df = source_csv[stats_columns]
 
