@@ -11,6 +11,7 @@ from allennlp.modules import TextFieldEmbedder, Seq2SeqEncoder, Seq2VecEncoder
 from typing import Dict, Any, List, Optional, Tuple
 
 from allennlp.nn.util import get_text_field_mask
+from allennlp.training.metrics import CategoricalAccuracy, Average
 from torch import nn
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -43,6 +44,8 @@ class UncertainReader(Model):
                 If the regularizer is set then the length to apply.
            dropout : ``float``, optional (default = ``None``)
                 Dropout percentage to use.
+           accuracy_top_k: ``Tuple[int]``, optional (default = ``[1, 3, 5, 10]``)
+                For discriminatory loss calculate the the top k accuracy metrics.
            initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
                Used to initialize the model parameters.
            regularizer : ``RegularizerApplicator``, optional (default=``None``)
@@ -59,6 +62,7 @@ class UncertainReader(Model):
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.25),
                  discriminator_length_regularizer: bool = True,
                  discriminator_regularizer_weight: float = 1.0,
+                 accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
                  initializer: InitializerApplicator = InitializerApplicator(),
                  regularizer: Optional[RegularizerApplicator] = None
                  ) -> None:
@@ -75,11 +79,21 @@ class UncertainReader(Model):
         self._discriminator_length_regularizer_weight = discriminator_regularizer_weight
 
         self._dropout = dropout
+
+        self._accuracy_top_k = accuracy_top_k
+
         self._initializer = initializer
         self._regularizer = regularizer
 
         self._log_softmax = nn.LogSoftmax(dim=1)
         self._nll_loss = nn.NLLLoss()
+
+        self._metrics = {}
+
+        for top_n in self._accuracy_top_k:
+            for i in range(1, len(distance_weights) + 1):
+                self._metrics[f"accuracy_{i}_{top_n}"] = CategoricalAccuracy(top_k=top_n)
+
 
         initializer(self)
 
@@ -202,12 +216,12 @@ class UncertainReader(Model):
             copied_scores = dot_product_scores.clone().cpu()
 
 
-        for masks, distance_weights in zip(target_masks, self._distance_weights):
+        for i, (target_classes, distance_weights) in enumerate(zip(target_masks, self._distance_weights), start=1):
             story_identity_mask = torch.eye(batch_encoded_stories.shape[0], batch_encoded_stories.shape[1]).byte()
-            masks = masks.view(masks.shape[0] * masks.shape[1]).to(batch_encoded_stories.device)
+            target_classes = target_classes.view(target_classes.shape[0] * target_classes.shape[1]).to(batch_encoded_stories.device)
 
             scores_softmax = self._log_softmax(dot_product_scores)
-            nll_loss = self._nll_loss(scores_softmax, masks)
+            nll_loss = self._nll_loss(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
 
@@ -215,15 +229,19 @@ class UncertainReader(Model):
                 source = batch_encoded_stories[story_identity_mask]
                 source_norm = source.norm(dim=-1)
 
-                target = batch_encoded_stories[masks]
+                target = batch_encoded_stories[target_classes]
                 target_norm = target.norm(dim=-1)
 
                 loss += (((source_norm - target_norm) ** 2 * self._discriminator_length_regularizer_weight).sum() / batch_size) * distance_weights
 
             # The next sentence is always the most likely. So to go 2 or 3 steps ahead mask out the dot product score
             # so the n+2 but becomes the best instead of n+1.
-            inverted_masks = (1 - masks )
+            inverted_masks = (1 - target_classes )
             dot_product_scores * inverted_masks.float()
+
+            with torch.no_grad():
+                for top_k in self._accuracy_top_k:
+                    self._metrics[f"accuracy_{i}_{top_k}"](scores_softmax, target_classes)
 
         return loss
 
