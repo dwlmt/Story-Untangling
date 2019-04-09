@@ -257,3 +257,6 @@ class UncertainReader(Model):
             target_mask += numpy.eye(batch_size, num_sentences, k=+i, dtype=numpy.int64)
             target_masks.append(torch.from_numpy(target_mask))
         return target_masks
+
+    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
+        return {metric_name: metric.get_metric(reset) for metric_name, metric in self._metrics.items()}
