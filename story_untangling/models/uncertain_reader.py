@@ -137,7 +137,7 @@ class UncertainReader(Model):
         output_dict = {}
         output_dict["metadata"] = metadata
 
-        embedded_text_tensor = self._text_field_embedder(text)
+        embedded_text_tensor = self._text_field_embedder(text).contiguous().cuda()
         batch_size, num_sentences, sentence_length, embedded_feature_size = embedded_text_tensor.shape
 
         # Because the batch has sentences need to reshape so can use the masking util function.
@@ -145,7 +145,7 @@ class UncertainReader(Model):
         for k, v in text.items():
             text_mod[k] = v.view(batch_size * num_sentences, sentence_length, -1)
         masks_tensor = get_text_field_mask(text_mod)
-        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length, -1)
+        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length, -1).cuda()
 
         # TODO: Parallelize using multiple GPUS if available rather than using a loop.
 
@@ -206,7 +206,7 @@ class UncertainReader(Model):
 
         output_dict = {**output_dict, **disc_output_dict}
 
-        output_dict["loss"] = loss.cpu()
+        output_dict["loss"] = loss
 
         return output_dict
 
