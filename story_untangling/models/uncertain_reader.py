@@ -58,16 +58,16 @@ class UncertainReader(Model):
                  target_seq2vec_encoder: Seq2VecEncoder = None,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
                  dropout: float = None,
-                 distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.25),
-                 discriminator_length_regularizer: bool = True,
-                 discriminator_regularizer_weight: float = 1.0,
+                 distance_weights: Tuple[float] = [1.0],  # (1.0, 0.5, 0.25),
+                 discriminator_length_regularizer: bool = False,
+                 discriminator_regularizer_weight: float = 0.1,
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
                  full_output_scores: bool = False,
                  full_output_embeddings: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  regularizer: Optional[RegularizerApplicator] = None
                  ) -> None:
-        super().__init__(vocab)
+        super().__init__(vocab, regularizer)
         self._vocab = vocab
         self._text_field_embedder = text_field_embedder
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
@@ -132,6 +132,7 @@ class UncertainReader(Model):
            loss : ``torch.FloatTensor``, optional
                A scalar loss to be optimised.
            """
+        torch.set_printoptions(profile="full")
 
         output_dict = {}
         output_dict["metadata"] = metadata
@@ -205,7 +206,7 @@ class UncertainReader(Model):
 
         output_dict = {**output_dict, **disc_output_dict}
 
-        output_dict["loss"] = loss
+        output_dict["loss"] = loss.cpu()
 
         return output_dict
 
@@ -215,31 +216,33 @@ class UncertainReader(Model):
     # batch_encoded_stories = batch_encoded_stories * expanded_masks
     # target_encoded_sentences = target_encoded_sentences * expanded_masks
 
-    def calculate_discriminatory_loss(self, batch_encoded_stories, target_encoded_sentences, story_sentence_masks):
+    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_sentences, story_sentence_masks):
         output_dict = {}
-        loss = torch.tensor(0.0).to(batch_encoded_stories.device)
+        loss = torch.tensor(0.0).to(encoded_stories.device)
 
-        batch_size, sentence_num, feature_size = batch_encoded_stories.shape
+        batch_size, sentence_num, feature_size = encoded_stories.shape
 
-        target_encoded_sentences = target_encoded_sentences.to(batch_encoded_stories.device)
+        target_encoded_sentences = target_encoded_sentences.to(encoded_stories.device)
 
-        batch_encoded_stories_flat = batch_encoded_stories.view(batch_size * sentence_num, feature_size)
+        encoded_stories_flat = encoded_stories.view(batch_size * sentence_num, feature_size)
         target_encoded_sentences_flat = target_encoded_sentences.view(batch_size * sentence_num, feature_size)
 
-        dot_product_scores = torch.matmul(batch_encoded_stories_flat,
+        dot_product_scores = torch.matmul(encoded_stories_flat,
                                           torch.t(target_encoded_sentences_flat))
 
         if self._discriminator_length_regularizer:
-            story_norm = batch_encoded_stories_flat.norm(dim=1)
+            story_norm = encoded_stories_flat.norm(dim=1)
             target_norm_aligned = target_encoded_sentences_flat.norm(dim=1)
 
         for i, (distance_weights) in enumerate(self._distance_weights, start=1):
 
+
             # Use a copy to mask out elements that shouldn't be used.
             # This section excludes other correct answers for other distance ranges from the dot product.
             dot_product_scores_copy = dot_product_scores.clone()
+
             offsets = list(range(1, len(self._distance_weights) + 1))
-            offsets.remove(i)
+            offsets = [o for o in offsets if o < i]
             for o in offsets:
                 exclude_mask = (1 - torch.diag(torch.ones(dot_product_scores.shape[0]), o).float().to(
                     dot_product_scores.device))
@@ -247,57 +250,53 @@ class UncertainReader(Model):
 
                 dot_product_scores_copy = dot_product_scores_copy * exclude_mask
 
-            story_sentence_masks = (story_sentence_masks > 0).float().to(dot_product_scores.device)
+            story_sentence_mask_weights = (story_sentence_masks > 0).float().to(dot_product_scores.device)
 
-            target_mask = torch.diag(torch.ones(batch_size * sentence_num - i), i).byte().to(dot_product_scores.device)
+            target_mask = torch.diag(torch.ones((batch_size * sentence_num) - i), i).byte().to(dot_product_scores.device)
             target_classes = torch.argmax(target_mask, dim=1).long().to(dot_product_scores.device)
+
+            # Remove rows which spill over batches.
+            batch_group = torch.ones(sentence_num)
+            batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - 1, sentence_num))), 0)
+            batch_group = batch_group.unsqueeze(dim=0)
+            batch_group = batch_group.expand(batch_size, sentence_num)
+            batch_group = batch_group.contiguous().view(batch_size * sentence_num).byte().to(dot_product_scores.device)
+
+            dot_product_scores_copy = dot_product_scores_copy[batch_group,]
+            target_mask = target_mask[batch_group,]
+            target_classes = target_classes[batch_group]
 
             scores_softmax = self._log_softmax(dot_product_scores_copy)
 
+
             # Mask out sentences that are not present in the target classes.
-            nll_loss = nn.NLLLoss(weight=story_sentence_masks)(scores_softmax, target_classes)
+            # print(i, scores_softmax, target_classes, story_sentence_mask_weights)
+            nll_loss = nn.NLLLoss(weight=story_sentence_mask_weights)(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
 
             if self._discriminator_length_regularizer:
-                target_norm_aligned = target_norm_aligned[0 + i:]
+                target_norm_aligned = target_norm_aligned[0 + i:,]
                 story_norm_aligned = story_norm[0:min(story_norm.shape[0] - i, target_norm_aligned.shape[0])]
 
                 loss += (((
                                       story_norm_aligned - target_norm_aligned) ** 2 * self._discriminator_length_regularizer_weight).sum()
                          / batch_size) * distance_weights
 
-
-            '''
-            
-            source = batch_encoded_stories#torch.masked_select(batch_encoded_stories, story_identity_mask)
-
-            print(target_encoded_sentences.shape)
-            target = torch.masked_select(target_encoded_sentences, target_classes_mask).view(-1, target_encoded_sentences.shape[-1])
-            print(source.shape, target.shape)
-
-            self.similarity_metrics(source, target, i, output_dict)
-
-            if self._discriminator_length_regularizer:
-                source_norm = source.norm(dim=-1)
-                target_norm = target.norm(dim=-1)
-
-                loss += (((source_norm - target_norm) ** 2 * self._discriminator_length_regularizer_weight).sum() / batch_size) * distance_weights
-
-            # The next sentence is always the most likely. So to go 2 or 3 steps ahead mask out the dot product score
-            # so the n+2 but becomes the best instead of n+1.
-            inverted_masks = (1 - target_classes )
-            dot_product_scores * inverted_masks.float()
+            target_encoded_sentences_correct = target_encoded_sentences_flat[
+                                               0 + i:target_encoded_sentences_flat.shape[0], ]
+            batch_encoded_stories_correct = encoded_stories_flat[0:min(encoded_stories_flat.shape[0] - i,
+                                                                       target_encoded_sentences_correct.shape[0]),]
 
             with torch.no_grad():
                 for top_k in self._accuracy_top_k:
                     self._metrics[f"accuracy_{i}_{top_k}"](scores_softmax, target_classes)
 
-                self.similarity_metrics(source, target, i, output_dict)
+                self.similarity_metrics(batch_encoded_stories_correct, target_encoded_sentences_correct, i, output_dict)
 
                 # Some extra work just for metrics.
-                correct_scores =  torch.masked_select(dot_product_scores,target_classes)
-                correct_log_probs =  torch.masked_select(scores_softmax,target_classes)
+                correct_scores = torch.masked_select(dot_product_scores_copy, target_mask)
+                correct_log_probs = torch.masked_select(scores_softmax, target_mask)
                 correct_probs = torch.exp(correct_log_probs)
 
                 output_dict[f"disc_coorect_dot_product_{i}"] = correct_scores
@@ -311,7 +310,6 @@ class UncertainReader(Model):
                 if self._full_output_scores:
                     output_dict[f"disc_dot_products_{i}"] = dot_product_scores
                     output_dict[f"disc_log_probs_{i}"] = scores_softmax
-            '''
 
         return loss, output_dict
 
