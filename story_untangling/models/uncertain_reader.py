@@ -16,7 +16,6 @@ from torch import nn
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
-
 @Model.register("uncertain_reader")
 class UncertainReader(Model):
     """
@@ -63,6 +62,8 @@ class UncertainReader(Model):
                  discriminator_length_regularizer: bool = True,
                  discriminator_regularizer_weight: float = 1.0,
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
+                 full_output_scores: bool = False,
+                 full_output_embeddings: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  regularizer: Optional[RegularizerApplicator] = None
                  ) -> None:
@@ -86,9 +87,24 @@ class UncertainReader(Model):
         self._regularizer = regularizer
 
         self._log_softmax = nn.LogSoftmax(dim=1)
-        self._nll_loss = nn.NLLLoss()
+
+        self._cosine_similarity = nn.CosineSimilarity()
+        self._l2_distance = nn.PairwiseDistance(p=2)
+        self._l1_distance = nn.PairwiseDistance(p=1)
+
+        self._full_output_scores = full_output_scores
+        self.full_output_embedding = full_output_embeddings
 
         self._metrics = {}
+
+        for i in range(1, len(distance_weights) + 1):
+            # TODO: Entropy measures. This will differ from the pilot and needs to tie into the Ely definitions.
+            self._metrics[f"disc_correct_dot_product_avg_{i}"] = Average()
+            self._metrics[f"disc_correct_log_prob_avg_{i}"] = Average()
+            self._metrics[f"disc_correct_prob_avg_{i}"] = Average()
+            self._metrics[f"disc_correct_similarity_cosine_avg_{i}"] = Average()
+            self._metrics[f"disc_correct_distance_l1_avg_{i}"] = Average()
+            self._metrics[f"disc_correct_distance_l2_avg_{i}"] = Average()
 
         for top_n in self._accuracy_top_k:
             for i in range(1, len(distance_weights) + 1):
@@ -177,59 +193,80 @@ class UncertainReader(Model):
             target_sentences = self._target_seq2vec_encoder(batch_encoded_sentences, masks_tensor)
         else:
             target_sentences = batch_encoded_sentences.select(2, -1)
+        target_sentences = target_sentences.view(batch_size, num_sentences, -1)
 
         # Create a Mask to apply to the coded sentences.
 
-        target_masks = self.disc_masks(batch_size, num_sentences)
-
         loss = torch.tensor(0.0).to(batch_encoded_stories.device)
 
-        loss += self.calculate_discriminatory_loss(batch_encoded_stories, target_sentences, story_sentence_masks,
-                                                   target_masks)
+        disc_loss, disc_output_dict = self.calculate_discriminatory_loss(batch_encoded_stories, target_sentences,
+                                                                         story_sentence_masks)
+        loss += disc_loss
 
+        output_dict = {**output_dict, **disc_output_dict}
+        
         output_dict["loss"] = loss
 
         return output_dict
 
-    def calculate_discriminatory_loss(self, batch_encoded_stories, target_encoded_sentences, story_sentence_masks,
-                                      target_masks):
+    # story_sentence_masks = story_sentence_masks.view(story_sentence_masks.shape[0] * story_sentence_masks.shape[1])
+    # story_sentence_masks = torch.unsqueeze(story_sentence_masks, dim=1)
+    # expanded_masks =  story_sentence_masks.expand_as(batch_encoded_stories).float()
+    # batch_encoded_stories = batch_encoded_stories * expanded_masks
+    # target_encoded_sentences = target_encoded_sentences * expanded_masks
+
+    def calculate_discriminatory_loss(self, batch_encoded_stories, target_encoded_sentences, story_sentence_masks):
+        output_dict = {}
         loss = torch.tensor(0.0).to(batch_encoded_stories.device)
+
+        batch_size, sentence_num, feature_size = batch_encoded_stories.shape
 
         target_encoded_sentences = target_encoded_sentences.to(batch_encoded_stories.device)
 
-        batch_size, sentence_num, feature_size = batch_encoded_stories.shape
-        story_sentence_masks = story_sentence_masks.view(story_sentence_masks.shape[0] * story_sentence_masks.shape[1])
+        batch_encoded_stories_flat = batch_encoded_stories.view(batch_size * sentence_num, feature_size)
+        target_encoded_sentences_flat = target_encoded_sentences.view(batch_size * sentence_num, feature_size)
 
-        batch_encoded_stories = batch_encoded_stories.view(batch_size * sentence_num, feature_size)
-        story_sentence_masks = torch.unsqueeze(story_sentence_masks, dim=1)
-        expanded_masks =  story_sentence_masks.expand_as(batch_encoded_stories).float()
+        dot_product_scores = torch.matmul(batch_encoded_stories_flat,
+                                          torch.t(target_encoded_sentences_flat))
 
-        batch_encoded_stories = batch_encoded_stories * expanded_masks
+        for i, (distance_weights) in enumerate(self._distance_weights, start=1):
 
-        target_encoded_sentences = target_encoded_sentences.view(batch_size * sentence_num, feature_size)
-        target_encoded_sentences = target_encoded_sentences * expanded_masks
+            # Use a copy to mask out elements that shouldn't be used.
+            # This section excludes other correct answers for other distance ranges from the dot product.
+            dot_product_scores_copy = dot_product_scores.clone()
+            offsets = list(range(1, len(self._distance_weights) + 1))
+            offsets.remove(i)
+            for o in offsets:
+                exclude_mask = (1 - torch.diag(torch.ones(dot_product_scores.shape[0]), o).float().to(
+                    dot_product_scores.device))
+                exclude_mask = exclude_mask[0:dot_product_scores.shape[0], 0:dot_product_scores.shape[1]]
 
-        dot_product_scores = torch.matmul(batch_encoded_stories,
-                                          torch.t(target_encoded_sentences))
+                dot_product_scores_copy = dot_product_scores_copy * exclude_mask
 
-        with torch.no_grad(): # Needed for stats as the other scores are changed.
-            copied_scores = dot_product_scores.clone().cpu()
+            story_sentence_masks = (story_sentence_masks > 0).float().to(dot_product_scores.device)
 
+            target_mask = torch.diag(torch.ones(batch_size * sentence_num - i), i).byte().to(dot_product_scores.device)
+            target_classes = torch.argmax(target_mask, dim=1).long().to(dot_product_scores.device)
 
-        for i, (target_classes, distance_weights) in enumerate(zip(target_masks, self._distance_weights), start=1):
-            story_identity_mask = torch.eye(batch_encoded_stories.shape[0], batch_encoded_stories.shape[1]).byte()
-            target_classes = target_classes.view(target_classes.shape[0] * target_classes.shape[1]).to(batch_encoded_stories.device)
+            scores_softmax = self._log_softmax(dot_product_scores_copy)
 
-            scores_softmax = self._log_softmax(dot_product_scores)
-            nll_loss = self._nll_loss(scores_softmax, target_classes)
+            # Mask out sentences that are not present in the target classes.
+            nll_loss = nn.NLLLoss(weight=story_sentence_masks)(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
 
-            if self._discriminator_length_regularizer:
-                source = batch_encoded_stories[story_identity_mask]
-                source_norm = source.norm(dim=-1)
+            '''
+            
+            source = batch_encoded_stories#torch.masked_select(batch_encoded_stories, story_identity_mask)
 
-                target = batch_encoded_stories[target_classes]
+            print(target_encoded_sentences.shape)
+            target = torch.masked_select(target_encoded_sentences, target_classes_mask).view(-1, target_encoded_sentences.shape[-1])
+            print(source.shape, target.shape)
+
+            self.similarity_metrics(source, target, i, output_dict)
+
+            if self._discriminator_length_regularizer:
+                source_norm = source.norm(dim=-1)
                 target_norm = target.norm(dim=-1)
 
                 loss += (((source_norm - target_norm) ** 2 * self._discriminator_length_regularizer_weight).sum() / batch_size) * distance_weights
@@ -243,20 +280,43 @@ class UncertainReader(Model):
                 for top_k in self._accuracy_top_k:
                     self._metrics[f"accuracy_{i}_{top_k}"](scores_softmax, target_classes)
 
-        return loss
+                self.similarity_metrics(source, target, i, output_dict)
 
-    def disc_masks(self, batch_size, num_sentences):
-        ''' Calculates the masks and loss weights for the discriminatory los..
-        '''
-        target_masks = []
+                # Some extra work just for metrics.
+                correct_scores =  torch.masked_select(dot_product_scores,target_classes)
+                correct_log_probs =  torch.masked_select(scores_softmax,target_classes)
+                correct_probs = torch.exp(correct_log_probs)
 
-        for i, weight in zip(range(1, len(self._distance_weights) + 1), self._distance_weights):
-            # the i-th previous and next sentence
-            target_mask = numpy.zeros((batch_size, num_sentences), dtype=numpy.int64)
+                output_dict[f"disc_coorect_dot_product_{i}"] = correct_scores
+                output_dict[f"disc_correct_log_probs_{i}"] = correct_log_probs
+                output_dict[f"disc_correct_probs_{i}"] = correct_probs
 
-            target_mask += numpy.eye(batch_size, num_sentences, k=+i, dtype=numpy.int64)
-            target_masks.append(torch.from_numpy(target_mask))
-        return target_masks
+                self._metrics[f"disc_correct_dot_product_avg_{i}"](correct_scores.mean().item())
+                self._metrics[f"disc_correct_prob_avg_{i}"](correct_probs.mean().item())
+                self._metrics[f"disc_correct_log_prob_avg_{i}"](correct_log_probs.mean().item())
+
+                if self._full_output_scores:
+                    output_dict[f"disc_dot_products_{i}"] = dot_product_scores
+                    output_dict[f"disc_log_probs_{i}"] = scores_softmax
+            '''
+
+        return loss, output_dict
+
+    def similarity_metrics(self, encoded_source, encoded_target, i, output_dict):
+        # If using cosine similarity then these will be calculated on the unnormalised vectors. Since the measure don't make sense on the
+        # normalised ones.
+        with torch.no_grad():
+            sim = self._cosine_similarity(encoded_source, encoded_target)
+            output_dict[f"disc_correct_similarity_cosine_{i}"] = sim
+            self._metrics[f"disc_correct_similarity_cosine_avg_{i}"](sim.mean().item())
+
+            dist_l1 = self._l1_distance(encoded_source, encoded_target)
+            output_dict[f"disc_correct_distance_l1_{i}"] = dist_l1
+            self._metrics[f"disc_correct_distance_l1_avg_{i}"](dist_l1.mean().item())
+
+            dist_l2 = self._l2_distance(encoded_source, encoded_target)
+            output_dict[f"disc_correct_distance_l2_{i}"] = dist_l2
+            self._metrics[f"disc_correct_distance_l2_avg_{i}"](dist_l2.mean().item())
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {metric_name: metric.get_metric(reset) for metric_name, metric in self._metrics.items()}
