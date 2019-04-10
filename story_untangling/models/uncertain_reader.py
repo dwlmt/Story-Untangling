@@ -204,7 +204,7 @@ class UncertainReader(Model):
         loss += disc_loss
 
         output_dict = {**output_dict, **disc_output_dict}
-        
+
         output_dict["loss"] = loss
 
         return output_dict
@@ -228,6 +228,10 @@ class UncertainReader(Model):
 
         dot_product_scores = torch.matmul(batch_encoded_stories_flat,
                                           torch.t(target_encoded_sentences_flat))
+
+        if self._discriminator_length_regularizer:
+            story_norm = batch_encoded_stories_flat.norm(dim=1)
+            target_norm_aligned = target_encoded_sentences_flat.norm(dim=1)
 
         for i, (distance_weights) in enumerate(self._distance_weights, start=1):
 
@@ -254,6 +258,15 @@ class UncertainReader(Model):
             nll_loss = nn.NLLLoss(weight=story_sentence_masks)(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
+
+            if self._discriminator_length_regularizer:
+                target_norm_aligned = target_norm_aligned[0 + i:]
+                story_norm_aligned = story_norm[0:min(story_norm.shape[0] - i, target_norm_aligned.shape[0])]
+
+                loss += (((
+                                      story_norm_aligned - target_norm_aligned) ** 2 * self._discriminator_length_regularizer_weight).sum()
+                         / batch_size) * distance_weights
+
 
             '''
             
