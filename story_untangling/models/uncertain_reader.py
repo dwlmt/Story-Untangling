@@ -59,7 +59,7 @@ class UncertainReader(Model):
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
                  dropout: float = None,
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25),
-                 discriminator_length_regularizer: bool = False,
+                 discriminator_length_regularizer: bool = True,
                  discriminator_regularizer_weight: float = 0.25,
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
                  full_output_scores: bool = False,
