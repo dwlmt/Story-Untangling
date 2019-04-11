@@ -7,7 +7,7 @@ from allennlp.common.checks import ConfigurationError
 from allennlp.data import Vocabulary
 from allennlp.models import Model, SimpleSeq2Seq
 from allennlp.nn import InitializerApplicator, RegularizerApplicator
-from allennlp.modules import TextFieldEmbedder, Seq2SeqEncoder, Seq2VecEncoder
+from allennlp.modules import TextFieldEmbedder, Seq2SeqEncoder, Seq2VecEncoder, FeedForward
 from typing import Dict, Any, List, Optional, Tuple
 
 from allennlp.nn.util import get_text_field_mask
@@ -57,10 +57,11 @@ class UncertainReader(Model):
                  story_seq2seq_encoder: Seq2SeqEncoder,
                  target_seq2vec_encoder: Seq2VecEncoder = None,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
+                 sentence_story_fusion: Seq2SeqEncoder = None,
                  dropout: float = None,
-                 distance_weights: Tuple[float] = (1.0, 0.5, 0.25),
-                 discriminator_length_regularizer: bool = True,
-                 discriminator_regularizer_weight: float = 0.25,
+                 distance_weights: Tuple[float] = [1.0],  # (1.0, 0.5, 0.25),
+                 discriminator_length_regularizer: bool = False,
+                 discriminator_regularizer_weight: float = 0.1,
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
                  full_output_scores: bool = False,
                  full_output_embeddings: bool = False,
@@ -74,6 +75,8 @@ class UncertainReader(Model):
         self._target_seq2vec_encoder = target_seq2vec_encoder
 
         self._story_seq2seq_encoder = story_seq2seq_encoder
+
+        self.sentence_story_fusion = sentence_story_fusion
 
         self._distance_weights = distance_weights
         self._discriminator_length_regularizer = discriminator_length_regularizer
@@ -137,7 +140,7 @@ class UncertainReader(Model):
         output_dict = {}
         output_dict["metadata"] = metadata
 
-        embedded_text_tensor = self._text_field_embedder(text).contiguous().cuda()
+        embedded_text_tensor = self._text_field_embedder(text).contiguous()
         batch_size, num_sentences, sentence_length, embedded_feature_size = embedded_text_tensor.shape
 
         # Because the batch has sentences need to reshape so can use the masking util function.
@@ -145,7 +148,7 @@ class UncertainReader(Model):
         for k, v in text.items():
             text_mod[k] = v.view(batch_size * num_sentences, sentence_length, -1)
         masks_tensor = get_text_field_mask(text_mod)
-        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length, -1).cuda()
+        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length, -1).to(embedded_text_tensor.device)
 
         # TODO: Parallelize using multiple GPUS if available rather than using a loop.
 
@@ -184,17 +187,24 @@ class UncertainReader(Model):
         batch_encoded_stories = torch.stack(batch_encoded_stories)
         batch_encoded_sentences = torch.stack(batch_encoded_sentences)
 
+        encoded_sentences = batch_encoded_sentences.select(2, -1)
+        encoded_sentences = encoded_sentences.view(batch_size, num_sentences, -1)
+
+        print(batch_encoded_stories.shape)
+
+        if self.sentence_story_fusion:
+            fused = torch.cat((batch_encoded_stories, encoded_sentences), dim=2)
+
+            batch_encoded_stories = self.sentence_story_fusion(fused, story_sentence_masks)
 
         if self._target_seq2vec_encoder:
             batch_encoded_sentences = batch_encoded_sentences.view(batch_size * num_sentences, sentence_length, -1)
+            masks_tensor = torch.squeeze(masks_tensor, dim=-1)
 
-            masks_tensor =  torch.squeeze(masks_tensor,dim=-1)
-            masks_tensor = masks_tensor.view(batch_size * num_sentences, -1)
-
-            target_sentences = self._target_seq2vec_encoder(batch_encoded_sentences, masks_tensor)
+            target_sentences = self._target_seq2vec_encoder(batch_encoded_sentences,
+                                                            masks_tensor.view(batch_size * num_sentences, -1))
         else:
-            target_sentences = batch_encoded_sentences.select(2, -1)
-        target_sentences = target_sentences.view(batch_size, num_sentences, -1)
+            target_sentences = encoded_sentences
 
         # Create a Mask to apply to the coded sentences.
 
@@ -216,7 +226,8 @@ class UncertainReader(Model):
     # batch_encoded_stories = batch_encoded_stories * expanded_masks
     # target_encoded_sentences = target_encoded_sentences * expanded_masks
 
-    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_sentences, story_sentence_masks):
+    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_sentences, story_sentence_masks,
+                                      sentence_loss=False):
         output_dict = {}
         loss = torch.tensor(0.0).to(encoded_stories.device)
 
@@ -230,11 +241,19 @@ class UncertainReader(Model):
         dot_product_scores = torch.matmul(encoded_stories_flat,
                                           torch.t(target_encoded_sentences_flat))
 
+        dot_product_mask = (
+                    1.0 - torch.diag(torch.ones(dot_product_scores.shape[0]), 0).float().to(dot_product_scores.device))
+        dot_product_scores *= dot_product_mask
+
+
         if self._discriminator_length_regularizer:
             story_norm = encoded_stories_flat.norm(dim=1)
             target_norm_aligned = target_encoded_sentences_flat.norm(dim=1)
 
-        for i, (distance_weights) in enumerate(self._distance_weights, start=1):
+        distance_weights = self._distance_weights
+        if sentence_loss:
+            distance_weights = [1.0]
+        for i, (distance_weights) in enumerate(distance_weights, start=1):
 
 
             # Use a copy to mask out elements that shouldn't be used.

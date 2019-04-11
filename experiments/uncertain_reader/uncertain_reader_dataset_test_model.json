@@ -23,9 +23,12 @@
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
-  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
-  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
+  //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
+  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
+  //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
+  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
+  //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
   "evaluate_on_test": true,
   "model": {
     "type": "uncertain_reader",
@@ -42,36 +45,43 @@
       "type": "gru",
       "input_size": 1024,
       "hidden_size": 1024,
-      "num_layers": 2,
+      "num_layers": 3,
       "dropout": 0.0
     },
     "story_seq2seq_encoder": {
       "type": "gru",
       "input_size": 1024,
       "hidden_size": 1024,
-      "num_layers": 2,
+      "num_layers": 3,
       "dropout": 0.0
     },
     "target_seq2vec_encoder": {
       "type": "gru",
       "input_size": 1024,
       "hidden_size": 1024,
-      "num_layers": 2,
+      "num_layers": 3,
       "dropout": 0.0
+    },
+    "sentence_story_fusion": {
+      "type": "feedforward",
+      "feedforward": {
+        "input_dim": 2048,
+        "num_layers": 2,
+        "hidden_dims": 1024,
+        "activations": "leaky_relu",
+        "dropout": 0.25
+      }
     }
   },
   "iterator": {
     "type": "basic",
-    "batch_size": 12
+    "batch_size": 4
   },
   "trainer": {
-    "num_epochs": 1,
+    "num_epochs": 100,
     "patience": 3,
     "cuda_device": [
-      0,
-      1,
-      2,
-      3
+      1
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
