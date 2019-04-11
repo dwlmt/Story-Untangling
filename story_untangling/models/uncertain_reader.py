@@ -31,8 +31,8 @@ class UncertainReader(Model):
                Embeds a text field into a vector representation. Can be used to swap in or out Glove, ELMO, or BERT.
            story_seq2seq_encoder : ``Seq2SeqEncoder``,
                seq2Seq encode the story sentences into a higher level hierarchical abstraction.
-           target_seq2vec_encoder : ``Seq2SeqEncoder``, optional (default = ``None``)
-               The target encoder. Replicates the target function in the Quick-Thoughts model of mapping to the same space.
+           sentence_story_fusion_encoder : ``Seq2SeqEncoder``, optional (default = ``None``)
+               Seq2Seq encodeer for fuding sentences and context features.
            sentence_seq2seq_encoder : ``Seq2SeqEncoder``, optional (default = ``None``)
                seq2Seq encoder on the embedded feature of each sentence. Optional second level encoder on top of ELMO or language model
            distance_weights: ``Tuple[float]``, optional (default = ``[1.0, 0.5, 0.25, 0.25]``)
@@ -55,11 +55,10 @@ class UncertainReader(Model):
                  vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
                  story_seq2seq_encoder: Seq2SeqEncoder,
-                 target_seq2vec_encoder: Seq2VecEncoder = None,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
-                 sentence_story_fusion: Seq2SeqEncoder = None,
+                 sentence_story_fusion_encoder: Seq2SeqEncoder = None,
                  dropout: float = None,
-                 distance_weights: Tuple[float] = [1.0],  # (1.0, 0.5, 0.25),
+                 distance_weights: Tuple[float] = (1.0, 0.5, 0.5, 0.25),
                  discriminator_length_regularizer: bool = False,
                  discriminator_regularizer_weight: float = 0.1,
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
@@ -72,11 +71,10 @@ class UncertainReader(Model):
         self._vocab = vocab
         self._text_field_embedder = text_field_embedder
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
-        self._target_seq2vec_encoder = target_seq2vec_encoder
 
         self._story_seq2seq_encoder = story_seq2seq_encoder
 
-        self.sentence_story_fusion = sentence_story_fusion
+        self.sentence_story_fusion_encoder = sentence_story_fusion_encoder
 
         self._distance_weights = distance_weights
         self._discriminator_length_regularizer = discriminator_length_regularizer
@@ -190,27 +188,16 @@ class UncertainReader(Model):
         encoded_sentences = batch_encoded_sentences.select(2, -1)
         encoded_sentences = encoded_sentences.view(batch_size, num_sentences, -1)
 
-        print(batch_encoded_stories.shape)
-
-        if self.sentence_story_fusion:
+        if self.sentence_story_fusion_encoder:
             fused = torch.cat((batch_encoded_stories, encoded_sentences), dim=2)
 
-            batch_encoded_stories = self.sentence_story_fusion(fused, story_sentence_masks)
-
-        if self._target_seq2vec_encoder:
-            batch_encoded_sentences = batch_encoded_sentences.view(batch_size * num_sentences, sentence_length, -1)
-            masks_tensor = torch.squeeze(masks_tensor, dim=-1)
-
-            target_sentences = self._target_seq2vec_encoder(batch_encoded_sentences,
-                                                            masks_tensor.view(batch_size * num_sentences, -1))
-        else:
-            target_sentences = encoded_sentences
+            batch_encoded_stories = self.sentence_story_fusion_encoder(fused, story_sentence_masks)
 
         # Create a Mask to apply to the coded sentences.
 
         loss = torch.tensor(0.0).to(batch_encoded_stories.device)
 
-        disc_loss, disc_output_dict = self.calculate_discriminatory_loss(batch_encoded_stories, target_sentences,
+        disc_loss, disc_output_dict = self.calculate_discriminatory_loss(batch_encoded_stories, batch_encoded_stories,
                                                                          story_sentence_masks)
         loss += disc_loss
 
@@ -219,12 +206,6 @@ class UncertainReader(Model):
         output_dict["loss"] = loss
 
         return output_dict
-
-    # story_sentence_masks = story_sentence_masks.view(story_sentence_masks.shape[0] * story_sentence_masks.shape[1])
-    # story_sentence_masks = torch.unsqueeze(story_sentence_masks, dim=1)
-    # expanded_masks =  story_sentence_masks.expand_as(batch_encoded_stories).float()
-    # batch_encoded_stories = batch_encoded_stories * expanded_masks
-    # target_encoded_sentences = target_encoded_sentences * expanded_masks
 
     def calculate_discriminatory_loss(self, encoded_stories, target_encoded_sentences, story_sentence_masks,
                                       sentence_loss=False):

@@ -55,14 +55,7 @@
       "num_layers": 3,
       "dropout": 0.0
     },
-    "target_seq2vec_encoder": {
-      "type": "gru",
-      "input_size": 1024,
-      "hidden_size": 1024,
-      "num_layers": 3,
-      "dropout": 0.0
-    },
-    "sentence_story_fusion": {
+    "sentence_story_fusion_encoder": {
       "type": "feedforward",
       "feedforward": {
         "input_dim": 2048,
@@ -79,9 +72,9 @@
   },
   "trainer": {
     "num_epochs": 100,
-    "patience": 3,
+    "patience": 5,
     "cuda_device": [
-      1
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
