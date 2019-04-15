@@ -409,13 +409,13 @@ class RnnSeqDecoder(SeqDecoder):
                     best_predictions = top_k_predictions[:, 0, :]
                     # shape: (batch_size, target_sequence_length)
 
-                    self._tensor_based_metric(best_predictions, target_tokens["tokens"])  # type: ignore
+                    self._tensor_based_metric(best_predictions, target_tokens[self._target_namespace])  # type: ignore
 
                 if self._token_based_metric is not None:
                     output_dict = self.decode(output_dict)
                     predicted_tokens = output_dict['predicted_tokens']
 
                     self._token_based_metric(predicted_tokens,  # type: ignore
-                                             [y.text for y in target_tokens["tokens"][1:-1]])
+                                             [y.text for y in target_tokens[self._target_namespace][1:-1]])
 
         return output_dict

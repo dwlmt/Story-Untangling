@@ -127,6 +127,9 @@ class UncertainReader(Model):
                                               tensor_based_metric=None,
                                               token_based_metric=None)
 
+            self._state_linearity = torch.nn.Linear(self._story_seq2seq_encoder.get_output_dim(),
+                                                    self._seq_decoder.get_output_dim(), bias=True)
+
         self._metrics = {}
 
         if self._disc_loss:
@@ -259,15 +262,16 @@ class UncertainReader(Model):
             enc_out = target_field_embedder(target_text).contiguous().to(flat_encoded_stories.device)
 
             source_mask = source_mask[non_empty_sentences, :].to(flat_encoded_stories.device)
+            flat_encoded_stories = flat_encoded_stories[non_empty_sentences, :]
 
             target_tokens = {"target": flat_tokens}
 
             state = {"source_mask": source_mask, "encoder_outputs": enc_out}
 
             seq_decoder = self._seq_decoder.to(encoded_sentences.device)
-            gen_output_dict = seq_decoder(state,
-                                          target_tokens=target_tokens)  # ,final_encoder_output=flat_encoded_stories.cpu)
-            print("Gen output dict", gen_output_dict)
+            flat_encoded_stories = self._state_linearity(flat_encoded_stories)
+            gen_output_dict = seq_decoder(state, target_tokens=target_tokens, final_encoder_output=flat_encoded_stories)
+
             loss += gen_output_dict["loss"]
 
             output_dict = {**output_dict, **gen_output_dict}
