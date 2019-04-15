@@ -11,8 +11,12 @@ from allennlp.modules import TextFieldEmbedder, Seq2SeqEncoder, Seq2VecEncoder, 
 from typing import Dict, Any, List, Optional, Tuple
 
 from allennlp.nn.util import get_text_field_mask
-from allennlp.training.metrics import CategoricalAccuracy, Average
+from allennlp.training.metrics import CategoricalAccuracy, Average, Entropy
+from allennlp.modules.attention import DotProductAttention
 from torch import nn
+
+from story_untangling.modules.lstm_decoder_cell import LstmDecoderCell
+from story_untangling.modules.rnn_seq_decoder import RnnSeqDecoder
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -28,6 +32,8 @@ class UncertainReader(Model):
                (``tokens``) or the target tokens can have a different namespace, in which case it needs to
                be specified as ``target_namespace``.
            text_field_embedder : ``TextFieldEmbedder``, required
+               Embeds a text field into a vector representation. Can be used to swap in or out Glove, ELMO, or BERT.
+           target_field_embedder : ``TextFieldEmbedder``, required
                Embeds a text field into a vector representation. Can be used to swap in or out Glove, ELMO, or BERT.
            story_seq2seq_encoder : ``Seq2SeqEncoder``,
                seq2Seq encode the story sentences into a higher level hierarchical abstraction.
@@ -45,6 +51,10 @@ class UncertainReader(Model):
                 Dropout percentage to use.
            accuracy_top_k: ``Tuple[int]``, optional (default = ``[1, 3, 5, 10]``)
                 For discriminatory loss calculate the the top k accuracy metrics.
+           gen_loss: ``Tuple[int]``, optional (default = ``True``)
+                Flag for the generative sequence to sequence loss.
+           disc_loss: ``Tuple[int]``, optional (default = ``True``)
+                Flag for the discriminatory loss.
            initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
                Used to initialize the model parameters.
            regularizer : ``RegularizerApplicator``, optional (default=``None``)
@@ -54,14 +64,17 @@ class UncertainReader(Model):
     def __init__(self,
                  vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
+                 target_field_embedder: TextFieldEmbedder,
                  story_seq2seq_encoder: Seq2SeqEncoder,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
                  sentence_story_fusion_encoder: Seq2SeqEncoder = None,
                  dropout: float = None,
-                 distance_weights: Tuple[float] = (1.0, 0.5, 0.5, 0.25),
-                 discriminator_length_regularizer: bool = False,
-                 discriminator_regularizer_weight: float = 0.1,
+                 distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.125),
+                 disc_length_regularizer: bool = False,
+                 disc_regularizer_weight: float = 0.1,
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
+                 gen_loss: bool = True,
+                 disc_loss: bool = True,
                  full_output_scores: bool = False,
                  full_output_embeddings: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
@@ -70,6 +83,7 @@ class UncertainReader(Model):
         super().__init__(vocab, regularizer)
         self._vocab = vocab
         self._text_field_embedder = text_field_embedder
+        self._target_field_embedder = target_field_embedder or self._text_field_embedder
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
 
         self._story_seq2seq_encoder = story_seq2seq_encoder
@@ -77,8 +91,11 @@ class UncertainReader(Model):
         self.sentence_story_fusion_encoder = sentence_story_fusion_encoder
 
         self._distance_weights = distance_weights
-        self._discriminator_length_regularizer = discriminator_length_regularizer
-        self._discriminator_length_regularizer_weight = discriminator_regularizer_weight
+        self._disc_length_regularizer = disc_length_regularizer
+        self._disc_length_regularizer_weight = disc_regularizer_weight
+
+        self._disc_loss = disc_loss
+        self._gen_loss = gen_loss
 
         self._dropout = dropout
 
@@ -96,26 +113,43 @@ class UncertainReader(Model):
         self._full_output_scores = full_output_scores
         self.full_output_embedding = full_output_embeddings
 
+        if self._gen_loss:
+            self._seq_decoder = RnnSeqDecoder(vocab=vocab,
+                                              decoder_cell=LstmDecoderCell(
+                                                  decoding_dim=300,
+                                                  target_embedding_dim=300,
+                                                  # attention = DotProductAttention()
+                                              ),
+                                              max_decoding_steps=50,
+                                              bidirectional_input=False,
+                                              beam_size=20,
+                                              target_namespace="target",
+                                              tensor_based_metric=None,
+                                              token_based_metric=None)
+
         self._metrics = {}
 
-        for i in range(1, len(distance_weights) + 1):
-            # TODO: Entropy measures. This will differ from the pilot and needs to tie into the Ely definitions.
-            self._metrics[f"disc_correct_dot_product_avg_{i}"] = Average()
-            self._metrics[f"disc_correct_log_prob_avg_{i}"] = Average()
-            self._metrics[f"disc_correct_prob_avg_{i}"] = Average()
-            self._metrics[f"disc_correct_similarity_cosine_avg_{i}"] = Average()
-            self._metrics[f"disc_correct_distance_l1_avg_{i}"] = Average()
-            self._metrics[f"disc_correct_distance_l2_avg_{i}"] = Average()
+        if self._disc_loss:
 
-        for top_n in self._accuracy_top_k:
             for i in range(1, len(distance_weights) + 1):
-                self._metrics[f"accuracy_{i}_{top_n}"] = CategoricalAccuracy(top_k=top_n)
+                for top_n in self._accuracy_top_k:
+                    self._metrics[f"accuracy_{i}_{top_n}"] = CategoricalAccuracy(top_k=top_n)
+
+                # self._metrics[f"entropy_{i}"] = Entropy()
+
+                self._metrics[f"disc_correct_dot_product_avg_{i}"] = Average()
+                self._metrics[f"disc_correct_log_prob_avg_{i}"] = Average()
+                self._metrics[f"disc_correct_prob_avg_{i}"] = Average()
+                self._metrics[f"disc_correct_similarity_cosine_avg_{i}"] = Average()
+                self._metrics[f"disc_correct_distance_l1_avg_{i}"] = Average()
+                self._metrics[f"disc_correct_distance_l2_avg_{i}"] = Average()
 
 
         initializer(self)
 
     def forward(self,
                 text: Dict[str, torch.LongTensor],
+                target_text: Dict[str, torch.LongTensor] = None,
                 metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
         """
            Parameters
@@ -145,8 +179,9 @@ class UncertainReader(Model):
         text_mod = {}
         for k, v in text.items():
             text_mod[k] = v.view(batch_size * num_sentences, sentence_length, -1)
+
         masks_tensor = get_text_field_mask(text_mod)
-        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length, -1).to(embedded_text_tensor.device)
+        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length).to(embedded_text_tensor.device)
 
         # TODO: Parallelize using multiple GPUS if available rather than using a loop.
 
@@ -197,11 +232,45 @@ class UncertainReader(Model):
 
         loss = torch.tensor(0.0).to(batch_encoded_stories.device)
 
-        disc_loss, disc_output_dict = self.calculate_discriminatory_loss(batch_encoded_stories, batch_encoded_stories,
-                                                                         story_sentence_masks)
-        loss += disc_loss
+        if self._disc_loss:
+            disc_loss, disc_output_dict = self.calculate_discriminatory_loss(batch_encoded_stories,
+                                                                             batch_encoded_stories,
+                                                                             story_sentence_masks)
 
-        output_dict = {**output_dict, **disc_output_dict}
+            output_dict = {**output_dict, **disc_output_dict}
+
+            loss += disc_loss
+
+        if self._gen_loss:
+            flat_encoded_stories = batch_encoded_stories.view(
+                batch_encoded_stories.shape[0] * batch_encoded_stories.shape[1], -1)
+
+            source_mask = masks_tensor.view(batch_size * num_sentences, sentence_length)
+
+            non_empty_sentences = (source_mask.sum(dim=1) > 0)
+
+            tokens = target_text["target"]
+            flat_tokens = tokens.view(batch_size * num_sentences, sentence_length)
+            flat_tokens = flat_tokens[non_empty_sentences, :]
+            target_text["target"] = flat_tokens.to(flat_encoded_stories.device)
+
+            target_field_embedder = self._target_field_embedder
+
+            enc_out = target_field_embedder(target_text).contiguous().to(flat_encoded_stories.device)
+
+            source_mask = source_mask[non_empty_sentences, :].to(flat_encoded_stories.device)
+
+            target_tokens = {"target": flat_tokens}
+
+            state = {"source_mask": source_mask, "encoder_outputs": enc_out}
+
+            seq_decoder = self._seq_decoder.to(encoded_sentences.device)
+            gen_output_dict = seq_decoder(state,
+                                          target_tokens=target_tokens)  # ,final_encoder_output=flat_encoded_stories.cpu)
+            print("Gen output dict", gen_output_dict)
+            loss += gen_output_dict["loss"]
+
+            output_dict = {**output_dict, **gen_output_dict}
 
         output_dict["loss"] = loss
 
@@ -226,8 +295,7 @@ class UncertainReader(Model):
                     1.0 - torch.diag(torch.ones(dot_product_scores.shape[0]), 0).float().to(dot_product_scores.device))
         dot_product_scores *= dot_product_mask
 
-
-        if self._discriminator_length_regularizer:
+        if self._disc_length_regularizer:
             story_norm = encoded_stories_flat.norm(dim=1)
             target_norm_aligned = target_encoded_sentences_flat.norm(dim=1)
 
@@ -268,19 +336,18 @@ class UncertainReader(Model):
 
             scores_softmax = self._log_softmax(dot_product_scores_copy)
 
-
             # Mask out sentences that are not present in the target classes.
             # print(i, scores_softmax, target_classes, story_sentence_mask_weights)
             nll_loss = nn.NLLLoss(weight=story_sentence_mask_weights)(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
 
-            if self._discriminator_length_regularizer:
+            if self._disc_length_regularizer:
                 target_norm_aligned = target_norm_aligned[0 + i:,]
                 story_norm_aligned = story_norm[0:min(story_norm.shape[0] - i, target_norm_aligned.shape[0])]
 
                 loss += (((
-                                      story_norm_aligned - target_norm_aligned) ** 2 * self._discriminator_length_regularizer_weight).sum()
+                                  story_norm_aligned - target_norm_aligned) ** 2 * self._disc_length_regularizer_weight).sum()
                          / batch_size) * distance_weights
 
             target_encoded_sentences_correct = target_encoded_sentences_flat[

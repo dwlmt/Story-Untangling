@@ -31,10 +31,13 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
     Parameters
     ----------
-    source_tokenizer : ``Tokenizer``, optional
+    tokenizer : ``Tokenizer``, optional
         Tokenizer to use to split the input sequences into words or other kinds of tokens. Defaults
         to ``WordTokenizer()``.
     source_token_indexers : ``Dict[str, TokenIndexer]``, optional
+        Indexers used to define input (source side) token representations. Defaults to
+        ``{"tokens": SingleIdTokenIndexer()}``.
+    target_token_indexers : ``Dict[str, TokenIndexer]``, optional
         Indexers used to define input (source side) token representations. Defaults to
         ``{"tokens": SingleIdTokenIndexer()}``.
     add_start_end_token : bool, (optional, default=True)
@@ -62,10 +65,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
     def __init__(self,
-                 source_tokenizer: Tokenizer = None,
-
+                 tokenizer: Tokenizer = None,
                  source_token_indexers: Dict[str, TokenIndexer] = None,
-                 add_start_end_token: bool = True,
+                 target_token_indexers: Dict[str, TokenIndexer] = None,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
@@ -76,9 +78,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
-        self._source_tokenizer = source_tokenizer or WordTokenizer()
+        self._tokenizer = tokenizer or WordTokenizer()
         self._source_token_indexers = source_token_indexers or {"tokens": SingleIdTokenIndexer()}
-        self._add_start_end_token = add_start_end_token
+        self._target_token_indexers = target_token_indexers or self._source_token_indexers
 
         self._dataset_path = dataset_path
         self._use_existing_cached_db = use_existing_cached_db
@@ -126,14 +128,11 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         field_dict = {}
         story_text_original = []
         story_text_fields = []
+        target_text_fields = []
 
         def tokenize(sentence, tokenizer, indexer):
             tokens = sentence["text"]
             tokenized_text = tokenizer(tokens)
-
-            if self._add_start_end_token:
-                tokenized_text.insert(0, Token(START_SYMBOL))
-                tokenized_text.append(Token(END_SYMBOL))
 
             if len(tokenized_text) > self._truncate_sequence_length and self._truncate_sequences:
                 tokenized_text = tokenized_text[:self._truncate_sequence_length]
@@ -146,15 +145,20 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             return tokens, token_field
 
         for i, sentence in enumerate(sentences, 1):
-            sentence_text, sentence_text_field, = tokenize(sentence, self._source_tokenizer.tokenize,
-                    self._source_token_indexers)
+            sentence_text, sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
+                                                           self._source_token_indexers)
             story_text_original.append(sentence_text)
             story_text_fields.append(sentence_text_field)
+
+            target_sentence_text, target_sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
+                                                                         self._target_token_indexers)
+            target_text_fields.append(target_sentence_text_field)
 
         metadata = {"story_id": story["id"], "number_of_sentences": story["sentence_num"]}
         metadata["text"] = story_text_original
 
         field_dict['text'] = ListField(story_text_fields)
+        field_dict['target_text'] = ListField(target_text_fields)
         field_dict["metadata"] = MetadataField(metadata)
 
         return Instance(field_dict)
