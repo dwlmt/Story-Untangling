@@ -17,6 +17,7 @@ from torch import nn
 
 from story_untangling.modules.lstm_decoder_cell import LstmDecoderCell
 from story_untangling.modules.rnn_seq_decoder import RnnSeqDecoder
+from allennlp.training.metrics import BLEU
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -129,7 +130,7 @@ class UncertainReader(Model):
                                               bidirectional_input=False,
                                               beam_size=20,
                                               target_namespace="target",
-                                              tensor_based_metric=None,
+                                              tensor_based_metric=BLEU(),
                                               token_based_metric=None)
 
             self._state_linearity = torch.nn.Linear(self._story_seq2seq_encoder.get_output_dim(),
@@ -432,4 +433,9 @@ class UncertainReader(Model):
             self._metrics[f"disc_correct_distance_l2_avg_{i}"](dist_l2.mean().item())
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        return {metric_name: metric.get_metric(reset) for metric_name, metric in self._metrics.items()}
+        metrics = {metric_name: metric.get_metric(reset) for metric_name, metric in self._metrics.items()}
+
+        if self._seq_decoder:
+            metrics = {**metrics, **self._seq_decoder.get_metrics()}
+
+        return metrics
