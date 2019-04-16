@@ -19,6 +19,8 @@ from story_untangling.modules.lstm_decoder_cell import LstmDecoderCell
 from story_untangling.modules.rnn_seq_decoder import RnnSeqDecoder
 from allennlp.training.metrics import BLEU
 
+from story_untangling.modules.seq_decoder import SeqDecoder
+
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 @Model.register("uncertain_reader")
@@ -42,6 +44,8 @@ class UncertainReader(Model):
                Seq2Seq encodeer for fuding sentences and context features.
            sentence_seq2seq_encoder : ``Seq2SeqEncoder``, optional (default = ``None``)
                seq2Seq encoder on the embedded feature of each sentence. Optional second level encoder on top of ELMO or language model
+           seq_decoder : ``SeqDecoder``, optional (default = ``None``)
+               Sequence to sequence decoder for the generative loss.
            distance_weights: ``Tuple[float]``, optional (default = ``[1.0, 0.5, 0.25, 0.25]``)
                 The numbers represent the weights to apply to n+1, n+2, n+3 is the loss function. The length how many sentence to look ahead in predictions.
            discriminator_length_regularizer : ``bool``, (optional, default=True)
@@ -69,6 +73,7 @@ class UncertainReader(Model):
                  story_seq2seq_encoder: Seq2SeqEncoder,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
                  sentence_story_fusion_encoder: Seq2SeqEncoder = None,
+                 seq_decoder: SeqDecoder = None,
                  dropout: float = None,
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.125),
                  disc_length_regularizer: bool = False,
@@ -120,18 +125,7 @@ class UncertainReader(Model):
 
         if self._gen_loss:
             self._target_field_embedder = target_field_embedder
-            self._seq_decoder = RnnSeqDecoder(vocab=vocab,
-                                              decoder_cell=LstmDecoderCell(
-                                                  decoding_dim=300,
-                                                  target_embedding_dim=300,
-                                                  attention=DotProductAttention()
-                                              ),
-                                              max_decoding_steps=50,
-                                              bidirectional_input=False,
-                                              beam_size=20,
-                                              target_namespace="target",
-                                              tensor_based_metric=BLEU(),
-                                              token_based_metric=None)
+            self._seq_decoder = seq_decoder
 
             self._state_linearity = torch.nn.Linear(self._story_seq2seq_encoder.get_output_dim(),
                                                     self._seq_decoder.get_output_dim(), bias=True)
