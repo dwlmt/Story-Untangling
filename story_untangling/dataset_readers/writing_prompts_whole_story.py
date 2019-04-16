@@ -68,6 +68,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  tokenizer: Tokenizer = None,
                  source_token_indexers: Dict[str, TokenIndexer] = None,
                  target_token_indexers: Dict[str, TokenIndexer] = None,
+                 add_start_end_token: bool = True,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
@@ -81,6 +82,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._tokenizer = tokenizer or WordTokenizer()
         self._source_token_indexers = source_token_indexers or {"tokens": SingleIdTokenIndexer()}
         self._target_token_indexers = target_token_indexers or self._source_token_indexers
+
+        self._add_start_end_token = add_start_end_token
 
         self._dataset_path = dataset_path
         self._use_existing_cached_db = use_existing_cached_db
@@ -133,6 +136,10 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         def tokenize(sentence, tokenizer, indexer):
             tokens = sentence["text"]
             tokenized_text = tokenizer(tokens)
+
+            if self._add_start_end_token:
+                tokenized_text.insert(0, Token(START_SYMBOL))
+                tokenized_text.append(Token(END_SYMBOL))
 
             if len(tokenized_text) > self._truncate_sequence_length and self._truncate_sequences:
                 tokenized_text = tokenized_text[:self._truncate_sequence_length]

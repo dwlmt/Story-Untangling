@@ -83,7 +83,6 @@ class UncertainReader(Model):
         super().__init__(vocab, regularizer)
         self._vocab = vocab
         self._text_field_embedder = text_field_embedder
-        self._target_field_embedder = target_field_embedder or self._text_field_embedder
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
 
         self._story_seq2seq_encoder = story_seq2seq_encoder
@@ -114,11 +113,12 @@ class UncertainReader(Model):
         self.full_output_embedding = full_output_embeddings
 
         if self._gen_loss:
+            self._target_field_embedder = target_field_embedder
             self._seq_decoder = RnnSeqDecoder(vocab=vocab,
                                               decoder_cell=LstmDecoderCell(
                                                   decoding_dim=300,
                                                   target_embedding_dim=300,
-                                                  # attention = DotProductAttention()
+                                                  attention=DotProductAttention()
                                               ),
                                               max_decoding_steps=50,
                                               bidirectional_input=False,
@@ -245,40 +245,60 @@ class UncertainReader(Model):
             loss += disc_loss
 
         if self._gen_loss:
-            flat_encoded_stories = batch_encoded_stories.view(
-                batch_encoded_stories.shape[0] * batch_encoded_stories.shape[1], -1)
-
-            source_mask = masks_tensor.view(batch_size * num_sentences, sentence_length)
-
-            non_empty_sentences = (source_mask.sum(dim=1) > 0)
-
-            tokens = target_text["target"]
-            flat_tokens = tokens.view(batch_size * num_sentences, sentence_length)
-            flat_tokens = flat_tokens[non_empty_sentences, :]
-            target_text["target"] = flat_tokens.to(flat_encoded_stories.device)
-
-            target_field_embedder = self._target_field_embedder
-
-            enc_out = target_field_embedder(target_text).contiguous().to(flat_encoded_stories.device)
-
-            source_mask = source_mask[non_empty_sentences, :].to(flat_encoded_stories.device)
-            flat_encoded_stories = flat_encoded_stories[non_empty_sentences, :]
-
-            target_tokens = {"target": flat_tokens}
-
-            state = {"source_mask": source_mask, "encoder_outputs": enc_out}
-
-            seq_decoder = self._seq_decoder.to(encoded_sentences.device)
-            flat_encoded_stories = self._state_linearity(flat_encoded_stories)
-            gen_output_dict = seq_decoder(state, target_tokens=target_tokens, final_encoder_output=flat_encoded_stories)
-
-            loss += gen_output_dict["loss"]
-
-            output_dict = {**output_dict, **gen_output_dict}
+            gen_loss, output_dict = self.calculate_gen_loss(batch_encoded_stories, encoded_sentences, masks_tensor,
+                                                            target_text, batch_size, num_sentences, sentence_length)
+            loss += gen_loss
 
         output_dict["loss"] = loss
 
         return output_dict
+
+    def calculate_gen_loss(self, batch_encoded_stories, encoded_sentences, masks_tensor, target_text, batch_size,
+                           num_sentences, sentence_length):
+
+        output_dict = {}
+        loss = torch.tensor(0.0).to(batch_encoded_stories.device)
+
+        flat_encoded_stories = batch_encoded_stories.view(
+            batch_encoded_stories.shape[0] * batch_encoded_stories.shape[1], -1)
+        source_mask = masks_tensor.view(batch_size * num_sentences, sentence_length)
+
+        tokens = target_text["target"]
+        flat_tokens = tokens.view(batch_size * num_sentences, sentence_length)
+
+        batch_group_mask = self.batch_group_mask(batch_size, num_sentences)
+        batch_group_mask = batch_group_mask.to(batch_encoded_stories.device)
+
+        batch_group_mask_target = batch_group_mask.clone()
+        batch_group_mask_target[0] = 0
+        batch_group_mask_target[-1] = 1
+
+        batch_group_mask_story = batch_group_mask.clone()
+        batch_group_mask_story[-1] = 0
+
+        source_mask = source_mask[batch_group_mask_story, :].to(flat_encoded_stories.device)
+        flat_encoded_stories = flat_encoded_stories[batch_group_mask_story, :]
+        flat_tokens = flat_tokens[batch_group_mask_target, :]
+
+        non_empty_sentences = (source_mask.sum(dim=1) > 0)
+
+        flat_tokens = flat_tokens[non_empty_sentences, :]
+        target_text["target"] = flat_tokens.to(flat_encoded_stories.device)
+
+        target_field_embedder = self._target_field_embedder
+        enc_out = target_field_embedder(target_text).contiguous().to(flat_encoded_stories.device)
+
+        source_mask = source_mask[non_empty_sentences, :].to(flat_encoded_stories.device)
+        flat_encoded_stories = flat_encoded_stories[non_empty_sentences, :]
+
+        target_tokens = {"target": flat_tokens}
+        state = {"source_mask": source_mask, "encoder_outputs": enc_out}
+        seq_decoder = self._seq_decoder.to(encoded_sentences.device)
+        flat_encoded_stories = self._state_linearity(flat_encoded_stories)
+        gen_output_dict = seq_decoder(state, target_tokens=target_tokens, final_encoder_output=flat_encoded_stories)
+        loss += gen_output_dict["loss"]
+        output_dict = {**output_dict, **gen_output_dict}
+        return loss, output_dict
 
     def calculate_discriminatory_loss(self, encoded_stories, target_encoded_sentences, story_sentence_masks,
                                       sentence_loss=False):
@@ -308,7 +328,6 @@ class UncertainReader(Model):
             distance_weights = [1.0]
         for i, (distance_weights) in enumerate(distance_weights, start=1):
 
-
             # Use a copy to mask out elements that shouldn't be used.
             # This section excludes other correct answers for other distance ranges from the dot product.
             dot_product_scores_copy = dot_product_scores.clone()
@@ -328,15 +347,12 @@ class UncertainReader(Model):
             target_classes = torch.argmax(target_mask, dim=1).long().to(dot_product_scores.device)
 
             # Remove rows which spill over batches.
-            batch_group = torch.ones(sentence_num)
-            batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - 1, sentence_num))), 0)
-            batch_group = batch_group.unsqueeze(dim=0)
-            batch_group = batch_group.expand(batch_size, sentence_num)
-            batch_group = batch_group.contiguous().view(batch_size * sentence_num).byte().to(dot_product_scores.device)
+            batch_group_mask = self.batch_group_mask(batch_size, sentence_num)
+            batch_group_mask = batch_group_mask.to(dot_product_scores.device)
 
-            dot_product_scores_copy = dot_product_scores_copy[batch_group,]
-            target_mask = target_mask[batch_group,]
-            target_classes = target_classes[batch_group]
+            dot_product_scores_copy = dot_product_scores_copy[batch_group_mask,]
+            target_mask = target_mask[batch_group_mask,]
+            target_classes = target_classes[batch_group_mask]
 
             scores_softmax = self._log_softmax(dot_product_scores_copy)
 
@@ -354,12 +370,13 @@ class UncertainReader(Model):
                                   story_norm_aligned - target_norm_aligned) ** 2 * self._disc_length_regularizer_weight).sum()
                          / batch_size) * distance_weights
 
-            target_encoded_sentences_correct = target_encoded_sentences_flat[
-                                               0 + i:target_encoded_sentences_flat.shape[0], ]
-            batch_encoded_stories_correct = encoded_stories_flat[0:min(encoded_stories_flat.shape[0] - i,
-                                                                       target_encoded_sentences_correct.shape[0]),]
-
             with torch.no_grad():
+
+                target_encoded_sentences_correct = target_encoded_sentences_flat[
+                                                   0 + i:target_encoded_sentences_flat.shape[0], ]
+                batch_encoded_stories_correct = encoded_stories_flat[0:min(encoded_stories_flat.shape[0] - i,
+                                                                           target_encoded_sentences_correct.shape[0]), ]
+
                 for top_k in self._accuracy_top_k:
                     self._metrics[f"accuracy_{i}_{top_k}"](scores_softmax, target_classes)
 
@@ -383,6 +400,15 @@ class UncertainReader(Model):
                     output_dict[f"disc_log_probs_{i}"] = scores_softmax
 
         return loss, output_dict
+
+    def batch_group_mask(self, batch_size, sentence_num):
+        batch_group = torch.ones(sentence_num)
+        batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - 1, sentence_num))), 0)
+        batch_group = batch_group.unsqueeze(dim=0)
+        batch_group = batch_group.expand(batch_size, sentence_num)
+        batch_group = batch_group.contiguous().view(batch_size * sentence_num).byte()
+        # print(batch_group)
+        return batch_group
 
     def similarity_metrics(self, encoded_source, encoded_target, i, output_dict):
         # If using cosine similarity then these will be calculated on the unnormalised vectors. Since the measure don't make sense on the

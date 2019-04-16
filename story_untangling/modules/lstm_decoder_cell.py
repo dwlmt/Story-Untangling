@@ -62,9 +62,6 @@ class LstmDecoderCell(DecoderCell):
         # shape: (batch_size, max_input_sequence_length, encoder_output_dim)
         encoder_outputs_mask = encoder_outputs_mask.float()
 
-        print(
-            decoder_hidden_state.shape, encoder_outputs.shape, encoder_outputs_mask.shape)
-
         # shape: (batch_size, max_input_sequence_length)
         input_weights = self._attention(
             decoder_hidden_state, encoder_outputs, encoder_outputs_mask)
