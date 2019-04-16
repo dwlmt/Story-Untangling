@@ -75,6 +75,8 @@ class UncertainReader(Model):
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
                  gen_loss: bool = True,
                  disc_loss: bool = True,
+                 gen_loss_weight: int = 1.0,
+                 disc_loss_weight: int = 1.0,
                  full_output_scores: bool = False,
                  full_output_embeddings: bool = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
@@ -95,6 +97,9 @@ class UncertainReader(Model):
 
         self._disc_loss = disc_loss
         self._gen_loss = gen_loss
+
+        self._gen_loss_weight = gen_loss_weight
+        self._disc_loss_weight = disc_loss_weight
 
         self._dropout = dropout
 
@@ -242,12 +247,12 @@ class UncertainReader(Model):
 
             output_dict = {**output_dict, **disc_output_dict}
 
-            loss += disc_loss
+            loss += disc_loss * self._disc_loss_weight
 
         if self._gen_loss:
             gen_loss, output_dict = self.calculate_gen_loss(batch_encoded_stories, encoded_sentences, masks_tensor,
                                                             target_text, batch_size, num_sentences, sentence_length)
-            loss += gen_loss
+            loss += gen_loss * self._gen_loss_weight
 
         output_dict["loss"] = loss
 
