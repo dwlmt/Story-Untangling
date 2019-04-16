@@ -44,8 +44,6 @@ class ReadingThoughts(Model):
            Embedder for the story as a whole.
        story_embedding_dim : ``int``, optional
            Embedder for the story as a whole.
-       dot_product_loss : ``bool``, (optional, default=True)
-           Use dot product when calculating the Quick Thoughts based loss.
        length_regularizer : ``bool``, (optional, default=True)
            Regularizer that encourages the source and target vectors to be the same length.
        length_regularizer_weight : ``float``, (optional, default=1.0)
