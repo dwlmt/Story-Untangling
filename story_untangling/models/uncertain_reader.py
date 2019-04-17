@@ -187,7 +187,6 @@ class UncertainReader(Model):
             text_mod[k] = v.view(batch_size * num_sentences, -1)
 
         embedded_text_tensor = self._text_field_embedder(text_mod).contiguous()
-        print("Embedded Text Tensor", embedded_text_tensor.shape)
 
         masks_tensor = get_text_field_mask(text_mod)
 
@@ -272,9 +271,6 @@ class UncertainReader(Model):
 
         encoded_sentences = encoded_sentences
 
-        print(masks_tensor.shape, target_text[self._primary_token_namespace].shape, batch_encoded_stories.shape,
-              encoded_sentences.shape)
-
         batch_group_mask = self.batch_group_mask(batch_size, num_sentences)
         batch_group_mask = batch_group_mask.to(batch_encoded_stories.device)
 
@@ -298,7 +294,6 @@ class UncertainReader(Model):
         non_empty_sentences = (source_mask.sum(dim=1) > 0)
 
         for k, v in target_text.items():
-            print(k, v.shape)
             v = v.view(batch_size, int(v.shape[0] / batch_size), -1)
             v = v[batch_group_mask_target]
             v = v[non_empty_sentences]
@@ -309,7 +304,6 @@ class UncertainReader(Model):
 
         encoded_sentences = encoded_sentences[non_empty_sentences, :]
 
-        print(target_text[self._primary_token_namespace].shape, flat_encoded_stories.shape, encoded_sentences.shape)
 
         target_tokens = {self._primary_token_namespace: target_text[self._primary_token_namespace]}
         state = {"source_mask": source_mask, "encoder_outputs": encoded_sentences}
@@ -377,7 +371,6 @@ class UncertainReader(Model):
             scores_softmax = self._log_softmax(dot_product_scores_copy)
 
             # Mask out sentences that are not present in the target classes.
-            # print(i, scores_softmax, target_classes, story_sentence_mask_weights)
             nll_loss = nn.NLLLoss(weight=story_sentence_mask_weights)(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
@@ -427,7 +420,7 @@ class UncertainReader(Model):
         batch_group = batch_group.unsqueeze(dim=0)
         batch_group = batch_group.expand(batch_size, sentence_num)
         batch_group = batch_group.contiguous().view(batch_size * sentence_num).byte()
-        # print(batch_group)
+
         return batch_group
 
     def similarity_metrics(self, encoded_source, encoded_target, i, output_dict):
