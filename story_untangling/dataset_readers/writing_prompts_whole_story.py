@@ -19,6 +19,7 @@ from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
 from story_untangling.dataset_readers.dataset_utils import dual_window
+from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -34,12 +35,10 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     tokenizer : ``Tokenizer``, optional
         Tokenizer to use to split the input sequences into words or other kinds of tokens. Defaults
         to ``WordTokenizer()``.
-    source_token_indexers : ``Dict[str, TokenIndexer]``, optional
+    token_indexers : ``Dict[str, TokenIndexer]``, optional
         Indexers used to define input (source side) token representations. Defaults to
         ``{"tokens": SingleIdTokenIndexer()}``.
-    target_token_indexers : ``Dict[str, TokenIndexer]``, optional
-        Indexers used to define input (source side) token representations. Defaults to
-        ``{"tokens": SingleIdTokenIndexer()}``.
+
     add_start_end_token : bool, (optional, default=True)
         Whether or not to add `START_SYMBOL` to the beginning of the source sequence.
 
@@ -66,22 +65,20 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     """
     def __init__(self,
                  tokenizer: Tokenizer = None,
-                 source_token_indexers: Dict[str, TokenIndexer] = None,
-                 target_token_indexers: Dict[str, TokenIndexer] = None,
-                 add_start_end_token: bool = True,
+                 token_indexers: Dict[str, TokenIndexer] = None,
+                 add_start_end_token: bool = False,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
                  min_story_sentences: int = 0,
                  max_story_sentences: int = 10 * 6,
-                 truncate_sequence_length: int = 50,
+                 truncate_sequence_length: int = 60,
                  story_chunking: int = 100,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
         self._tokenizer = tokenizer or WordTokenizer()
-        self._source_token_indexers = source_token_indexers or {"tokens": SingleIdTokenIndexer()}
-        self._target_token_indexers = target_token_indexers or self._source_token_indexers
+        self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
 
         self._add_start_end_token = add_start_end_token
 
@@ -131,10 +128,15 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         field_dict = {}
         story_text_original = []
         story_text_fields = []
-        target_text_fields = []
 
         def tokenize(sentence, tokenizer, indexer):
-            tokens = sentence["text"]
+            if isinstance(sentence, str):
+                tokens = sentence
+            else:
+                tokens = sentence["text"]
+
+            tokens = text_standardize(tokens)
+
             tokenized_text = tokenizer(tokens)
 
             if self._add_start_end_token:
@@ -153,19 +155,19 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         for i, sentence in enumerate(sentences, 1):
             sentence_text, sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
-                                                           self._source_token_indexers)
+                                                           self._token_indexers)
             story_text_original.append(sentence_text)
             story_text_fields.append(sentence_text_field)
 
-            target_sentence_text, target_sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
-                                                                         self._target_token_indexers)
-            target_text_fields.append(target_sentence_text_field)
+        if len(story_text_fields) < self._story_chunking:
+            text_field = TextField([], self._token_indexers).empty_field()
+            story_text_fields.extend([text_field] * (self._story_chunking - len(story_text_fields)))
 
         metadata = {"story_id": story["id"], "number_of_sentences": story["sentence_num"]}
         metadata["text"] = story_text_original
 
-        field_dict['text'] = ListField(story_text_fields)
-        field_dict['target_text'] = ListField(target_text_fields)
+        text_field = ListField(story_text_fields)
+        field_dict['text'] = text_field
         field_dict["metadata"] = MetadataField(metadata)
 
         return Instance(field_dict)

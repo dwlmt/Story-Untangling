@@ -69,7 +69,6 @@ class UncertainReader(Model):
     def __init__(self,
                  vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
-                 target_field_embedder: TextFieldEmbedder,
                  story_seq2seq_encoder: Seq2SeqEncoder,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
                  sentence_story_fusion_encoder: Seq2SeqEncoder = None,
@@ -81,6 +80,7 @@ class UncertainReader(Model):
                  accuracy_top_k: Tuple[int] = (1, 3, 5, 10),
                  gen_loss: bool = True,
                  disc_loss: bool = True,
+                 primary_token_namespace="openai_transformer",
                  gen_loss_weight: int = 1.0,
                  disc_loss_weight: int = 1.0,
                  full_output_scores: bool = False,
@@ -101,8 +101,10 @@ class UncertainReader(Model):
         self._disc_length_regularizer = disc_length_regularizer
         self._disc_length_regularizer_weight = disc_regularizer_weight
 
-        self._disc_loss = disc_loss
         self._gen_loss = gen_loss
+        self._disc_loss = disc_loss
+
+        self._primary_token_namespace = primary_token_namespace
 
         self._gen_loss_weight = gen_loss_weight
         self._disc_loss_weight = disc_loss_weight
@@ -123,8 +125,8 @@ class UncertainReader(Model):
         self._full_output_scores = full_output_scores
         self.full_output_embedding = full_output_embeddings
 
+        self._seq_decoder = None
         if self._gen_loss:
-            self._target_field_embedder = target_field_embedder
             self._seq_decoder = seq_decoder
 
             self._state_linearity = torch.nn.Linear(self._story_seq2seq_encoder.get_output_dim(),
@@ -152,7 +154,6 @@ class UncertainReader(Model):
 
     def forward(self,
                 text: Dict[str, torch.LongTensor],
-                target_text: Dict[str, torch.LongTensor] = None,
                 metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
         """
            Parameters
@@ -175,16 +176,26 @@ class UncertainReader(Model):
         output_dict = {}
         output_dict["metadata"] = metadata
 
-        embedded_text_tensor = self._text_field_embedder(text).contiguous()
-        batch_size, num_sentences, sentence_length, embedded_feature_size = embedded_text_tensor.shape
 
         # Because the batch has sentences need to reshape so can use the masking util function.
         text_mod = {}
+        batch_size = None
         for k, v in text.items():
-            text_mod[k] = v.view(batch_size * num_sentences, sentence_length, -1)
+            if not batch_size:
+                batch_size, num_sentences, sentence_length = v.shape
+
+            text_mod[k] = v.view(batch_size * num_sentences, -1)
+
+        embedded_text_tensor = self._text_field_embedder(text_mod).contiguous()
+        print("Embedded Text Tensor", embedded_text_tensor.shape)
 
         masks_tensor = get_text_field_mask(text_mod)
-        masks_tensor = masks_tensor.view(batch_size, num_sentences, sentence_length).to(embedded_text_tensor.device)
+
+        text_mod[self._primary_token_namespace] = text_mod[self._primary_token_namespace][:, 0: masks_tensor.shape[1]]
+
+        masks_tensor = masks_tensor.view(batch_size, num_sentences, -1)
+
+        embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
 
         # TODO: Parallelize using multiple GPUS if available rather than using a loop.
 
@@ -245,8 +256,8 @@ class UncertainReader(Model):
             loss += disc_loss * self._disc_loss_weight
 
         if self._gen_loss:
-            gen_loss, output_dict = self.calculate_gen_loss(batch_encoded_stories, encoded_sentences, masks_tensor,
-                                                            target_text, batch_size, num_sentences, sentence_length)
+            gen_loss, output_dict = self.calculate_gen_loss(batch_encoded_stories, embedded_text_tensor, masks_tensor,
+                                                            text_mod, batch_size, num_sentences)
             loss += gen_loss * self._gen_loss_weight
 
         output_dict["loss"] = loss
@@ -254,17 +265,15 @@ class UncertainReader(Model):
         return output_dict
 
     def calculate_gen_loss(self, batch_encoded_stories, encoded_sentences, masks_tensor, target_text, batch_size,
-                           num_sentences, sentence_length):
+                           num_sentences):
 
         output_dict = {}
         loss = torch.tensor(0.0).to(batch_encoded_stories.device)
 
-        flat_encoded_stories = batch_encoded_stories.view(
-            batch_encoded_stories.shape[0] * batch_encoded_stories.shape[1], -1)
-        source_mask = masks_tensor.view(batch_size * num_sentences, sentence_length)
+        encoded_sentences = encoded_sentences
 
-        tokens = target_text["target"]
-        flat_tokens = tokens.view(batch_size * num_sentences, sentence_length)
+        print(masks_tensor.shape, target_text[self._primary_token_namespace].shape, batch_encoded_stories.shape,
+              encoded_sentences.shape)
 
         batch_group_mask = self.batch_group_mask(batch_size, num_sentences)
         batch_group_mask = batch_group_mask.to(batch_encoded_stories.device)
@@ -276,23 +285,34 @@ class UncertainReader(Model):
         batch_group_mask_story = batch_group_mask.clone()
         batch_group_mask_story[-1] = 0
 
-        source_mask = source_mask[batch_group_mask_story, :].to(flat_encoded_stories.device)
-        flat_encoded_stories = flat_encoded_stories[batch_group_mask_story, :]
-        flat_tokens = flat_tokens[batch_group_mask_target, :]
+        batch_group_mask_story = batch_group_mask_story.view(batch_size,
+                                                             int(batch_group_mask_story.shape[0] / batch_size))
+        batch_group_mask_target = batch_group_mask_target.view(batch_size,
+                                                               int(batch_group_mask_target.shape[0] / batch_size))
+
+        source_mask = masks_tensor[batch_group_mask_story].to(batch_encoded_stories.device)
+        flat_encoded_stories = batch_encoded_stories[batch_group_mask_story]
+        encoded_sentences = encoded_sentences[batch_group_mask_target, :]
+
 
         non_empty_sentences = (source_mask.sum(dim=1) > 0)
 
-        flat_tokens = flat_tokens[non_empty_sentences, :]
-        target_text["target"] = flat_tokens.to(flat_encoded_stories.device)
-
-        target_field_embedder = self._target_field_embedder
-        enc_out = target_field_embedder(target_text).contiguous().to(flat_encoded_stories.device)
+        for k, v in target_text.items():
+            print(k, v.shape)
+            v = v.view(batch_size, int(v.shape[0] / batch_size), -1)
+            v = v[batch_group_mask_target]
+            v = v[non_empty_sentences]
+            target_text[self._primary_token_namespace] = v.to(flat_encoded_stories.device)
 
         source_mask = source_mask[non_empty_sentences, :].to(flat_encoded_stories.device)
         flat_encoded_stories = flat_encoded_stories[non_empty_sentences, :]
 
-        target_tokens = {"target": flat_tokens}
-        state = {"source_mask": source_mask, "encoder_outputs": enc_out}
+        encoded_sentences = encoded_sentences[non_empty_sentences, :]
+
+        print(target_text[self._primary_token_namespace].shape, flat_encoded_stories.shape, encoded_sentences.shape)
+
+        target_tokens = {self._primary_token_namespace: target_text[self._primary_token_namespace]}
+        state = {"source_mask": source_mask, "encoder_outputs": encoded_sentences}
         seq_decoder = self._seq_decoder.to(encoded_sentences.device)
         flat_encoded_stories = self._state_linearity(flat_encoded_stories)
         gen_output_dict = seq_decoder(state, target_tokens=target_tokens, final_encoder_output=flat_encoded_stories)
