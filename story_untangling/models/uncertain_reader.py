@@ -347,7 +347,7 @@ class UncertainReader(Model):
             dot_product_scores_copy = dot_product_scores.clone()
 
             offsets = list(range(1, len(self._distance_weights) + 1))
-            offsets = [o for o in offsets if o < i]
+            offsets = [o for o in offsets if o is not i]
             for o in offsets:
                 exclude_mask = (1 - torch.diag(torch.ones(dot_product_scores.shape[0]), o).float().to(
                     dot_product_scores.device))
