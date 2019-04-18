@@ -61,7 +61,7 @@
                 "dropout": 0.0
           },*/
     "seq_decoder": {
-      "type": "rnn_seq_decoder",
+      "type": "rnn_seq_decoder_openai",
       "decoder_cell": {
         "type": "lstm_decoder_cell",
         "decoding_dim": 768,
@@ -71,7 +71,12 @@
       "max_decoding_steps": 50,
       "beam_size": 50,
       "target_namespace": "openai_transformer",
-      "tensor_based_metric": "bleu"
+      "tensor_based_metric": "bleu",
+      "target_indexer": {
+        "type": "openai_transformer_byte_pair",
+        "n_ctx": 100,
+        "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
+      }
     },
     "story_seq2seq_encoder": {
       "type": "gru",

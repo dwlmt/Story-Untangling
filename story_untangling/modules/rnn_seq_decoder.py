@@ -2,20 +2,21 @@ from typing import Dict, List, Tuple
 
 import torch
 import torch.nn.functional as F
+from allennlp.modules.openai_transformer import OpenaiTransformer
 from torch.nn import Linear
 
 from allennlp.common import Registrable
 from story_untangling.modules.seq_decoder import SeqDecoder
-from allennlp.data import Vocabulary
-from allennlp.modules import Embedding
+from allennlp.data import Vocabulary, TokenIndexer
+from allennlp.modules import Embedding, TokenEmbedder
 from story_untangling.modules.decoder_cell import DecoderCell
 from allennlp.nn import util
 from allennlp.nn.beam_search import BeamSearch
 from allennlp.training.metrics import Metric
 
 
-@SeqDecoder.register("rnn_seq_decoder")
-class RnnSeqDecoder(SeqDecoder):
+@SeqDecoder.register("rnn_seq_decoder_openai")
+class RnnSeqDecoderOpenAI(SeqDecoder):
     """
     Parameters
     ----------
@@ -48,6 +49,8 @@ class RnnSeqDecoder(SeqDecoder):
         in the batch and the second is a gold sequence for each item in the batch.
     scheduled_sampling_ratio : ``float``
         Defines ratio between teacher forced training and real output usage.
+    target_embedder : ``TokenEmbedder``
+        Token Embedder.
     """
 
     def __init__(
@@ -61,9 +64,11 @@ class RnnSeqDecoder(SeqDecoder):
             tensor_based_metric: Metric = None,
             token_based_metric: Metric = None,
             scheduled_sampling_ratio: float = 0.,
+            target_embedder: TokenEmbedder = None,
+            target_indexer: TokenIndexer[int] = None
     ):
 
-        super(RnnSeqDecoder, self).__init__(
+        super(RnnSeqDecoderOpenAI, self).__init__(
             vocab=vocab,
             target_namespace=target_namespace,
             tensor_based_metric=tensor_based_metric,
@@ -74,6 +79,9 @@ class RnnSeqDecoder(SeqDecoder):
 
         self._target_vocab_size = self.vocab.get_vocab_size(self._target_namespace)
         self._target_namespace = target_namespace
+
+        self.target_embedder = target_embedder
+        self.target_indexer = target_indexer
 
         # At prediction time, we use a beam search to find the most likely sequence of target tokens.
         beam_size = beam_size or 1
@@ -90,29 +98,17 @@ class RnnSeqDecoder(SeqDecoder):
         self.decoder_input_dim = self.decoder_output_dim
         self.encoder_output_dim = self.decoder_input_dim
 
-        target_vocab_size = self.vocab.get_vocab_size(self._target_namespace)
-
-        # The decoder input will be a function of the embedding of the previous predicted token,
-        # an attended encoder hidden state called the "attentive read", and another
-        # weighted sum of the encoder hidden state called the "selective read".
-        # While the weights for the attentive read are calculated by an `Attention` module,
-        # the weights for the selective read are simply the predicted probabilities
-        # corresponding to each token in the source sentence that matches the target
-        # token from the previous timestep.
-
-        # Dense embedding of vocab words in the target space.
-
-        self._target_embedder = Embedding(target_vocab_size, self.decoder_cell.target_embedding_dim)
-
         # We project the hidden state from the decoder into the output vocabulary space
         # in order to get log probabilities of each target token, at each time step.
-        self._output_projection_layer = Linear(self.decoder_cell.get_output_dim(), target_vocab_size)
+        self._output_projection_layer = Linear(self.decoder_cell.get_output_dim(), self._target_vocab_size)
 
         self._scheduled_sampling_ratio = scheduled_sampling_ratio
 
     def _forward_beam_search(self, state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         batch_size = state["source_mask"].size()[0]
+        print("Mask shape", state["source_mask"].shape)
         start_predictions = state["source_mask"].new_full((batch_size,), fill_value=self._start_index)
+        print("Predictions shape", start_predictions.shape)
 
         # shape (all_top_k_predictions): (batch_size, beam_size, num_decoding_steps)
         # shape (log_probabilities): (batch_size, beam_size)
@@ -140,6 +136,7 @@ class RnnSeqDecoder(SeqDecoder):
         batch_size = source_mask.size()[0]
 
         if target_tokens:
+
             # shape: (batch_size, max_target_sequence_length)
             targets = target_tokens[self._target_namespace]
 
@@ -149,10 +146,7 @@ class RnnSeqDecoder(SeqDecoder):
             # Either way, we don't have to process it.
             num_decoding_steps = target_sequence_length - 1
 
-            # Prepare embeddings for targets. They will be used as gold embeddings during decoder training
-            # shape: (batch_size, max_target_sequence_length, embedding_dim)
-
-            target_embeddings = self._target_embedder(targets)
+            target_embeddings = self.target_embedder.cpu()(target_tokens)
         else:
             num_decoding_steps = self._max_decoding_steps
 
@@ -206,7 +200,7 @@ class RnnSeqDecoder(SeqDecoder):
             last_predictions = predicted_classes
 
             # shape: (batch_size, 1, target_embedding_dim)
-            last_predictions_embeddings = self._target_embedder(last_predictions).unsqueeze(1)
+            last_predictions_embeddings = self.target_embedder(last_predictions).unsqueeze(1)
 
             # This step is required, since we want to keep up two different prediction history: gold and real
             if steps_embeddings.shape[-1] == 0:
@@ -255,7 +249,29 @@ class RnnSeqDecoder(SeqDecoder):
         previous_steps_predictions = state.get("previous_steps_predictions")
 
         # shape: (batch_size, 1, target_embedding_dim)
-        last_predictions_embeddings = self._target_embedder(last_predictions).unsqueeze(1)
+        print("Last predictions", last_predictions)
+        print(last_predictions.shape)
+
+        offset_tensor = []
+        for p in last_predictions:
+            if p != 0:
+                offset_tensor.append(1)
+            else:
+                offset_tensor.append(0)
+
+        offset_tensor = torch.tensor(offset_tensor).long()
+
+        mask_first = torch.zeros(100)
+        mask_first[0] = 1
+
+        last_predictions = last_predictions.unsqueeze(dim=1).expand(last_predictions.shape[0], 100)
+        offset_tensor = offset_tensor.unsqueeze(dim=1).expand(offset_tensor.shape[0], 100)
+
+        print("offset_tensor", offset_tensor)
+
+        last_predictions_map = {"openai_transformer": last_predictions, "openai_transformer-offsets": offset_tensor}
+        last_predictions_embeddings = self.target_embedder(last_predictions_map)  # .unsqueeze(1)
+        print("Last prediction embeddings", last_predictions_embeddings.shape)
 
         if previous_steps_predictions is None or previous_steps_predictions.shape[-1] == 0:
             # There is no previous steps, except for start vectors in ``last_predictions``
@@ -264,6 +280,11 @@ class RnnSeqDecoder(SeqDecoder):
         else:
             # shape: (group_size, steps_count, target_embedding_dim)
             previous_steps_predictions = torch.cat([previous_steps_predictions, last_predictions_embeddings], 1)
+
+        print(previous_steps_predictions)
+        # print(encoder_outputs)
+        print(source_mask)
+        print(state)
 
         decoder_state, decoder_output = self.decoder_cell(
             previous_steps_predictions=previous_steps_predictions,
@@ -333,8 +354,6 @@ class RnnSeqDecoder(SeqDecoder):
                 state["encoder_outputs"],
                 state["source_mask"],
                 bidirectional=self.bidirectional_input)
-        else:
-            final_encoder_output = final_encoder_output
 
         state.update(self.decoder_cell.init_decoder_state(batch_size, final_encoder_output))
 

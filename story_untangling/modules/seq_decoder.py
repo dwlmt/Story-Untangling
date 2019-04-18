@@ -2,6 +2,7 @@ from typing import Dict
 
 import numpy
 import torch
+from allennlp.modules import TokenEmbedder
 from torch.nn import Module
 
 from allennlp.common import Registrable
@@ -19,11 +20,14 @@ class SeqDecoder(Module, Registrable):
             self,
             vocab: Vocabulary,
             target_namespace: str = "tokens",
+            target_embedder: TokenEmbedder = None,
             tensor_based_metric: Metric = None,
             token_based_metric: Metric = None,
     ):
         super(SeqDecoder, self).__init__()
         self._target_namespace = target_namespace
+
+        self.target_embedder = target_embedder
 
         self.vocab = vocab
 

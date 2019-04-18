@@ -66,7 +66,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     def __init__(self,
                  tokenizer: Tokenizer = None,
                  token_indexers: Dict[str, TokenIndexer] = None,
-                 add_start_end_token: bool = False,
+                 add_start_end_token: bool = True,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
