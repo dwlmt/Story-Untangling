@@ -34,6 +34,7 @@
   "evaluate_on_test": true,
   "model": {
     "type": "uncertain_reader",
+    "disc_loss": true,
     "text_field_embedder": {
       "allow_unmatched_keys": true,
       "embedder_to_indexer_map": {
@@ -60,42 +61,20 @@
                 "num_layers": 3,
                 "dropout": 0.0
           },*/
-    "seq_decoder": {
-      "type": "rnn_seq_decoder_openai",
-      "decoder_cell": {
-        "type": "lstm_decoder_cell",
-        "decoding_dim": 768,
-        "target_embedding_dim": 768,
-        "attention": "dot_product"
-      },
-      "max_decoding_steps": 50,
-      "beam_size": 50,
-      "target_namespace": "openai_transformer",
-      "tensor_based_metric": "bleu",
-      "target_indexer": {
-        "type": "openai_transformer_byte_pair",
-        "n_ctx": 100,
-        "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
-      }
-    },
     "story_seq2seq_encoder": {
       "type": "gru",
       "input_size": 768,
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
+    },
+    "story_fusion_decoder": {
+      "input_dim": 768,
+      "num_layers": 2,
+      "hidden_dims": 768,
+      "activations": "leaky_relu",
+      "dropout": 0.0
     }
-    /*,
-        "sentence_story_fusion_encoder": {
-          "type": "feedforward",
-          "feedforward": {
-            "input_dim": 1536,
-            "num_layers": 2,
-            "hidden_dims": 768,
-            "activations": "leaky_relu",
-            "dropout": 0.0
-          }
-        }*/
   },
   "iterator": {
     "type": "basic",
@@ -105,7 +84,7 @@
     "num_epochs": 100,
     "patience": 5,
     "cuda_device": [
-      0
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
