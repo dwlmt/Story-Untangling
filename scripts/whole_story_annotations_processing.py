@@ -124,6 +124,7 @@ def process_annotations(args):
             triples.append((worker, story, metrics_col))
         t = AnnotationTask(data=triples, distance=interval_distance)
         stats_dict[col]["krippendorff_alpha"] = t.alpha()
+        stats_dict[col]["average_agreement"] = t.alpha()
 
     pandas.DataFrame.from_dict(stats_dict, orient="index").to_csv(f"{args['target']}_stats.csv")
 
