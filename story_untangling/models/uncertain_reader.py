@@ -66,6 +66,7 @@ class UncertainReader(Model):
                  text_field_embedder: TextFieldEmbedder = None,
                  story_seq2seq_encoder: Seq2SeqEncoder = None,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
+                 story_feedforward: FeedForward = None,
                  dropout: float = None,
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.125),
                  disc_length_regularizer: bool = False,
@@ -90,8 +91,11 @@ class UncertainReader(Model):
 
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
         self._story_seq2seq_encoder = story_seq2seq_encoder
+        self._story_feedforward = story_feedforward
 
         feature_dim = story_seq2seq_encoder.get_output_dim()
+        if self._story_feedforward:
+            feature_dim = self._story_feedforward.get_output_dim()
 
         transformer = self._text_field_embedder._token_embedders[self._primary_token_namespace]._transformer
         self._lm_model = FusionLM(
@@ -228,6 +232,9 @@ class UncertainReader(Model):
         story_sentence_masks = torch.squeeze(story_sentence_masks, dim=1)
 
         batch_encoded_stories = torch.stack(batch_encoded_stories)
+
+        if self._story_feedforward:
+            batch_encoded_stories = self._story_feedforward(batch_encoded_stories)
 
         loss = torch.tensor(0.0).to(batch_encoded_stories.device)
 
