@@ -15,7 +15,7 @@ from allennlp.training.metrics import CategoricalAccuracy, Average, Entropy
 from torch import nn
 from torch.nn import Dropout
 
-from story_untangling.modules.gpt_lm import MixtureLM, FusionLM
+from story_untangling.modules.gpt_lm import MixtureLM, FusionLM, BilinearLM
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -66,6 +66,7 @@ class UncertainReader(Model):
                  story_seq2seq_encoder: Seq2SeqEncoder = None,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
                  fusion_seq2seq_encoder: Seq2SeqEncoder = None,
+                 bilinear_fusion: bool = False,
                  story_feedforward: FeedForward = None,
                  dropout: float = None,
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.125),
@@ -99,7 +100,15 @@ class UncertainReader(Model):
             feature_dim = self._story_feedforward.get_output_dim()
 
         transformer = self._text_field_embedder._token_embedders[self._primary_token_namespace]._transformer
-        if fusion_seq2seq_encoder is None:
+
+        if bilinear_fusion:
+            self._lm_model = BilinearLM(
+                transformer=transformer,
+                feature_dim=feature_dim,
+                metrics=self._metrics,
+                accuracy_top_k=accuracy_top_k)
+
+        elif fusion_seq2seq_encoder is None:
 
             self._lm_model = MixtureLM(
                 transformer=transformer,

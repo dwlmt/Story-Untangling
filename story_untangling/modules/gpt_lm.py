@@ -7,26 +7,49 @@ from torch.nn import NLLLoss, CrossEntropyLoss
 from typing import Dict, Any, List
 
 
-class MixtureLM(nn.Module):
+class BaseLMHead(nn.Module):
     """ Language Model Head for the transformer """
 
-    def __init__(self, transformer: OpenaiTransformer, feature_dim: int, metrics: Dict[str, Any] = None,
+    def __init__(self, transformer: OpenaiTransformer, metrics: Dict[str, Any] = None,
                  accuracy_top_k: List = None):
-        super(MixtureLM, self).__init__()
+        super(BaseLMHead, self).__init__()
         self.transformer = transformer
         self._metrics = metrics
         self._accuracy_top_k = accuracy_top_k
+
+        self._decoder = self.transformer.decoder
+
+        self.log_softmax = nn.LogSoftmax(dim=1)
+        self.loss = NLLLoss(ignore_index=-1)
+
+    def calc_loss(self, lm_labels, lm_logits):
+        # Shift so that tokens < n predict n
+        lm_logits = lm_logits[:, :-1, :].contiguous()
+        lm_labels = lm_labels[:, 1:].contiguous()
+        # Flatten the tokens and classes
+        lm_logits = lm_logits.view(-1, lm_logits.size(-1))
+        lm_labels = lm_labels.view(-1)
+        scores_softmax = self.log_softmax(lm_logits)
+        loss = self.loss(scores_softmax, lm_labels)
+        if self._metrics and not self.training:
+            with torch.no_grad():
+                for top_k in self._accuracy_top_k:
+                    self._metrics[f"gen_accuracy_{top_k}"](scores_softmax, lm_labels)
+        return loss
+
+
+class MixtureLM(BaseLMHead):
+    """ Language Model mixture for the Transformer. """
+
+    def __init__(self, transformer: OpenaiTransformer, feature_dim: int, metrics: Dict[str, Any] = None,
+                 accuracy_top_k: List = None):
+        super(MixtureLM, self).__init__(transformer, metrics, accuracy_top_k)
 
         # Trainable weight for combining the language model.
         self._lm_weighting = torch.tensor([0.5], requires_grad=True)
 
         self._feature_decoder = torch.nn.Linear(in_features=feature_dim,
                                                 out_features=self.transformer.decoder.out_features, bias=False)
-
-        self._decoder = self.transformer.decoder
-
-        self.log_softmax = nn.LogSoftmax(dim=1)
-        self.loss = NLLLoss(ignore_index=-1)
 
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
 
@@ -41,46 +64,22 @@ class MixtureLM(nn.Module):
         lm_logits = (lm_logits * lm_weighting) + (feature_logits * (1.0 - lm_weighting))
 
         if lm_labels is not None:
-
-            # Shift so that tokens < n predict n
-            lm_logits = lm_logits[:, :-1, :].contiguous()
-            lm_labels = lm_labels[:, 1:].contiguous()
-
-            # Flatten the tokens and classes
-            lm_logits = lm_logits.view(-1, lm_logits.size(-1))
-            lm_labels = lm_labels.view(-1)
-
-            scores_softmax = self.log_softmax(lm_logits)
-            loss = self.loss(scores_softmax, lm_labels)
-
-            if self._metrics and not self.training:
-                with torch.no_grad():
-                    for top_k in self._accuracy_top_k:
-                        self._metrics[f"gen_accuracy_{top_k}"](scores_softmax, lm_labels)
-
-            return loss.to(lm_hidden_states.device)
+            return self.calc_loss(lm_labels, lm_logits).to(lm_hidden_states.device)
 
         return lm_logits
 
 
-class FusionLM(nn.Module):
-    """ Language Model Head for the transformer """
+class FusionLM(BaseLMHead):
+    """ Fuses Language Model output using a Seq2SeqEncoder"""
 
     def __init__(self, transformer: OpenaiTransformer, encoder: Seq2SeqEncoder, metrics: Dict[str, Any] = None,
                  accuracy_top_k: List = None):
-        super(FusionLM, self).__init__()
-        self.transformer = transformer
-        self._encoder = encoder
-        self._metrics = metrics
-        self._accuracy_top_k = accuracy_top_k
+        super(FusionLM, self).__init__(transformer, metrics, accuracy_top_k)
+
         self._encoder = encoder
 
-        self._decoder = self.transformer.decoder
-        # Reuse the decoder from GPT and switch on finetuning.
         self._decoder.requires_grad = True
 
-        self.log_softmax = nn.LogSoftmax(dim=1)
-        self.loss = NLLLoss(ignore_index=-1)
 
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
 
@@ -96,23 +95,29 @@ class FusionLM(nn.Module):
         lm_logits = self._decoder(fused_states)
 
         if lm_labels is not None:
-
-            # Shift so that tokens < n predict n
-            lm_logits = lm_logits[:, :-1, :].contiguous()
-            lm_labels = lm_labels[:, 1:].contiguous()
-
-            # Flatten the tokens and classes
-            lm_logits = lm_logits.view(-1, lm_logits.size(-1))
-            lm_labels = lm_labels.view(-1)
-
-            scores_softmax = self.log_softmax(lm_logits)
-            loss = self.loss(scores_softmax, lm_labels)
-
-            if self._metrics and not self.training:
-                with torch.no_grad():
-                    for top_k in self._accuracy_top_k:
-                        self._metrics[f"gen_accuracy_{top_k}"](scores_softmax, lm_labels)
-
-            return loss.to(lm_hidden_states.device)
+            return self.calc_loss(lm_labels, lm_logits).to(lm_hidden_states.device)
 
         return lm_logits
+
+
+class BilinearLM(BaseLMHead):
+    """ Fuses Language Model output using a Bilinear layer"""
+
+    def __init__(self, transformer: OpenaiTransformer, feature_dim: int, metrics: Dict[str, Any] = None,
+                 accuracy_top_k: List = None):
+        super(BilinearLM, self).__init__(transformer, metrics, accuracy_top_k)
+
+        self._bilinear = nn.Bilinear(feature_dim, self._decoder.in_features, self._decoder.in_features)
+
+        self._decoder.requires_grad = True
+
+    def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
+        fused_states = self._bilinear(feature_hidden_states.contiguous(), lm_hidden_states)
+
+        lm_logits = self._decoder(fused_states)
+
+        if lm_labels is not None:
+            return self.calc_loss(lm_labels, lm_logits).to(lm_hidden_states.device)
+
+        return lm_logits
+
