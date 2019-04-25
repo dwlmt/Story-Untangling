@@ -15,7 +15,7 @@ from allennlp.training.metrics import CategoricalAccuracy, Average, Entropy
 from torch import nn
 from torch.nn import Dropout
 
-from story_untangling.modules.gpt_lm import FusionLM
+from story_untangling.modules.gpt_lm import MixtureLM
 
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -98,13 +98,12 @@ class UncertainReader(Model):
             feature_dim = self._story_feedforward.get_output_dim()
 
         transformer = self._text_field_embedder._token_embedders[self._primary_token_namespace]._transformer
-        self._lm_model = FusionLM(
+        self._lm_model = MixtureLM(
             transformer=transformer,
+            feature_dim=feature_dim,
             metrics=self._metrics,
             accuracy_top_k=accuracy_top_k)
 
-        self._story_feature_decoder = torch.nn.Linear(in_features=feature_dim,
-                                                      out_features=transformer.decoder.out_features, bias=False)
 
         self._distance_weights = distance_weights
         self._disc_length_regularizer = disc_length_regularizer
@@ -293,12 +292,10 @@ class UncertainReader(Model):
         encoded_sentences_target = encoded_sentences_target[non_empty_sentences]
         target_labels = target_text[self._primary_token_namespace]
 
-        feature_logits = self._story_feature_decoder(encoded_stories)
-
         target_labels = target_labels[:, : encoded_sentences_target.shape[1]]
 
         loss += self._lm_model(encoded_sentences_target,
-                               feature_logits,
+                               encoded_stories,
                                lm_labels=target_labels)
 
         return loss, output_dict

@@ -6,12 +6,13 @@ from allennlp.modules import FeedForward
 from torch.nn import NLLLoss, CrossEntropyLoss
 from typing import Dict, Any, List
 
-class FusionLM(nn.Module):
+
+class MixtureLM(nn.Module):
     """ Language Model Head for the transformer """
 
-    def __init__(self, transformer: OpenaiTransformer, metrics: Dict[str, Any] = None,
+    def __init__(self, transformer: OpenaiTransformer, feature_dim: int, metrics: Dict[str, Any] = None,
                  accuracy_top_k: List = None):
-        super(FusionLM, self).__init__()
+        super(MixtureLM, self).__init__()
         self.transformer = transformer
         self._metrics = metrics
         self._accuracy_top_k = accuracy_top_k
@@ -19,14 +20,19 @@ class FusionLM(nn.Module):
         # Trainable weight for combining the language model.
         self._lm_weighting = torch.tensor([0.5], requires_grad=True)
 
+        self._feature_decoder = torch.nn.Linear(in_features=feature_dim,
+                                                out_features=self.transformer.decoder.out_features, bias=False)
+
         self._decoder = self.transformer.decoder
 
         self.log_softmax = nn.LogSoftmax(dim=1)
         self.loss = NLLLoss(ignore_index=-1)
 
-    def forward(self, lm_hidden_states, feature_logits, lm_labels=None):
+    def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
 
-        lm_weighting = self._lm_weighting.clamp(min=0.0, max=1.0).to(lm_hidden_states.device)
+        lm_weighting = self._lm_weighting.clamp(min=0.001, max=0.999).to(lm_hidden_states.device)
+
+        feature_logits = self._feature_decoder(feature_hidden_states)
 
         if len(lm_hidden_states.shape) == 3:
             feature_logits = feature_logits.unsqueeze(dim=1)
