@@ -20,7 +20,7 @@ class BaseLMHead(nn.Module):
         self._decoder = self.transformer.decoder
 
         self.log_softmax = nn.LogSoftmax(dim=1)
-        self.loss = NLLLoss(ignore_index=-1)
+        self.loss = NLLLoss(ignore_index=0)
 
     def calc_loss(self, lm_labels, lm_logits):
         # Shift so that tokens < n predict n

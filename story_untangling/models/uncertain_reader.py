@@ -144,6 +144,7 @@ class UncertainReader(Model):
         self._regularizer = regularizer
 
         self._log_softmax = nn.LogSoftmax(dim=1)
+        self._nll_loss = nn.NLLLoss(ignore_index=0)
 
         self._cosine_similarity = nn.CosineSimilarity()
         self._l2_distance = nn.PairwiseDistance(p=2)
@@ -359,8 +360,6 @@ class UncertainReader(Model):
 
                 dot_product_scores_copy = dot_product_scores_copy * exclude_mask
 
-            story_sentence_mask_weights = (story_sentence_masks > 0).float().to(dot_product_scores.device)
-
             target_mask = torch.diag(torch.ones((batch_size * sentence_num) - i), i).byte().to(dot_product_scores.device)
             target_classes = torch.argmax(target_mask, dim=1).long().to(dot_product_scores.device)
 
@@ -375,7 +374,7 @@ class UncertainReader(Model):
             scores_softmax = self._log_softmax(dot_product_scores_copy)
 
             # Mask out sentences that are not present in the target classes.
-            nll_loss = nn.NLLLoss(weight=story_sentence_mask_weights)(scores_softmax, target_classes)
+            nll_loss = self._nll_loss(scores_softmax, target_classes)
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
 
@@ -423,6 +422,8 @@ class UncertainReader(Model):
         return loss, output_dict
 
     def batch_group_mask(self, batch_size, sentence_num):
+        """ Mask out the last row in each batch as will not have a prediction for for the next row.
+        """
         batch_group = torch.ones(sentence_num)
         batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - 1, sentence_num))), 0)
         batch_group = batch_group.unsqueeze(dim=0)
