@@ -112,6 +112,11 @@ class BilinearLM(BaseLMHead):
         self._decoder.requires_grad = True
 
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
+        feature_hidden_states = feature_hidden_states.unsqueeze(dim=1)
+
+        feature_hidden_states = feature_hidden_states.expand(feature_hidden_states.shape[0], lm_hidden_states.shape[1],
+                                                             feature_hidden_states.shape[2])
+
         fused_states = self._bilinear(feature_hidden_states.contiguous(), lm_hidden_states)
 
         lm_logits = self._decoder(fused_states)
