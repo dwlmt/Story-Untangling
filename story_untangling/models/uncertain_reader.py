@@ -364,7 +364,7 @@ class UncertainReader(Model):
             target_classes = torch.argmax(target_mask, dim=1).long().to(dot_product_scores.device)
 
             # Remove rows which spill over batches.
-            batch_group_mask = self.batch_group_mask(batch_size, sentence_num)
+            batch_group_mask = self.batch_group_mask(batch_size, sentence_num, i=i)
             batch_group_mask = batch_group_mask.to(dot_product_scores.device)
 
             dot_product_scores_copy = dot_product_scores_copy[batch_group_mask,]
@@ -378,9 +378,10 @@ class UncertainReader(Model):
 
             loss += nll_loss * distance_weights # Add the loss and scale it.
 
+            # Regularizer to try and keep the vectors as similar lengths.
             if self._disc_length_regularizer:
-                target_norm_aligned = target_norm_aligned[0 + i:,]
-                story_norm_aligned = story_norm[0:min(story_norm.shape[0] - i, target_norm_aligned.shape[0])]
+                target_norm_aligned = target_norm_aligned[i:, ]
+                story_norm_aligned = story_norm[story_norm.shape[0] - i]
 
                 loss += (((
                                   story_norm_aligned - target_norm_aligned) ** 2 * self._disc_length_regularizer_weight).sum()
@@ -391,10 +392,8 @@ class UncertainReader(Model):
                 if not self.training:
 
                     target_encoded_sentences_correct = target_encoded_sentences_flat[
-                                                       0 + i:target_encoded_sentences_flat.shape[0], ]
-                    batch_encoded_stories_correct = encoded_stories_flat[0:min(encoded_stories_flat.shape[0] - i,
-                                                                               target_encoded_sentences_correct.shape[
-                                                                                   0]), ]
+                                                       i:, ]
+                    batch_encoded_stories_correct = encoded_stories_flat[:encoded_stories_flat.shape[0] - i, :]
 
                     for top_k in self._accuracy_top_k:
                         self._metrics[f"disc_accuracy_{i}_{top_k}"](scores_softmax, target_classes)
@@ -421,11 +420,11 @@ class UncertainReader(Model):
 
         return loss, output_dict
 
-    def batch_group_mask(self, batch_size, sentence_num):
+    def batch_group_mask(self, batch_size, sentence_num, i=1):
         """ Mask out the last row in each batch as will not have a prediction for for the next row.
         """
         batch_group = torch.ones(sentence_num)
-        batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - 1, sentence_num))), 0)
+        batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - i, sentence_num))), 0)
         batch_group = batch_group.unsqueeze(dim=0)
         batch_group = batch_group.expand(batch_size, sentence_num)
         batch_group = batch_group.contiguous().view(batch_size * sentence_num).byte()
