@@ -15,8 +15,7 @@ from allennlp.training.metrics import CategoricalAccuracy, Average, Entropy
 from torch import nn
 from torch.nn import Dropout
 
-from story_untangling.modules.gpt_lm import MixtureLM
-
+from story_untangling.modules.gpt_lm import MixtureLM, FusionLM
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -37,10 +36,10 @@ class UncertainReader(Model):
                Embeds a text field into a vector representation. Can be used to swap in or out Glove, ELMO, or BERT.
            story_seq2seq_encoder : ``Seq2SeqEncoder``,
                seq2Seq encode the story sentences into a higher level hierarchical abstraction.
-           story_fusion_decoder : ``Seq2SeqEncoder``, optional (default = ``None``)
-               For concatenating and fusing the story context features to help the language model decode.
            sentence_seq2seq_encoder : ``Seq2SeqEncoder``, optional (default = ``None``)
                seq2Seq encoder on the embedded feature of each sentence. Optional second level encoder on top of ELMO or language model.
+           fusion_seq2seq_encoder : ``Seq2SeqEncoder``, optional (default = ``None``)
+               For concatenating and fusing the story context features to help the language model decode.
            distance_weights: ``Tuple[float]``, optional (default = ``[1.0, 0.5, 0.25, 0.25]``)
                 The numbers represent the weights to apply to n+1, n+2, n+3 is the loss function. The length how many sentence to look ahead in predictions.
            discriminator_length_regularizer : ``bool``, (optional, default=True)
@@ -66,6 +65,7 @@ class UncertainReader(Model):
                  text_field_embedder: TextFieldEmbedder = None,
                  story_seq2seq_encoder: Seq2SeqEncoder = None,
                  sentence_seq2seq_encoder: Seq2SeqEncoder = None,
+                 fusion_seq2seq_encoder: Seq2SeqEncoder = None,
                  story_feedforward: FeedForward = None,
                  dropout: float = None,
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.125),
@@ -91,6 +91,7 @@ class UncertainReader(Model):
 
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
         self._story_seq2seq_encoder = story_seq2seq_encoder
+
         self._story_feedforward = story_feedforward
 
         feature_dim = story_seq2seq_encoder.get_output_dim()
@@ -98,11 +99,19 @@ class UncertainReader(Model):
             feature_dim = self._story_feedforward.get_output_dim()
 
         transformer = self._text_field_embedder._token_embedders[self._primary_token_namespace]._transformer
-        self._lm_model = MixtureLM(
-            transformer=transformer,
-            feature_dim=feature_dim,
-            metrics=self._metrics,
-            accuracy_top_k=accuracy_top_k)
+        if fusion_seq2seq_encoder is None:
+
+            self._lm_model = MixtureLM(
+                transformer=transformer,
+                feature_dim=feature_dim,
+                metrics=self._metrics,
+                accuracy_top_k=accuracy_top_k)
+        else:
+            self._lm_model = FusionLM(
+                transformer=transformer,
+                encoder=fusion_seq2seq_encoder,
+                metrics=self._metrics,
+                accuracy_top_k=accuracy_top_k)
 
 
         self._distance_weights = distance_weights
