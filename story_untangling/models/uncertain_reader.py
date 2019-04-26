@@ -1,17 +1,13 @@
 import logging
-
-import numpy
-import torch
-from allennlp.common import Params
-from allennlp.common.checks import ConfigurationError
-from allennlp.data import Vocabulary
-from allennlp.models import Model, SimpleSeq2Seq
-from allennlp.nn import InitializerApplicator, RegularizerApplicator
-from allennlp.modules import TextFieldEmbedder, Seq2SeqEncoder, Seq2VecEncoder, FeedForward
 from typing import Dict, Any, List, Optional, Tuple
 
-from allennlp.nn.util import get_text_field_mask
-from allennlp.training.metrics import CategoricalAccuracy, Average, Entropy
+import torch
+from allennlp.data import Vocabulary
+from allennlp.models import Model
+from allennlp.modules import TextFieldEmbedder, Seq2SeqEncoder, FeedForward
+from allennlp.nn import InitializerApplicator, RegularizerApplicator
+from allennlp.nn.util import get_text_field_mask, get_final_encoder_states
+from allennlp.training.metrics import CategoricalAccuracy, Average
 from torch import nn
 from torch.nn import Dropout
 
@@ -230,25 +226,30 @@ class UncertainReader(Model):
             else:
                 encoded_sentences = story_embedded_text
 
-            # TODO: Just take the last context. Change this to allow a general attention mechanism over the sentence, pooling, etc.
             batch_encoded_sentences.append(encoded_sentences)
-            encoded_sentences = encoded_sentences.select(1, -1)
-            encoded_sentences = torch.unsqueeze(encoded_sentences, dim=0)
 
             # Create a mask that only has stories with sentences that go to the end of the batch.
             story_sentence_mask = torch.sum(story_mask, 1)
             story_sentence_mask = story_sentence_mask > 0
-            story_sentence_mask = story_sentence_mask.unsqueeze(dim=0).to(encoded_sentences.device)
+            story_sentence_mask = story_sentence_mask.to(encoded_sentences.device)
+
+            # Get the final context form each encoding.
+            encoded_sentence_vecs = get_final_encoder_states(encoded_sentences[story_sentence_mask],
+                                                             story_mask[story_sentence_mask])
+            encoded_sentence_vecs = torch.unsqueeze(encoded_sentence_vecs, dim=0)
+
+            # Unflatten so can be stacked across stories
+            story_sentence_mask = story_sentence_mask.unsqueeze(dim=0)
             story_sentence_masks.append(story_sentence_mask)
 
-            encoded_story = self._story_seq2seq_encoder(encoded_sentences, story_sentence_mask)
+            encoded_story = self._story_seq2seq_encoder(encoded_sentence_vecs, story_sentence_mask)
 
             encoded_story = encoded_story.squeeze(dim=0)
             batch_encoded_stories.append(encoded_story)
 
+        # Combine the individual stories to a batch.
         story_sentence_masks = torch.stack(story_sentence_masks)
         story_sentence_masks = torch.squeeze(story_sentence_masks, dim=1)
-
         batch_encoded_stories = torch.stack(batch_encoded_stories)
 
         if self._story_feedforward:
