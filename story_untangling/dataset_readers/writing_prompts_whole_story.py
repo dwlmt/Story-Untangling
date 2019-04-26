@@ -1,25 +1,20 @@
 import asyncio
 import logging
-from collections import OrderedDict
-from time import sleep
 from typing import Dict, List, Union, Any
 
 import dataset
 import more_itertools
-import numpy
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data import Token
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.data.fields import TextField, MetadataField, ArrayField, ListField
+from allennlp.data.fields import TextField, MetadataField, ListField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
+from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
-from allennlp.semparse.contexts.knowledge_graph import KnowledgeGraph
 from overrides import overrides
 
-from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
-from story_untangling.dataset_readers.dataset_utils import dual_window
-from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
+from story_untangling.dataset_readers.dataset_features import create_dataset_db
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -63,6 +58,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
+
     def __init__(self,
                  tokenizer: Tokenizer = None,
                  token_indexers: Dict[str, TokenIndexer] = None,
@@ -112,14 +108,13 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         for story in stories:
 
-                story_id = story["id"]
+            story_id = story["id"]
 
-                # Id will be the same as the sentence num as they are inserted as a batch in sequence.
-                sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} ORDER BY id')]
+            # Id will be the same as the sentence num as they are inserted as a batch in sequence.
+            sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} ORDER BY id')]
 
-                for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
-
-                    yield self.text_to_instance(sentence_batch, story)
+            for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
+                yield self.text_to_instance(sentence_batch, story)
 
     @overrides
     def text_to_instance(self,
@@ -171,7 +166,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         field_dict["metadata"] = MetadataField(metadata)
 
         return Instance(field_dict)
-
 
     def create_temp_dataset(self, temp_db_location):
         self._dataset_path = temp_db_location

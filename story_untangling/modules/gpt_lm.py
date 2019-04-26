@@ -1,10 +1,10 @@
-import torch
-
-from torch import nn
-from allennlp.modules.openai_transformer import OpenaiTransformer
-from allennlp.modules import FeedForward, Seq2SeqEncoder
-from torch.nn import NLLLoss, CrossEntropyLoss
 from typing import Dict, Any, List
+
+import torch
+from allennlp.modules import Seq2SeqEncoder
+from allennlp.modules.openai_transformer import OpenaiTransformer
+from torch import nn
+from torch.nn import NLLLoss
 
 
 class BaseLMHead(nn.Module):
@@ -24,11 +24,11 @@ class BaseLMHead(nn.Module):
 
     def calc_loss(self, lm_labels, lm_logits):
         # Shift so that tokens < n predict n
-        lm_logits = lm_logits[:, :-1, :].contiguous()
-        lm_labels = lm_labels[:, 1:].contiguous()
+        lm_logits = lm_logits[:, :-1, :]
+        lm_labels = lm_labels[:, 1:]
         # Flatten the tokens and classes
-        lm_logits = lm_logits.view(-1, lm_logits.size(-1))
-        lm_labels = lm_labels.view(-1)
+        lm_logits = lm_logits.contiguous().view(-1, lm_logits.size(-1))
+        lm_labels = lm_labels.contiguous().view(-1)
         scores_softmax = self.log_softmax(lm_logits)
         loss = self.loss(scores_softmax, lm_labels)
         if self._metrics and not self.training:
@@ -80,9 +80,7 @@ class FusionLM(BaseLMHead):
 
         self._decoder.requires_grad = True
 
-
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
-
         feature_hidden_states = feature_hidden_states.unsqueeze(dim=1)
 
         feature_hidden_states = feature_hidden_states.expand(feature_hidden_states.shape[0], lm_hidden_states.shape[1],
@@ -125,4 +123,3 @@ class BilinearLM(BaseLMHead):
             return self.calc_loss(lm_labels, lm_logits).to(lm_hidden_states.device)
 
         return lm_logits
-

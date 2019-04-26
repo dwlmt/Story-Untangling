@@ -265,9 +265,8 @@ class ReadingThoughts(Model):
                 output_dict["target_embeddings"] = encoded_target.tolist()
 
             batch_loss, scores = self._calculate_loss(batch_size, encoded_source, encoded_target, output_dict,
-                                         full_output_score=self._full_output_score)
+                                                      full_output_score=self._full_output_score)
             loss += batch_loss
-
 
             # If there is a custom similarity defined then output using this similarity.
             self.similarity_metrics(encoded_source, encoded_target, "neighbour", output_dict)
@@ -287,10 +286,9 @@ class ReadingThoughts(Model):
             if self._full_output_embeddings:
                 output_dict["negative_embeddings"] = encoded_negative.tolist()
 
-
-
             batch_loss, scores = self._calculate_loss(batch_size, encoded_source, encoded_negative, output_dict,
-                                                      metrics_prefix="negative", full_output_score=self._full_output_score, existing_scores=scores)
+                                                      metrics_prefix="negative",
+                                                      full_output_score=self._full_output_score, existing_scores=scores)
             loss += batch_loss
 
             self.similarity_metrics(encoded_source, encoded_target, "negative", output_dict)
@@ -337,7 +335,6 @@ class ReadingThoughts(Model):
             comb_scores += neg_scores * neg_identity.float()
             dot_product_scores = comb_scores
 
-
         # The correct answer should correspond to the same position in the batch.
         identity = torch.eye(batch_size, dtype=torch.long).to(dot_product_scores.device)
         target_classes = torch.argmax(identity, dim=1)  # Get indices and NLLLoss needs these.
@@ -351,7 +348,6 @@ class ReadingThoughts(Model):
         # The length regularizer penalizes cases where the correct source and targets aren't the same length.
         # Redundant when applying a cosine loss as the vectors will be normalized for length anyway.
         if self._length_regularizer and not self._cosine_loss:
-
             source_norm = encoded_source.norm(dim=-1)
             target_norm = encoded_target.norm(dim=-1)
 
