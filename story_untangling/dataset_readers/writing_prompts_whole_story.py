@@ -12,12 +12,13 @@ from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
+from langdetect.lang_detect_exception import LangDetectException
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
-
+from langdetect import detect
 
 @DatasetReader.register("writing_prompts_whole_story")
 class WritingPromptsWholeStoryDatasetReader(DatasetReader):
@@ -62,12 +63,12 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     def __init__(self,
                  tokenizer: Tokenizer = None,
                  token_indexers: Dict[str, TokenIndexer] = None,
-                 add_start_end_token: bool = True,
+                 add_start_end_token: bool = False,
                  dataset_path: str = "./dataset-cache/",
                  use_existing_cached_db: bool = True,
                  db_discriminator="def",
-                 min_story_sentences: int = 0,
-                 max_story_sentences: int = 10 * 6,
+                 min_story_sentences: int = 5,
+                 max_story_sentences: int = 500,
                  truncate_sequence_length: int = 50,
                  story_chunking: int = 100,
                  cuda_device: Union[List[int], int] = -1,
@@ -114,7 +115,21 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} ORDER BY id')]
 
             for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
-                yield self.text_to_instance(sentence_batch, story)
+
+                # Filter out non English and gibberish sentences.
+
+                sentences_filtered = []
+                for sen in sentence_batch:
+                    try:
+                        if len(sen["text"]) > 0 and detect(sen["text"]) == 'en':
+                            sentences_filtered.append(sen)
+                    except LangDetectException:
+                        pass
+
+                if not sentences_filtered or len(sentences_filtered) == 0:
+                    continue
+
+                yield self.text_to_instance(sentences_filtered, story)
 
     @overrides
     def text_to_instance(self,
