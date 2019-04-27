@@ -12,13 +12,12 @@ from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
-from langdetect.lang_detect_exception import LangDetectException
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
-from langdetect import detect
+
 
 @DatasetReader.register("writing_prompts_whole_story")
 class WritingPromptsWholeStoryDatasetReader(DatasetReader):
@@ -112,24 +111,14 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             story_id = story["id"]
 
             # Id will be the same as the sentence num as they are inserted as a batch in sequence.
-            sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} ORDER BY id')]
+            sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} and lang = "en" '
+                                             f'and nonsense = false and english_chars=true ORDER BY id')]
 
             for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
 
                 # Filter out non English and gibberish sentences.
 
-                sentences_filtered = []
-                for sen in sentence_batch:
-                    try:
-                        if len(sen["text"]) > 0 and detect(sen["text"]) == 'en':
-                            sentences_filtered.append(sen)
-                    except LangDetectException:
-                        pass
-
-                if not sentences_filtered or len(sentences_filtered) == 0:
-                    continue
-
-                yield self.text_to_instance(sentences_filtered, story)
+                yield self.text_to_instance(sentence_batch, story)
 
     @overrides
     def text_to_instance(self,

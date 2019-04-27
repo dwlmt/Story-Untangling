@@ -5,7 +5,7 @@ import logging
 import os
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
-from typing import Tuple, List, Dict, Any, Optional, Union
+from typing import Tuple, List, Dict, Any, Union
 
 import dataset
 import more_itertools
@@ -16,15 +16,25 @@ from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
 from allennlp.models import Model
 from allennlp.predictors import Predictor
 from dataset import Database
+from guess_language import guess_language
 from nltk.sentiment import SentimentIntensityAnalyzer
+from nostril import nonsense
 from textblob import TextBlob
 
 nltk.download('vader_lexicon')
 
+
+def isEnglish(s):
+    try:
+        s.encode(encoding='utf-8').decode('ascii')
+    except UnicodeDecodeError:
+        return False
+    else:
+        return True
+
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 300, "check_same_thread": False}}
-
 
 async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
                             sentence_splitter: SentenceSplitter = SpacySentenceSplitter(),
@@ -59,7 +69,6 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
         with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
-            
             # Create the main tables and columns that need indexing.
             story_table = db.create_table('story')
             story_table.create_column('story_num', db.types.integer)
@@ -343,9 +352,20 @@ class SaveStoryToDatabase:
 
                         text = " ".join([s.text for s in sent])
 
+                        try:
+                            lang = guess_language(text)
+                        except:
+                            lang = "UNKNOWN"
+                        try:
+                            is_nonsense = nonsense(text)
+                        except:
+                            is_nonsense = True
+
+                        is_eng = isEnglish(text)
+
                         sentences_to_save.append(
                             dict(sentence_num=i, story_id=story_id, text=text,
-                                 sentence_len=sentence_len,
+                                 sentence_len=sentence_len, lang=lang, nonsense=is_nonsense, english_chars=is_eng,
                                  start_span=start_span, end_span=end_span))
                     sentence_table.insert_many(sentences_to_save)
 
