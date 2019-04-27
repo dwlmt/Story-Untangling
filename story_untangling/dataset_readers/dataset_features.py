@@ -24,7 +24,7 @@ from textblob import TextBlob
 nltk.download('vader_lexicon')
 
 
-def isEnglish(s):
+def isAscii(s):
     try:
         s.encode(encoding='utf-8').decode('ascii')
     except UnicodeDecodeError:
@@ -96,6 +96,8 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             story_ids = await asyncio.gather(*create_story_tasks)
             logger.info(f"Saved stories to db with ids: {story_ids}")
 
+            await save_language_features(batch_size, dataset_db, executor, loop)
+
             if should_save_sentiment:
                 await save_sentiment(batch_size, dataset_db, executor, loop)
 
@@ -109,6 +111,46 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
 
 async def save_sentiment(batch_size, dataset_db, executor, loop):
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
+        db["sentence"].create_column('vader_sentiment', db.types.float)
+        db["sentence"].create_column('textblob_polarity', db.types.float)
+        db["sentence"].create_column('textblob_subjectivity', db.types.float)
+        sentiment_batch = []
+        sentiment_tasks = []
+        for sentence in db['sentence']:
+            sentiment_batch.append(sentence)
+
+            if len(sentiment_batch) == batch_size:
+                sentiment_tasks.append(
+                    loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+                sentiment_batch = []
+        sentiment_tasks.append(
+            loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+        await asyncio.gather(*sentiment_tasks)
+        logger.info(f"Sentiment saved")
+
+
+async def save_language_features(batch_size, dataset_db, executor, loop):
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
+        db["sentence"].create_column('lang', db.types.string)
+        db["sentence"].create_column('nonsense', db.types.boolean)
+        db["sentence"].create_column('ascii_chars', db.types.boolean)
+        sentiment_batch = []
+        sentiment_tasks = []
+        for sentence in db['sentence']:
+            sentiment_batch.append(sentence)
+
+            if len(sentiment_batch) == batch_size:
+                sentiment_tasks.append(
+                    loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), sentiment_batch))
+                sentiment_batch = []
+        sentiment_tasks.append(
+            loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), sentiment_batch))
+        await asyncio.gather(*sentiment_tasks)
+        logger.info(f"Language Features Saved")
+
+
+async def save_(batch_size, dataset_db, executor, loop):
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
         db["sentence"].create_column('vader_sentiment', db.types.float)
         db["sentence"].create_column('textblob_polarity', db.types.float)
@@ -319,6 +361,39 @@ class SentimentDatabaseFeatures:
             update_table_on_id(db, "sentence", sents_to_save)
 
 
+class LangDatabaseFeatures:
+    def __init__(self, dataset_db: str):
+        self._dataset_db = dataset_db
+
+    def __call__(self, story_sentences: List[Dict[str, Any]]) -> None:
+        sents_to_save = []
+        for sent_dict in story_sentences:
+
+            text = sent_dict["text"]
+
+            try:
+                lang = guess_language(text)
+            except:
+                lang = "UNKNOWN"
+            try:
+                if len(text) <= 10:
+                    is_nonsense = False
+                else:
+                    is_nonsense = nonsense(text)
+            except:
+                is_nonsense = True
+
+            is_eng = isAscii(text)
+
+            sentiment_dict = dict(id=sent_dict["id"], lang=lang, nonsense=is_nonsense, ascii_chars=is_eng)
+
+            sents_to_save.append(sentiment_dict)
+
+        with dataset.connect(self._dataset_db,
+                             engine_kwargs=engine_kwargs) as db:
+            update_table_on_id(db, "sentence", sents_to_save)
+
+
 class SaveStoryToDatabase:
     def __init__(self, dataset_db: str, truncate_sequence_length: int = 250):
         self._dataset_db = dataset_db
@@ -352,21 +427,9 @@ class SaveStoryToDatabase:
 
                         text = " ".join([s.text for s in sent])
 
-                        try:
-                            lang = guess_language(text)
-                        except:
-                            lang = "UNKNOWN"
-                        try:
-                            is_nonsense = nonsense(text)
-                        except:
-                            is_nonsense = True
-
-                        is_eng = isEnglish(text)
-
                         sentences_to_save.append(
                             dict(sentence_num=i, story_id=story_id, text=text,
-                                 sentence_len=sentence_len, lang=lang, nonsense=is_nonsense, english_chars=is_eng,
-                                 start_span=start_span, end_span=end_span))
+                                 sentence_len=sentence_len, start_span=start_span, end_span=end_span))
                     sentence_table.insert_many(sentences_to_save)
 
                     story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
