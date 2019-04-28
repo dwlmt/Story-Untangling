@@ -111,8 +111,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             story_id = story["id"]
 
             # Id will be the same as the sentence num as they are inserted as a batch in sequence.
-            sentences = [s for s in db.query(f'SELECT * FROM sentence WHERE story_id = {story_id} and lang = "en" '
-                                             f'and nonsense = false and ascii_chars=true ORDER BY id')]
+            sentences = [s for s in db.query(f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
+                                             f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
+                                             f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true ORDER BY id')]
 
             for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
 

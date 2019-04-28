@@ -34,7 +34,7 @@ def isAscii(s):
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
-engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 300, "check_same_thread": False}}
+engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 1000, "check_same_thread": False}}
 
 async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
                             sentence_splitter: SentenceSplitter = SpacySentenceSplitter(),
@@ -73,7 +73,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             story_table = db.create_table('story')
             story_table.create_column('story_num', db.types.integer)
             sentence_table = db.create_table('sentence')
-            sentence_table.create_column('story_id', db.types.integer)
+            sentence_table.create_column('story_id', db.types.bigint)
             sentence_table.create_column('sentence_num', db.types.integer)
             sentence_table.create_column('sentence_len', db.types.integer)
             sentence_table.create_column('start_span', db.types.integer)
@@ -112,9 +112,12 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
 async def save_sentiment(batch_size, dataset_db, executor, loop):
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
-        db["sentence"].create_column('vader_sentiment', db.types.float)
-        db["sentence"].create_column('textblob_polarity', db.types.float)
-        db["sentence"].create_column('textblob_subjectivity', db.types.float)
+        sentence_sentiment_table = db.create_table('sentence_sentiment')
+        sentence_sentiment_table.create_column('sentence_id', db.types.bigint)
+        sentence_sentiment_table.create_column('vader_sentiment', db.types.float)
+        sentence_sentiment_table.create_column('textblob_polarity', db.types.float)
+        sentence_sentiment_table.create_column('textblob_subjectivity', db.types.float)
+        sentence_sentiment_table.create_index(['sentence_id'])
         sentiment_batch = []
         sentiment_tasks = []
         for sentence in db['sentence']:
@@ -126,49 +129,39 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
                 sentiment_batch = []
         sentiment_tasks.append(
             loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+
         await asyncio.gather(*sentiment_tasks)
+
         logger.info(f"Sentiment saved")
 
 
 async def save_language_features(batch_size, dataset_db, executor, loop):
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
-        db["sentence"].create_column('lang', db.types.string)
-        db["sentence"].create_column('nonsense', db.types.boolean)
-        db["sentence"].create_column('ascii_chars', db.types.boolean)
-        sentiment_batch = []
-        sentiment_tasks = []
-        for sentence in db['sentence']:
-            sentiment_batch.append(sentence)
+        table = db.create_table('sentence_lang')
+        table.create_column('sentence_id', db.types.bigint)
+        table.create_column('lang', db.types.string)
+        table.create_column('nonsense', db.types.boolean)
+        table.create_column('ascii_chars', db.types.boolean)
 
-            if len(sentiment_batch) == batch_size:
-                sentiment_tasks.append(
-                    loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), sentiment_batch))
-                sentiment_batch = []
-        sentiment_tasks.append(
-            loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), sentiment_batch))
-        await asyncio.gather(*sentiment_tasks)
+        table.create_index(['sentence_id'])
+
+        batch = []
+        tasks = []
+
+        for sentence in db['sentence']:
+
+            batch.append(sentence)
+
+
+            if len(batch) == batch_size:
+                loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), batch)
+                batch = []
+        tasks.append(
+            loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), batch))
+
+        await asyncio.gather(*tasks)
+
         logger.info(f"Language Features Saved")
-
-
-async def save_(batch_size, dataset_db, executor, loop):
-    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
-        db["sentence"].create_column('vader_sentiment', db.types.float)
-        db["sentence"].create_column('textblob_polarity', db.types.float)
-        db["sentence"].create_column('textblob_subjectivity', db.types.float)
-        sentiment_batch = []
-        sentiment_tasks = []
-        for sentence in db['sentence']:
-            sentiment_batch.append(sentence)
-
-            if len(sentiment_batch) == batch_size:
-                sentiment_tasks.append(
-                    loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
-                sentiment_batch = []
-        sentiment_tasks.append(
-            loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
-        await asyncio.gather(*sentiment_tasks)
-        logger.info(f"Sentiment saved")
-
 
 async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None,
                    save_batch_size: int = 25):
@@ -227,7 +220,7 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
 
         
         coref_table = db.create_table('coreference')
-        coref_table.create_column('story_id', db.types.integer)
+        coref_table.create_column('story_id', db.types.bigint)
         coref_table.create_column('start_span', db.types.integer)
         coref_table.create_column('end_span', db.types.integer)
         coref_table.create_index(['story_id'])
@@ -262,7 +255,6 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
                 sentence_tokens = word_tokenizer.batch_tokenize(sentence_list)
 
                 for sentence_chunk in more_itertools.chunked(sentence_tokens, n=sentence_chunks):
-
                     sentence_chunk_flat = list(more_itertools.flatten(sentence_chunk))
 
                     if len(sentence_chunk_flat) < 10:
@@ -295,23 +287,17 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
                     
                 except Exception as e:
                     logging.error(e)
-                    
 
             logger.info(f"Coreferences Saved")
 
 
 def update_table_on_id(db, table, data):
     try:
-        
         sentence_table = db[table]
         for sent_dict in data:
             sentence_table.update(sent_dict, ["id"])
-        
-
     except Exception as e:
         logging.error(e)
-        
-
 
 async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
     """ Async yield batches of stories that are line separated/
@@ -351,14 +337,13 @@ class SentimentDatabaseFeatures:
             polarity = text_blob.sentiment.polarity
             subjectivity = text_blob.sentiment.subjectivity
 
-            sentiment_dict = dict(id=sent_dict["id"], vader_sentiment=vader_compound, textblob_polarity=polarity,
+            sentiment_dict = dict(sentence_id=sent_dict["id"], vader_sentiment=vader_compound, textblob_polarity=polarity,
                                   textblob_subjectivity=subjectivity)
 
             sents_to_save.append(sentiment_dict)
 
-        with dataset.connect(self._dataset_db,
-                             engine_kwargs=engine_kwargs) as db:
-            update_table_on_id(db, "sentence", sents_to_save)
+        with dataset.connect(self._dataset_db, engine_kwargs=engine_kwargs) as db:
+            db["sentence_sentiment"].insert_many(sents_to_save)
 
 
 class LangDatabaseFeatures:
@@ -366,7 +351,7 @@ class LangDatabaseFeatures:
         self._dataset_db = dataset_db
 
     def __call__(self, story_sentences: List[Dict[str, Any]]) -> None:
-        sents_to_save = []
+        lang_list = []
         for sent_dict in story_sentences:
 
             text = sent_dict["text"]
@@ -385,13 +370,12 @@ class LangDatabaseFeatures:
 
             is_eng = isAscii(text)
 
-            sentiment_dict = dict(id=sent_dict["id"], lang=lang, nonsense=is_nonsense, ascii_chars=is_eng)
+            lang_dict = dict(sentence_id=sent_dict["id"], lang=lang, nonsense=is_nonsense, ascii_chars=is_eng)
 
-            sents_to_save.append(sentiment_dict)
+            lang_list.append(lang_dict)
 
-        with dataset.connect(self._dataset_db,
-                             engine_kwargs=engine_kwargs) as db:
-            update_table_on_id(db, "sentence", sents_to_save)
+        with dataset.connect(self._dataset_db, engine_kwargs=engine_kwargs) as db:
+            db["sentence_lang"].insert_many(lang_list)
 
 
 class SaveStoryToDatabase:
