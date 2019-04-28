@@ -119,18 +119,23 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
         sentence_sentiment_table.create_column('textblob_subjectivity', db.types.float)
         sentence_sentiment_table.create_index(['sentence_id'])
         sentiment_batch = []
-        sentiment_tasks = []
+        tasks = []
         for sentence in db['sentence']:
             sentiment_batch.append(sentence)
 
             if len(sentiment_batch) == batch_size:
-                sentiment_tasks.append(
-                    loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+                tasks.append(
+                    loop.run_in_executor(executor, SentimentDatabaseFeatures(), sentiment_batch))
                 sentiment_batch = []
-        sentiment_tasks.append(
-            loop.run_in_executor(executor, SentimentDatabaseFeatures(dataset_db), sentiment_batch))
+        tasks.append(
+            loop.run_in_executor(executor, SentimentDatabaseFeatures(), sentiment_batch))
 
-        await asyncio.gather(*sentiment_tasks)
+        for i, t in enumerate(asyncio.as_completed(tasks)):
+            result = await t
+            db["sentence_sentiment"].insert_many(result)
+            print(f"Sentence Sentiment batch saved {i}")
+
+        await asyncio.gather(*tasks)
 
         logger.info(f"Sentiment saved")
 
@@ -152,14 +157,16 @@ async def save_language_features(batch_size, dataset_db, executor, loop):
 
             batch.append(sentence)
 
-
             if len(batch) == batch_size:
                 loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), batch)
                 batch = []
         tasks.append(
             loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), batch))
 
-        await asyncio.gather(*tasks)
+        for i, t in enumerate(asyncio.as_completed(tasks)):
+            result = await t
+            db["sentence_lang"].insert_many(result)
+            print(f"Sentence Language batch saved {i}")
 
         logger.info(f"Language Features Saved")
 
@@ -321,8 +328,8 @@ async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[Lis
 
 
 class SentimentDatabaseFeatures:
-    def __init__(self, dataset_db: str):
-        self._dataset_db = dataset_db
+    def __init__(self):
+        pass
 
     def __call__(self, story_sentences: List[Dict[str, Any]]) -> None:
         sents_to_save = []
@@ -342,13 +349,12 @@ class SentimentDatabaseFeatures:
 
             sents_to_save.append(sentiment_dict)
 
-        with dataset.connect(self._dataset_db, engine_kwargs=engine_kwargs) as db:
-            db["sentence_sentiment"].insert_many(sents_to_save)
+        return sents_to_save
 
 
 class LangDatabaseFeatures:
-    def __init__(self, dataset_db: str):
-        self._dataset_db = dataset_db
+    def __init__(self):
+        pass
 
     def __call__(self, story_sentences: List[Dict[str, Any]]) -> None:
         lang_list = []
@@ -374,8 +380,8 @@ class LangDatabaseFeatures:
 
             lang_list.append(lang_dict)
 
-        with dataset.connect(self._dataset_db, engine_kwargs=engine_kwargs) as db:
-            db["sentence_lang"].insert_many(lang_list)
+        return lang_list
+
 
 
 class SaveStoryToDatabase:
