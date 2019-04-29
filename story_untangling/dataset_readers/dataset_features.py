@@ -372,6 +372,9 @@ class LangDatabaseFeatures:
 
             try:
                 lang = guess_language(text)
+                if guess_language.UNKNOWN == lang:
+                    lang = "UNKNOWN"
+
             except:
                 lang = "UNKNOWN"
             try:
