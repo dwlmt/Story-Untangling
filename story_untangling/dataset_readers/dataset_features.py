@@ -16,10 +16,12 @@ from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
 from allennlp.models import Model
 from allennlp.predictors import Predictor
 from dataset import Database
-from guess_language import guess_language
+
+
 from nltk.sentiment import SentimentIntensityAnalyzer
 from nostril import nonsense
 from textblob import TextBlob
+from whatthelang import WhatTheLang
 
 nltk.download('vader_lexicon')
 
@@ -127,19 +129,15 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
 
             if len(sentiment_batch) == batch_size:
                 tasks.append(
-                    loop.run_in_executor(executor, SentimentDatabaseFeatures(), sentiment_batch))
+                    loop.run_in_executor(executor, sentiment_features, sentiment_batch))
                 sentiment_batch = []
         tasks.append(
-            loop.run_in_executor(executor, SentimentDatabaseFeatures(), sentiment_batch))
-
-    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
+            loop.run_in_executor(executor, sentiment_features, sentiment_batch))
 
         for i, t in enumerate(asyncio.as_completed(tasks)):
             result = await t
             db["sentence_sentiment"].insert_many(result)
             print(f"Sentence Sentiment batch saved {i}")
-
-        await asyncio.gather(*tasks)
 
         logger.info(f"Sentiment saved")
 
@@ -164,12 +162,10 @@ async def save_language_features(batch_size, dataset_db, executor, loop):
             batch.append(sentence)
 
             if len(batch) == batch_size:
-                loop.run_in_executor(executor, LangDatabaseFeatures(), batch)
+                tasks.append(loop.run_in_executor(executor, lang_features, batch))
                 batch = []
         tasks.append(
-            loop.run_in_executor(executor, LangDatabaseFeatures(), batch))
-
-    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
+            loop.run_in_executor(executor, lang_features, batch))
 
         for i, t in enumerate(asyncio.as_completed(tasks)):
             result = await t
@@ -282,7 +278,6 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
                     if len(tasks) == save_batch_size:
                         results = await asyncio.gather(*tasks)
 
-
                         for coref_to_save in results:
                             try:
                                 
@@ -335,63 +330,57 @@ async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[Lis
     yield lines, story_nums
 
 
-class SentimentDatabaseFeatures:
-    def __init__(self):
-        pass
+def sentiment_features( story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
+    sents_to_save = []
+    for sent_dict in story_sentences:
+        analyzer = SentimentIntensityAnalyzer()
+        text = sent_dict["text"]
 
-    def __call__(self, story_sentences: List[Dict[str, Any]]) -> None:
-        sents_to_save = []
-        for sent_dict in story_sentences:
-            analyzer = SentimentIntensityAnalyzer()
-            text = sent_dict["text"]
+        vader_sentiment = analyzer.polarity_scores(text)
+        vader_compound = vader_sentiment["compound"]
 
-            vader_sentiment = analyzer.polarity_scores(text)
-            vader_compound = vader_sentiment["compound"]
+        text_blob = TextBlob(text)
+        polarity = text_blob.sentiment.polarity
+        subjectivity = text_blob.sentiment.subjectivity
 
-            text_blob = TextBlob(text)
-            polarity = text_blob.sentiment.polarity
-            subjectivity = text_blob.sentiment.subjectivity
+        sentiment_dict = dict(sentence_id=sent_dict["id"], vader_sentiment=vader_compound, textblob_polarity=polarity,
+                              textblob_subjectivity=subjectivity)
 
-            sentiment_dict = dict(sentence_id=sent_dict["id"], vader_sentiment=vader_compound, textblob_polarity=polarity,
-                                  textblob_subjectivity=subjectivity)
+        sents_to_save.append(sentiment_dict)
 
-            sents_to_save.append(sentiment_dict)
+    return sents_to_save
 
-        return sents_to_save
+def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
+    lang_list = []
+    for sent_dict in story_sentences:
 
+        text = sent_dict["text"]
 
-class LangDatabaseFeatures:
-    def __init__(self):
-        pass
+        wtl = WhatTheLang()
 
-    def __call__(self, story_sentences: List[Dict[str, Any]]) -> None:
-        lang_list = []
-        for sent_dict in story_sentences:
+        try:
+            lang =  wtl.predict_lang(text)
 
-            text = sent_dict["text"]
+            if not isinstance(lang, str):
+                lang = "UKN"
 
-            try:
-                lang = guess_language(text)
-                if guess_language.UNKNOWN == lang:
-                    lang = "UNKNOWN"
+        except:
+            lang = "UKN"
+        try:
+            if len(text) <= 10:
+                is_nonsense = False
+            else:
+                is_nonsense = nonsense(text)
+        except:
+            is_nonsense = True
 
-            except:
-                lang = "UNKNOWN"
-            try:
-                if len(text) <= 10:
-                    is_nonsense = False
-                else:
-                    is_nonsense = nonsense(text)
-            except:
-                is_nonsense = True
+        is_eng = isAscii(text)
 
-            is_eng = isAscii(text)
+        lang_dict = dict(sentence_id=sent_dict["id"], lang=lang, nonsense=is_nonsense, ascii_chars=is_eng)
 
-            lang_dict = dict(sentence_id=sent_dict["id"], lang=lang, nonsense=is_nonsense, ascii_chars=is_eng)
+        lang_list.append(lang_dict)
 
-            lang_list.append(lang_dict)
-
-        return lang_list
+    return lang_list
 
 
 
@@ -406,7 +395,6 @@ class SaveStoryToDatabase:
         for sentences, story_num in zip(story_sentences, story_nums):
             with dataset.connect(self._dataset_db,
                                  engine_kwargs=engine_kwargs) as db:
-
                 try:
                     
                     story_table = db['story']

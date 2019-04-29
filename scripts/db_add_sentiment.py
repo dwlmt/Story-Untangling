@@ -21,7 +21,7 @@ async def add_sentiment_features(args):
 parser = argparse.ArgumentParser(
     description='Add per sentence sentiment information to the database.')
 parser.add_argument('--database', required=True, type=str, help="The database.")
-parser.add_argument('--batch-size', type=int, default=100, help="Batch size. default: 100")
+parser.add_argument('--batch-size', type=int, default=1000, help="Batch size. default: 1000")
 parser.add_argument('--max-workers', type=int, default=16, help="Number of topics to use from HDP. Default: 16")
 
 args = parser.parse_args()
