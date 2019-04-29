@@ -111,6 +111,8 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
 
 async def save_sentiment(batch_size, dataset_db, executor, loop):
+    tasks = []
+
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
         sentence_sentiment_table = db.create_table('sentence_sentiment')
         sentence_sentiment_table.create_column('sentence_id', db.types.bigint)
@@ -119,7 +121,7 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
         sentence_sentiment_table.create_column('textblob_subjectivity', db.types.float)
         sentence_sentiment_table.create_index(['sentence_id'])
         sentiment_batch = []
-        tasks = []
+
         for sentence in db['sentence']:
             sentiment_batch.append(sentence)
 
@@ -129,6 +131,8 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
                 sentiment_batch = []
         tasks.append(
             loop.run_in_executor(executor, SentimentDatabaseFeatures(), sentiment_batch))
+
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
         for i, t in enumerate(asyncio.as_completed(tasks)):
             result = await t
@@ -141,6 +145,9 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
 
 
 async def save_language_features(batch_size, dataset_db, executor, loop):
+
+    tasks = []
+
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
         table = db.create_table('sentence_lang')
         table.create_column('sentence_id', db.types.bigint)
@@ -151,17 +158,18 @@ async def save_language_features(batch_size, dataset_db, executor, loop):
         table.create_index(['sentence_id'])
 
         batch = []
-        tasks = []
 
         for sentence in db['sentence']:
 
             batch.append(sentence)
 
             if len(batch) == batch_size:
-                loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), batch)
+                loop.run_in_executor(executor, LangDatabaseFeatures(), batch)
                 batch = []
         tasks.append(
-            loop.run_in_executor(executor, LangDatabaseFeatures(dataset_db), batch))
+            loop.run_in_executor(executor, LangDatabaseFeatures(), batch))
+
+    with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
         for i, t in enumerate(asyncio.as_completed(tasks)):
             result = await t
