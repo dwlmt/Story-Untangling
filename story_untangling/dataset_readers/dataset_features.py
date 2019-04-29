@@ -352,11 +352,12 @@ def sentiment_features( story_sentences: List[Dict[str, Any]]) -> List[Dict[str,
 
 def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
     lang_list = []
+
+    wtl = WhatTheLang()
+
     for sent_dict in story_sentences:
 
         text = sent_dict["text"]
-
-        wtl = WhatTheLang()
 
         try:
             lang =  wtl.predict_lang(text)
