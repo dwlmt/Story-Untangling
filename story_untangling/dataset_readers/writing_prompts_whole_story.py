@@ -69,9 +69,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  db_discriminator="def",
                  min_story_sentences: int = 5,
                  max_story_sentences: int = 500,
-                 truncate_sequence_length: int = 50,
+                 truncate_sequence_length: int = 40,
                  max_avg_length_per_word = 8,
-                 story_chunking: int = 100,
+                 story_chunking: int = 75,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
