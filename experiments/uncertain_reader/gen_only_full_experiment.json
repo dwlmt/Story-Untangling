@@ -31,7 +31,7 @@
   "evaluate_on_test": true,
   "model": {
     "type": "uncertain_reader",
-    "disc_loss": true,
+    "disc_loss": false,
     "gen_loss": true,
     "distance_weights": [
       1.0
@@ -103,7 +103,7 @@
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      2
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

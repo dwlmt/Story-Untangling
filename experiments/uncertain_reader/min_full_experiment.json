@@ -54,35 +54,13 @@
         }
       }
     },
-    "sentence_seq2seq_encoder": {
-      "type": "gru",
-      "input_size": 768,
-      "hidden_size": 768,
-      "num_layers": 2,
-      "dropout": 0.0
-    },
     "story_seq2seq_encoder": {
       "type": "gru",
       "input_size": 768,
       "hidden_size": 768,
-      "num_layers": 2,
+      "num_layers": 1,
       "dropout": 0.0
     },
-    "story_feedforward": {
-      "input_dim": 768,
-      "num_layers": 2,
-      "hidden_dims": 768,
-      "activations": "elu",
-      "dropout": 0.0
-    }
-    /*,
-        "target_feedforward": {
-          "input_dim": 768,
-          "num_layers": 2,
-          "hidden_dims": 768,
-          "activations": "elu",
-          "dropout": 0.0
-        }*/,
     //"bilinear_fusion": true,
     "fusion_seq2seq_encoder": {
       "type": "feedforward",
@@ -103,7 +81,7 @@
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      2
+      1
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

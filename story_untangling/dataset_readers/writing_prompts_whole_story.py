@@ -70,6 +70,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  min_story_sentences: int = 5,
                  max_story_sentences: int = 500,
                  truncate_sequence_length: int = 50,
+                 max_avg_length_per_word = 8,
                  story_chunking: int = 100,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
@@ -85,7 +86,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._min_story_sentences = min_story_sentences
         self._max_story_sentences = max_story_sentences
         self._truncate_sequence_length = truncate_sequence_length
-        self._max_character_length = self._truncate_sequence_length * 10
+        self._max_character_length = self._truncate_sequence_length * max_avg_length_per_word
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_chunking = story_chunking
 
