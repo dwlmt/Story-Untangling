@@ -45,7 +45,6 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                             coreference_model: str = None,
                             batch_size: int = 100,
                             max_workers: int = 16,
-                            truncate_sequence_length : int = 250,
                             cuda_device: Union[List[int], int] = None) -> str:
     file_name = os.path.basename(file_path)
     database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
@@ -92,7 +91,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
                 story_sentences = sentence_splitter.batch_split_sentences(lines)
                 create_story_tasks.append(
-                    loop.run_in_executor(executor, SaveStoryToDatabase(dataset_db, truncate_sequence_length=truncate_sequence_length),
+                    loop.run_in_executor(executor, SaveStoryToDatabase(dataset_db),
                                          story_sentences, story_nums))
 
             story_ids = await asyncio.gather(*create_story_tasks)
@@ -386,9 +385,8 @@ def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
 
 
 class SaveStoryToDatabase:
-    def __init__(self, dataset_db: str, truncate_sequence_length: int = 250):
+    def __init__(self, dataset_db: str):
         self._dataset_db = dataset_db
-        self._truncate_sequence_length = truncate_sequence_length
         self._word_tokenizer = WordTokenizer()
 
     def __call__(self, story_sentences: List[str], story_nums: List[int]) -> List[int]:
@@ -408,8 +406,6 @@ class SaveStoryToDatabase:
                     sentences = self._word_tokenizer.batch_tokenize(sentences)
 
                     for i, sent in enumerate(sentences):
-                        if self._truncate_sequence_length:
-                            sent = sent[0:min(self._truncate_sequence_length, len(sent))]
                         start_span = total_story_tokens
                         sentence_len = len(sent)
                         total_story_tokens += sentence_len

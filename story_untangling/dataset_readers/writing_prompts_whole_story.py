@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import textwrap
 from typing import Dict, List, Union, Any
 
 import dataset
@@ -84,6 +85,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._min_story_sentences = min_story_sentences
         self._max_story_sentences = max_story_sentences
         self._truncate_sequence_length = truncate_sequence_length
+        self._max_character_length = self._truncate_sequence_length * 10
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_chunking = story_chunking
 
@@ -96,7 +98,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         dataset_db = loop.run_until_complete(
             create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
                               file_path=file_path, use_existing_database=self._use_existing_cached_db,
-                              truncate_sequence_length=self._truncate_sequence_length,
                               cuda_device=self._cuda_device))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
@@ -136,6 +137,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 tokens = sentence["text"]
 
             tokens = text_standardize(tokens)
+            tokens = textwrap.shorten(tokens, width=self._max_character_length)
 
             tokenized_text = tokenizer(tokens)
 
