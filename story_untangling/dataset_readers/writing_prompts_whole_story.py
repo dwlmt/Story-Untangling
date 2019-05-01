@@ -1,10 +1,14 @@
 import asyncio
 import logging
+import pickle
 import textwrap
+from pathlib import Path
 from typing import Dict, List, Union, Any
 
 import dataset
 import more_itertools
+import nltk
+from PyDictionary import PyDictionary
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data import Token
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
@@ -13,7 +17,11 @@ from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
+from nostril import nonsense
 from overrides import overrides
+from spacy.lang.en import STOP_WORDS
+import enchant
+
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db
 
@@ -77,6 +85,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  truncate_sequence_length: int = 40,
                  max_avg_length_per_word = 8,
                  max_word_length = 25,
+                 min_check_word_length=8,
                  story_chunking: int = 75,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
@@ -94,10 +103,30 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._truncate_sequence_length = truncate_sequence_length
         self._max_character_length = self._truncate_sequence_length * max_avg_length_per_word
         self._max_word_length = max_word_length
+        self._min_check_word_length = min_check_word_length
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_chunking = story_chunking
 
         self._cuda_device = cuda_device
+
+
+        self._allowed_tokens = {}
+        self._tried_tokens = {}
+
+        for t in nltk.corpus.stopwords.words('english'):
+            self._allowed_tokens[t] = True
+
+        for t in STOP_WORDS:
+            self._allowed_tokens[t] = True
+
+        for t in punctuation:
+            self._allowed_tokens[t] = True
+
+        self._py_dictionary = PyDictionary()
+        self._enchant_dict_us = enchant.Dict("en_US")
+        self._enchant_dict_uk = enchant.Dict("en_UK")
+
+        self._reloaded_dicts = False
 
     @overrides
     def _read(self, file_path):
@@ -109,6 +138,17 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                               cuda_device=self._cuda_device))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
+
+        if not self._reloaded_dicts:
+            self._reloaded_dicts = True
+            allowed_tokens = db.get_table("allowed_tokens")
+            for t in allowed_tokens:
+                self._allowed_tokens[t["token"]] = True
+            print(f"Starting Allowed Tokens Size: {len(self._allowed_tokens)}")
+            tried_tokens = db.get_table("tried_tokens")
+            for t in tried_tokens:
+                self._tried_tokens[t["token"]] = True
+            print(f"Starting Tried Tokens Size: {len(self._tried_tokens)}")
 
         # Randomize the order of the stories. With repeated epochs and lazy dataloaders will produce different negative examples each epoch.
         stories = db.query(
@@ -128,15 +168,18 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
                 # Filter out non English and gibberish sentences.
 
-                yield self.text_to_instance(sentence_batch, story)
+                yield self.text_to_instance(sentence_batch, story, db)
 
     @overrides
     def text_to_instance(self,
-                         sentences: Dict[str, Any], story: Dict[str, Any]) -> Instance:  # type: ignore
+                         sentences: Dict[str, Any], story: Dict[str, Any], db) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
         story_text_original = []
         story_text_fields = []
+
+        tried_to_insert = []
+        allowed_to_insert = []
 
         def tokenize(sentence, tokenizer, indexer):
             if isinstance(sentence, str):
@@ -151,8 +194,24 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             tokens = textwrap.shorten(tokens, width=self._max_character_length)
 
             tokenized_text = tokenizer(tokens)
-            tokens = ' '.join([textwrap.shorten(t.text,width=self._max_word_length) for t in tokenized_text])
-            tokenized_text = tokenizer(tokens)
+
+            stripped_tokens = []
+
+            for token in tokenized_text:
+                token_text = token.lower_
+                token_len = len(token)
+                if token_len < self._min_check_word_length or (token_text in self._allowed_tokens and token_len <= self._max_word_length):
+                    stripped_tokens.append(token)
+                elif token_text not in self._tried_tokens:
+
+                    lookup_tokens(token_text)
+
+                    if token_text in self._allowed_tokens and len(token_text) <= self._max_word_length:
+                        stripped_tokens.append(token)
+                    else:
+                        print(f"Rejected token: {token_text}")
+
+            tokenized_text = stripped_tokens
 
             if self._add_start_end_token:
                 tokenized_text.insert(0, Token(START_SYMBOL))
@@ -167,6 +226,30 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 token_field = token_field.empty_field()
 
             return tokens, token_field
+
+        def lookup_tokens(token_text):
+
+            add_token = False
+            if self._enchant_dict_us.check(token_text) or self._enchant_dict_uk.check(token_text):
+                # print("Enchant Dictionary", token_text)
+                add_token = True
+            elif self._py_dictionary.meaning(token_text) != None:
+                print("Py Dictionary", token_text)
+                add_token = True
+            else:
+                try:
+                    if not nonsense(token_text):
+                        # print("Not Nonsense", token_text)
+                        add_token = True
+                except:
+                    pass
+
+            if add_token:
+                self._allowed_tokens[token_text] = True
+                allowed_to_insert.append({"token": token_text})
+
+            self._tried_tokens[token_text] = True
+            tried_to_insert.append({"token": token_text})
 
         def strip_repeating_punctuation(tokens):
             # Strip repeating characters.
@@ -195,6 +278,13 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         text_field = ListField(story_text_fields)
         field_dict['text'] = text_field
         field_dict["metadata"] = MetadataField(metadata)
+
+        if len(tried_to_insert) > 0:
+            print(f"Tried tokens inserted: {len(tried_to_insert)}")
+            db["tried_tokens"].insert_many(tried_to_insert)
+        if len(allowed_to_insert) > 0:
+            print(f"Allowed tokens inserted: {len(allowed_to_insert)}")
+            db["allowed_tokens"].insert_many(allowed_to_insert)
 
         return Instance(field_dict)
 
