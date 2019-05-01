@@ -19,6 +19,11 @@ from story_untangling.dataset_readers.dataset_features import create_dataset_db
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
+from itertools import groupby
+from string import punctuation
+
+punc = set(punctuation) - set('.')
+
 
 @DatasetReader.register("writing_prompts_whole_story")
 class WritingPromptsWholeStoryDatasetReader(DatasetReader):
@@ -71,6 +76,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  max_story_sentences: int = 500,
                  truncate_sequence_length: int = 40,
                  max_avg_length_per_word = 8,
+                 max_word_length = 25,
                  story_chunking: int = 75,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
@@ -87,6 +93,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._max_story_sentences = max_story_sentences
         self._truncate_sequence_length = truncate_sequence_length
         self._max_character_length = self._truncate_sequence_length * max_avg_length_per_word
+        self._max_word_length = max_word_length
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_chunking = story_chunking
 
@@ -138,8 +145,13 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 tokens = sentence["text"]
 
             tokens = text_standardize(tokens)
+
+            tokens = strip_repeating_punctuation(tokens)
+
             tokens = textwrap.shorten(tokens, width=self._max_character_length)
 
+            tokenized_text = tokenizer(tokens)
+            tokens = ' '.join([textwrap.shorten(t.text,width=self._max_word_length) for t in tokenized_text])
             tokenized_text = tokenizer(tokens)
 
             if self._add_start_end_token:
@@ -155,6 +167,17 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 token_field = token_field.empty_field()
 
             return tokens, token_field
+
+        def strip_repeating_punctuation(tokens):
+            # Strip repeating characters.
+            newtext = []
+            for k, g in groupby(tokens):
+                if k in punc:
+                    newtext.append(k)
+                else:
+                    newtext.extend(g)
+            tokens = ''.join(newtext)
+            return tokens
 
         for i, sentence in enumerate(sentences, 1):
             sentence_text, sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
