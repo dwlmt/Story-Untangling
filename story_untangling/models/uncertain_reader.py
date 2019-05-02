@@ -73,6 +73,7 @@ class UncertainReader(Model):
                  gen_loss: bool = True,
                  disc_loss: bool = True,
                  primary_token_namespace="openai_transformer",
+                 lm_finetune_top_layers: int = 0,
                  gen_loss_weight: float = 1.0,
                  disc_loss_weight: float = 1.0,
                  full_output_scores: bool = False,
@@ -92,12 +93,22 @@ class UncertainReader(Model):
         self._target_feedforward = target_feedforward
         self._story_feedforward = story_feedforward
 
-
         feature_dim = story_seq2seq_encoder.get_output_dim()
         if self._story_feedforward:
             feature_dim = self._story_feedforward.get_output_dim()
 
         transformer = self._text_field_embedder._token_embedders[self._primary_token_namespace]._transformer
+
+        # Finetune the top n layers.
+
+        if lm_finetune_top_layers > 0:
+            for i, h in enumerate(reversed(transformer.h), start=1):
+                for param in h.parameters():
+                    param.requires_grad = True
+                print(f"Finetune LM layer -{i}")
+                if i == lm_finetune_top_layers:
+                    break
+
 
         if bilinear_fusion:
             self._lm_model = BilinearLM(

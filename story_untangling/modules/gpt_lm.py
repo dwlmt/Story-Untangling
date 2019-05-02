@@ -78,8 +78,6 @@ class FusionLM(BaseLMHead):
 
         self._encoder = encoder
 
-        self._decoder.requires_grad = True
-
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
         feature_hidden_states = feature_hidden_states.unsqueeze(dim=1)
 
