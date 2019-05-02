@@ -10,7 +10,7 @@
     "token_indexers": {
       "openai_transformer": {
         "type": "openai_transformer_byte_pair",
-        "n_ctx": 150,
+        "n_ctx": 100,
         "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
@@ -33,11 +33,9 @@
     "type": "uncertain_reader",
     "disc_loss": true,
     "gen_loss": true,
+    "lm_finetune_top_layers": 3,
     "distance_weights": [
-      1.0,
-      0.5,
-      0.25,
-      0.125
+      1.0
     ],
     "text_field_embedder": {
       "allow_unmatched_keys": true,
@@ -51,8 +49,8 @@
         "openai_transformer": {
           "type": "openai_transformer_embedder",
           "transformer": {
-            "n_ctx": 150,
-            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
+            "n_ctx": 100,
+            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
           }
         }
       }

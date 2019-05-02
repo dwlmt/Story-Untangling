@@ -10,11 +10,11 @@
     "token_indexers": {
       "openai_transformer": {
         "type": "openai_transformer_byte_pair",
-        "n_ctx": 100,
+        "n_ctx": 150,
         "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
-    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
+    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/base",
     "use_existing_cached_db": true,
     "cuda_device": [
       0,
@@ -48,7 +48,7 @@
         "openai_transformer": {
           "type": "openai_transformer_embedder",
           "transformer": {
-            "n_ctx": 100,
+            "n_ctx": 150,
             "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
           }
         }
@@ -65,7 +65,7 @@
       "type": "gru",
       "input_size": 768,
       "hidden_size": 768,
-      "num_layers": 2,
+      "num_layers": 3,
       "dropout": 0.0
     },
     "story_feedforward": {
