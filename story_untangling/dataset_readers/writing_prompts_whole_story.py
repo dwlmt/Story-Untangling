@@ -86,7 +86,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  max_avg_length_per_word = 8,
                  max_word_length = 25,
                  min_check_word_length=8,
-                 story_chunking: int = 75,
+                 story_chunking: int = 50,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -200,7 +200,13 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             for token in tokenized_text:
                 token_text = token.lower_
                 token_len = len(token)
-                if token_len < self._min_check_word_length or (token_text in self._allowed_tokens and token_len <= self._max_word_length):
+                if token_len < self._max_word_length:
+                    stripped_tokens.append(token)
+
+                # Disable the main checker
+                if True:
+                    pass
+                elif token_len < self._min_check_word_length or (token_text in self._allowed_tokens and token_len <= self._max_word_length):
                     stripped_tokens.append(token)
                 elif token_text not in self._tried_tokens:
 
