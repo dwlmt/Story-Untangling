@@ -211,9 +211,11 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                     if token_text in self._allowed_tokens and len(token_text) <= self._max_word_length:
                         stripped_tokens.append(token)
                     else:
+                        stripped_tokens.append(Token(token.pos_))
                         print(f"Rejected token: {token_text}")
 
             tokenized_text = stripped_tokens
+
 
             if self._add_start_end_token:
                 tokenized_text.insert(0, Token(START_SYMBOL))
