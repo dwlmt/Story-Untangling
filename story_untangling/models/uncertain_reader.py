@@ -210,21 +210,20 @@ class UncertainReader(Model):
 
         # Because the batch has sentences need to reshape so can use the masking util function.
         text_mod = {}
+        def_device = None
         batch_size = None
         for k, v in text.items():
             if not batch_size:
                 batch_size, num_sentences, sentence_length = v.shape
+            def_device = v.device
+            text_mod[k] = v.view(batch_size * num_sentences, -1).to(self._lm_model.transformer.decoder.weight.device)
 
-            text_mod[k] = v.view(batch_size * num_sentences, -1)
-
-        masks_tensor = get_text_field_mask(text_mod)
+        masks_tensor = get_text_field_mask(text_mod).to(def_device)
         masks_tensor = masks_tensor.view(batch_size, num_sentences, -1)
 
-        embedded_text_tensor = self._text_field_embedder(text_mod)
+        embedded_text_tensor = self._text_field_embedder(text_mod).to(def_device)
 
         embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
-
-        # TODO: Parallelize using multiple GPUS if available rather than using a loop.
 
         batch_encoded_stories = []
         batch_encoded_sentences = []

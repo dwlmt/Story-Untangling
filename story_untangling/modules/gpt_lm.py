@@ -53,18 +53,18 @@ class MixtureLM(BaseLMHead):
 
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
 
-        lm_weighting = self._lm_weighting.clamp(min=0.001, max=0.999).to(lm_hidden_states.device)
+        lm_weighting = self._lm_weighting.clamp(min=0.001, max=0.999).to(feature_hidden_states.device)
 
         feature_logits = self._feature_decoder(feature_hidden_states)
 
         if len(lm_hidden_states.shape) == 3:
             feature_logits = feature_logits.unsqueeze(dim=1)
 
-        lm_logits = self._decoder(lm_hidden_states)
+        lm_logits = self._decoder(lm_hidden_states.to(self._decoder.weight.device)).to(feature_logits.device)
         lm_logits = (lm_logits * lm_weighting) + (feature_logits * (1.0 - lm_weighting))
 
         if lm_labels is not None:
-            return self.calc_loss(lm_labels, lm_logits).to(lm_hidden_states.device)
+            return self.calc_loss(lm_labels.to(lm_logits.device), lm_logits)
 
         return lm_logits
 
@@ -88,10 +88,10 @@ class FusionLM(BaseLMHead):
 
         fused_states = self._encoder(fused_states)
 
-        lm_logits = self._decoder(fused_states)
+        lm_logits = self._decoder(fused_states.to(self._decoder.weight.device))
 
         if lm_labels is not None:
-            return self.calc_loss(lm_labels, lm_logits).to(lm_hidden_states.device)
+            return self.calc_loss(lm_labels.to(feature_hidden_states.device), lm_logits.to(feature_hidden_states)).to(lm_hidden_states.device)
 
         return lm_logits
 
