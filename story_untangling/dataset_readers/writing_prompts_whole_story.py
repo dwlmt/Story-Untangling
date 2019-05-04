@@ -82,7 +82,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  db_discriminator="def",
                  min_story_sentences: int = 5,
                  max_story_sentences: int = 500,
-                 truncate_sequence_length: int = 40,
+                 truncate_sequence_length: int = 50,
                  max_avg_length_per_word = 8,
                  max_word_length = 25,
                  min_check_word_length=8,
