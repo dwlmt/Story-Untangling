@@ -38,9 +38,9 @@ class UncertainReader(Model):
                Target encoded used to fuse the vector. effectively a bridge to the future state.
            distance_weights: ``Tuple[float]``, optional (default = ``[1.0, 0.5, 0.25, 0.25]``)
                 The numbers represent the weights to apply to n+1, n+2, n+3 is the loss function. The length how many sentence to look ahead in predictions.
-           discriminator_length_regularizer : ``bool``, (optional, default=True)
+           disc_length_regularizer : ``bool``, (optional, default=True)
                 Regularizer that encourages the source and target vectors to be the same length.
-           discriminator_length_regularizer_weight : ``float``, (optional, default=1.0)
+           disc_length_regularizer_weight : ``float``, (optional, default=1.0)
                 If the regularizer is set then the length to apply.
            dropout : ``float``, optional (default = ``None``)
                 Dropout percentage to use.
@@ -422,7 +422,7 @@ class UncertainReader(Model):
                     correct_log_probs = torch.masked_select(scores_softmax, target_mask)
                     correct_probs = torch.exp(correct_log_probs)
 
-                    output_dict[f"disc_coorect_dot_product_{i}"] = correct_scores
+                    output_dict[f"disc_correct_dot_product_{i}"] = correct_scores
                     output_dict[f"disc_correct_log_probs_{i}"] = correct_log_probs
                     output_dict[f"disc_correct_probs_{i}"] = correct_probs
 
