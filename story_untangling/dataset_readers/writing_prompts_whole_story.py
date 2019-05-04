@@ -204,9 +204,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                     stripped_tokens.append(token)
 
                 # Disable the main checker
-                if True:
-                    pass
-                elif token_len < self._min_check_word_length or (token_text in self._allowed_tokens and token_len <= self._max_word_length):
+                if token_len < self._min_check_word_length or (token_text in self._allowed_tokens and token_len <= self._max_word_length):
                     stripped_tokens.append(token)
                 elif token_text not in self._tried_tokens:
 
