@@ -22,7 +22,7 @@
       2,
       3
     ],
-     "story_chunking": 75,
+    "story_chunking": 75,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -69,6 +69,22 @@
       "num_layers": 3,
       "dropout": 0.0
     },
+    "story_feedforward": {
+      "input_dim": 768,
+      "num_layers": 2,
+      "hidden_dims": 768,
+      "activations": "elu",
+      "dropout": 0.0
+    }
+    ,
+        "target_feedforward": {
+          "input_dim": 768,
+          "num_layers": 2,
+          "hidden_dims": 768,
+          "activations": "elu",
+          "dropout": 0.0
+        },
+    //"bilinear_fusion": true,
     "fusion_seq2seq_encoder": {
       "type": "feedforward",
       "feedforward": {
@@ -88,7 +104,7 @@
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      1
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
