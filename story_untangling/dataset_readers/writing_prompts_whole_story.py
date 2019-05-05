@@ -283,12 +283,15 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         field_dict['text'] = text_field
         field_dict["metadata"] = MetadataField(metadata)
 
-        if len(tried_to_insert) > 0:
-            print(f"Tried tokens inserted: {len(tried_to_insert)}")
-            db["tried_tokens"].insert_many(tried_to_insert)
-        if len(allowed_to_insert) > 0:
-            print(f"Allowed tokens inserted: {len(allowed_to_insert)}")
-            db["allowed_tokens"].insert_many(allowed_to_insert)
+        try:
+            if len(tried_to_insert) > 0:
+                print(f"Tried tokens inserted: {len(tried_to_insert)}")
+                db["tried_tokens"].insert_many(tried_to_insert)
+            if len(allowed_to_insert) > 0:
+                print(f"Allowed tokens inserted: {len(allowed_to_insert)}")
+                db["allowed_tokens"].insert_many(allowed_to_insert)
+        except e:
+            print(e)
 
         return Instance(field_dict)
 
