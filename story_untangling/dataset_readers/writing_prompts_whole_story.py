@@ -290,8 +290,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             if len(allowed_to_insert) > 0:
                 print(f"Allowed tokens inserted: {len(allowed_to_insert)}")
                 db["allowed_tokens"].insert_many(allowed_to_insert)
-        except e:
-            print(e)
+        except:
+            print(f"Couldn't insert {tried_to_insert}, {allowed_to_insert}")
 
         return Instance(field_dict)
 
