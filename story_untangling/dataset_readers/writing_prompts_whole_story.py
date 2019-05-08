@@ -128,6 +128,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         self._reloaded_dicts = False
 
+        self._tried_to_insert = []
+        self._allowed_to_insert = []
+
     @overrides
     def _read(self, file_path):
 
@@ -170,6 +173,19 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
                 yield self.text_to_instance(sentence_batch, story, db)
 
+        try:
+            if len(self._tried_to_insert) > 0:
+                print(f"Tried tokens inserted: {len(self._tried_to_insert)}")
+                db["tried_tokens"].insert_many(self._tried_to_insert)
+            if len(self._allowed_to_insert) > 0:
+                print(f"Allowed tokens inserted: {len(self._allowed_to_insert)}")
+                db["allowed_tokens"].insert_many(self._allowed_to_insert)
+
+            self._tried_to_insert = []
+            self._allowed_to_insert = []
+        except:
+            print(f"Couldn't insert {self._tried_to_insert}, {self._allowed_to_insert}")
+
     @overrides
     def text_to_instance(self,
                          sentences: Dict[str, Any], story: Dict[str, Any], db) -> Instance:  # type: ignore
@@ -177,9 +193,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         field_dict = {}
         story_text_original = []
         story_text_fields = []
-
-        tried_to_insert = []
-        allowed_to_insert = []
 
         def tokenize(sentence, tokenizer, indexer):
             if isinstance(sentence, str):
@@ -202,16 +215,20 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 token_len = len(token)
 
                 # Disable the main checker
-                if token_len < self._min_check_word_length or (token_text in self._allowed_tokens and token_len <= self._max_word_length):
+                if token_len > self._max_word_length:
+                    if len(token.pos_) > 0:
+                        stripped_tokens.append(Token(token.pos_))
+                elif token_len < self._min_check_word_length or token_text in self._allowed_tokens:
                     stripped_tokens.append(token)
                 elif token_text not in self._tried_tokens:
 
                     lookup_tokens(token_text)
 
-                    if token_text in self._allowed_tokens and len(token_text) <= self._max_word_length:
+                    if token_text in self._allowed_tokens and len(token_text):
                         stripped_tokens.append(token)
                     else:
-                        stripped_tokens.append(Token(token.pos_))
+                        if len(token.pos_) > 0:
+                            stripped_tokens.append(Token(token.pos_))
                         print(f"Rejected token: {token_text}")
 
             tokenized_text = stripped_tokens
@@ -250,10 +267,10 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
             if add_token:
                 self._allowed_tokens[token_text] = True
-                allowed_to_insert.append({"token": token_text})
+                self._allowed_to_insert.append({"token": token_text})
 
             self._tried_tokens[token_text] = True
-            tried_to_insert.append({"token": token_text})
+            self._tried_to_insert.append({"token": token_text})
 
         def strip_repeating_punctuation(tokens):
             # Strip repeating characters.
@@ -282,16 +299,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         text_field = ListField(story_text_fields)
         field_dict['text'] = text_field
         field_dict["metadata"] = MetadataField(metadata)
-
-        try:
-            if len(tried_to_insert) > 0:
-                print(f"Tried tokens inserted: {len(tried_to_insert)}")
-                db["tried_tokens"].insert_many(tried_to_insert)
-            if len(allowed_to_insert) > 0:
-                print(f"Allowed tokens inserted: {len(allowed_to_insert)}")
-                db["allowed_tokens"].insert_many(allowed_to_insert)
-        except:
-            print(f"Couldn't insert {tried_to_insert}, {allowed_to_insert}")
 
         return Instance(field_dict)
 
