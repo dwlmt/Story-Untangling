@@ -10,7 +10,7 @@
     "token_indexers": {
       "openai_transformer": {
         "type": "openai_transformer_byte_pair",
-        "n_ctx": 120,
+        "n_ctx": 150,
         "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
@@ -22,7 +22,7 @@
       2,
       3
     ],
-    "story_chunking": 75,
+    "story_chunking": 60,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -41,17 +41,17 @@
       "allow_unmatched_keys": true,
       "embedder_to_indexer_map": {
         "openai_transformer": [
-          "openai_transformer",
-          "openai_transformer-offsets"
+          "openai_transformer"
         ]
       },
       "token_embedders": {
         "openai_transformer": {
           "type": "openai_transformer_embedder",
           "transformer": {
-            "n_ctx": 120,
+            "n_ctx": 150,
             "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
-          }
+          },
+         "top_layer_only": true
         }
       }
     },
@@ -75,11 +75,10 @@
     "batch_size": 2
   },
   "trainer": {
-    "type" : "uncertain_trainer_split_lm",
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      0, 1,
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

@@ -10,11 +10,11 @@
     "token_indexers": {
       "openai_transformer": {
         "type": "openai_transformer_byte_pair",
-        "n_ctx": 120,
+        "n_ctx": 150,
         "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
-    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/base",//,"/disk/scratch/s1569885/dataset",
+    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",//,"/disk/scratch/s1569885/dataset",
     "use_existing_cached_db": true,
     "cuda_device": [
       0,
@@ -22,6 +22,7 @@
       2,
       3
     ],
+    "story_chunking": 60,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -33,6 +34,7 @@
     "type": "uncertain_reader",
     "disc_loss": true,
     "gen_loss": true,
+    //"lm_finetune_top_layers": 2,
     "distance_weights": [
       1.0
     ],
@@ -41,17 +43,17 @@
       "allow_unmatched_keys": true,
       "embedder_to_indexer_map": {
         "openai_transformer": [
-          "openai_transformer",
-          "openai_transformer-offsets"
+          "openai_transformer"
         ]
       },
       "token_embedders": {
         "openai_transformer": {
           "type": "openai_transformer_embedder",
           "transformer": {
-            "n_ctx": 120,
-            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
-          }
+            "n_ctx": 150,
+            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
+          },
+          "top_layer_only": true
         }
       }
     },
@@ -102,10 +104,11 @@
     "batch_size": 2
   },
   "trainer": {
-    "num_epochs": 100,
+    //"type" : "uncertain_trainer_split_lm",
+    "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      2, 3
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
