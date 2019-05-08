@@ -86,6 +86,7 @@ class UncertainReader(Model):
 
         self._vocab = vocab
         self._text_field_embedder = text_field_embedder
+
         self._primary_token_namespace = primary_token_namespace
 
         self._sentence_seq2seq_encoder = sentence_seq2seq_encoder
@@ -222,8 +223,8 @@ class UncertainReader(Model):
         masks_tensor = masks_tensor.view(batch_size, num_sentences, -1)
 
         embedded_text_tensor = self._text_field_embedder(text_mod).to(def_device)
-
         embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
+
 
         batch_encoded_stories = []
         batch_encoded_sentences = []
@@ -233,31 +234,12 @@ class UncertainReader(Model):
             story_embedded_text = torch.squeeze(story_embedded_text, dim=0)
             story_mask = torch.squeeze(story_mask)
 
-            if self._sentence_seq2seq_encoder:
-                encoded_sentences = self._sentence_seq2seq_encoder(story_embedded_text, story_mask)
-            else:
-                encoded_sentences = story_embedded_text
+            encoded_sentences, encoded_story, story_sentence_mask = self.encode_story_vectors(story_embedded_text,
+                                                                                              story_mask)
 
-            batch_encoded_sentences.append(encoded_sentences)
-
-            # Create a mask that only has stories with sentences that go to the end of the batch.
-            story_sentence_mask = torch.sum(story_mask, 1)
-            story_sentence_mask = story_sentence_mask > 0
-            story_sentence_mask = story_sentence_mask.to(encoded_sentences.device)
-
-            # Get the final context form each encoding.
-            encoded_sentence_vecs = get_final_encoder_states(encoded_sentences[story_sentence_mask],
-                                                             story_mask[story_sentence_mask])
-            encoded_sentence_vecs = torch.unsqueeze(encoded_sentence_vecs, dim=0)
-
-            # Unflatten so can be stacked across stories
-            story_sentence_mask = story_sentence_mask.unsqueeze(dim=0)
             story_sentence_masks.append(story_sentence_mask)
-
-            encoded_story = self._story_seq2seq_encoder(encoded_sentence_vecs, story_sentence_mask)
-
-            encoded_story = encoded_story.squeeze(dim=0)
             batch_encoded_stories.append(encoded_story)
+            batch_encoded_sentences.append(encoded_sentences)
 
         batch_encoded_stories = torch.stack(batch_encoded_stories)
 
@@ -286,7 +268,31 @@ class UncertainReader(Model):
 
         output_dict["loss"] = loss
 
+        if self.full_output_embedding:
+            output_dict["source_encoded_stories"] = source_encoded_stories
+            output_dict["embedded_text_tensor"] = embedded_text_tensor
+            output_dict["masks"] = masks_tensor
+
         return output_dict
+
+    def encode_story_vectors(self, story_embedded_text, story_mask):
+        if self._sentence_seq2seq_encoder:
+            encoded_sentences = self._sentence_seq2seq_encoder(story_embedded_text, story_mask)
+        else:
+            encoded_sentences = story_embedded_text
+        # Create a mask that only has stories with sentences that go to the end of the batch.
+        story_sentence_mask = torch.sum(story_mask, 1)
+        story_sentence_mask = story_sentence_mask > 0
+        story_sentence_mask = story_sentence_mask.to(encoded_sentences.device)
+        # Get the final context form each encoding.
+        encoded_sentence_vecs = get_final_encoder_states(encoded_sentences[story_sentence_mask],
+                                                         story_mask[story_sentence_mask])
+        encoded_sentence_vecs = torch.unsqueeze(encoded_sentence_vecs, dim=0)
+        # Unflatten so can be stacked across stories
+        story_sentence_mask = story_sentence_mask.unsqueeze(dim=0)
+        encoded_story = self._story_seq2seq_encoder(encoded_sentence_vecs, story_sentence_mask)
+        encoded_story = encoded_story.squeeze(dim=0)
+        return encoded_sentences, encoded_story, story_sentence_mask
 
     def calculate_gen_loss(self, encoded_stories, encoded_sentences, masks_tensor, target_text, batch_size,
                            num_sentences):
@@ -319,9 +325,10 @@ class UncertainReader(Model):
         non_empty_sentences = (masks_tensor.sum(dim=1) > 0)
 
         for k, v in target_text.items():
-            v = v[batch_group_mask_target]
-            v = v[non_empty_sentences]
-            target_text[k] = v
+            if v is not None:
+                v = v[batch_group_mask_target]
+                v = v[non_empty_sentences]
+                target_text[k] = v
 
         encoded_stories = encoded_stories[non_empty_sentences]
         encoded_sentences_target = encoded_sentences_target[non_empty_sentences]
