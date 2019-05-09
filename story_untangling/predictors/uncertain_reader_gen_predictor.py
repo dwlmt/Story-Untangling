@@ -187,9 +187,10 @@ class UncertainReaderGenPredictor(Predictor):
 
         encoded_story = torch.squeeze(encoded_story)
 
-        created_node = AnyNode(gold=False, story_tensor=encoded_story, sentence_ids=text_to_gen_from,
+        created_node = AnyNode(gold=False, story_tensor=encoded_story, sentence_ids=gen_sentence,
                                sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                              text_to_gen_from.tolist() if t in self.indexer.decoder],
+                                              gen_sentence if t in self.indexer.decoder],
+                               sentence_length=len(gen_sentence),
                                parent=parent)
         print(created_node)
 
