@@ -1,15 +1,15 @@
-import itertools
+from collections import OrderedDict
 
 import torch
-from allennlp.common import JsonDict, tqdm
-from allennlp.common.util import sanitize
+from allennlp.common import JsonDict
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
-from allennlp.nn.util import get_final_encoder_states
 from allennlp.predictors import Predictor
-from anytree import AnyNode, RenderTree
+from anytree import AnyNode, Node
+from anytree.exporter import DictExporter
 
 full_stop_token = 239
+exporter = DictExporter(dictcls=OrderedDict, attriter=sorted)
 
 
 def random_sample(logits: torch.Tensor) -> int:
@@ -41,7 +41,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
-        self.sentences_to_unroll = 2
+        self.sentences_to_unroll = 3
         self.samples_per_level = 5
 
 
@@ -52,36 +52,77 @@ class UncertainReaderGenPredictor(Predictor):
         embedded_text_tensor = torch.from_numpy(embedded_text_tensor).cpu()
         embedded_text_mask = torch.from_numpy(outputs["masks"]).cpu()
 
-        for position, (text_field, encoded_story) in enumerate(zip(instance["text"],
-                                                                         torch.from_numpy(outputs["source_encoded_stories"]).cpu())):
+        encoded_stories = torch.from_numpy(outputs["source_encoded_stories"]).cpu()
+        text = instance["text"]
 
-            root = AnyNode(id="root")
+        print(instance["metadata"])
+
+        root = Node(name="root")
+        per_sentence = Node(name="sentences", parent=root)
+        aggregate = Node(name="aggregate_stats", parent=root)
+
+        for position, (text_field, encoded_story) in enumerate(zip(text, encoded_stories)):
+
 
             text_tensor_dict = text_field.as_tensor(text_field.get_padding_lengths())
-
             text_to_gen_from = text_tensor_dict['openai_transformer']
             ctx_size = text_to_gen_from.size(0)
-
             sentence_length = torch.sum(embedded_text_mask[position]).item()
-
             text_to_gen_from = text_to_gen_from[0:sentence_length]
 
             if sentence_length == 0:
                 continue
 
+            position_node = AnyNode(name=f"{position}", story_id=instance["metadata"]["story_id"],
+                                    sentence_id=instance["metadata"]["sentence_ids"][position],
+                                    sentence_num=instance["metadata"]["sentence_nums"][position],
+                                    parent=per_sentence)
+            # Use a paths placeholder so the aggregate statsitics can be separated from the
+            paths = Node(name="paths", parent=position_node)
+            stats = Node(name="stats", parent=position_node)
+
+            # This is the correct answer from the story.
+            correct_base = AnyNode(gold=True, story_tensor=encoded_story.shape, sentence_ids=text_to_gen_from,
+                                   sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
+                                                  text_to_gen_from.tolist() if t in self.indexer.decoder],
+                                   sentence_length=sentence_length, parent=paths)
+
+            # Put the correct representations into the sentences at the given point.
+            for i in range(1, self.sentences_to_unroll + 1):
+
+                if position + i > len(text) - 1 or len(text[position + i]) == 0:
+                    continue
+
+                text_tensor_dict = text[position + i].as_tensor(text_field.get_padding_lengths())
+                text_to_gen_from_future = text_tensor_dict['openai_transformer']
+
+                sentence_length_future = torch.sum(embedded_text_mask[position + i]).item()
+                text_to_gen_from_future = text_to_gen_from_future[0:sentence_length_future]
+
+                correct_base = AnyNode(gold=True, sentence_tensor=embedded_text_tensor[position + i].shape,
+                                       story_tensor=encoded_stories[position + i].shape,
+                                       sentence_ids=text_to_gen_from_future,
+                                       sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
+                                                      text_to_gen_from_future.tolist() if
+                                                      t in self.indexer.decoder],
+                                       sentence_length=sentence_length_future,
+                                       parent=correct_base)
+                print(f"Add Node: {correct_base}")
+
+
             for sample_num in range(self.samples_per_level):
-                out =  self.generate_sentence(position, embedded_text_tensor, embedded_text_mask,  encoded_story, text_to_gen_from,
-                                              sentence_length, ctx_size, recursion=self.sentences_to_unroll - 1)
-                print(position, out)
+                self.generate_sentence(position, embedded_text_tensor, embedded_text_mask, encoded_story,
+                                       text_to_gen_from,
+                                       sentence_length, ctx_size, recursion=self.sentences_to_unroll - 1, parent=paths)
 
-        return {}#sanitize(outputs)
+        root_as_dict = exporter.export(root)
+        return root_as_dict
 
-    def generate_sentence(self, position, embedded_text_tensor, embedded_text_mask, encoded_story, text_to_gen_from, sentence_length, ctx_size, recursion=0):
+    def generate_sentence(self, position, embedded_text_tensor, embedded_text_mask, encoded_story,
+                          text_to_gen_from, sentence_length, ctx_size, recursion=0, parent=None):
         gen_sentence = []
 
-        print(embedded_text_tensor.shape)
         encoded_text_merged = embedded_text_tensor[position, :, :]
-        print(encoded_text_merged.shape)
 
         for i in range(ctx_size - 1):
 
@@ -123,10 +164,7 @@ class UncertainReaderGenPredictor(Predictor):
         gen_sentence_padded = torch.unsqueeze(gen_sentence_padded, dim=0)
 
         generated_sentence_tensor = self.embedder(gen_sentence_padded)
-        print("Generated Sentence Tensor", generated_sentence_tensor.shape)
 
-        # New sentence can be longer than the existing batch so need to resize the representation.
-        #if generated_sentence_tensor.shape[1] > embedded_text_tensor.shape[1]:
         new_embedded_text_tensor = torch.zeros(embedded_text_tensor.shape[0], max(embedded_text_tensor.shape[1],
                                                                                   generated_sentence_tensor.shape[1]),
                                                embedded_text_tensor.shape[2])
@@ -138,15 +176,7 @@ class UncertainReaderGenPredictor(Predictor):
         new_embedded_text_mask[: , 0: embedded_text_mask.shape[1]] = embedded_text_mask
         embedded_text_mask = new_embedded_text_mask.long()
 
-        #else:
-            # Copy as don't want to change the original state.
-        #    embedded_text_tensor = embedded_text_tensor.clone()
-        #    embedded_text_tensor[position] = generated_sentence_tensor
-
-        embedded_text_tensor[position] = generated_sentence_tensor
-        print(embedded_text_tensor.shape, embedded_text_mask.shape)
         encoded_sentences, encoded_story, story_sentence_mask = self._model.encode_story_vectors(embedded_text_tensor, embedded_text_mask)
-        print(encoded_sentences.shape, encoded_story.shape, story_sentence_mask.shape)
 
         encoded_story = encoded_story[position]
 
@@ -155,8 +185,13 @@ class UncertainReaderGenPredictor(Predictor):
 
         encoded_story = torch.squeeze(encoded_story, dim=0)
 
-        generated_sentence_tensor = torch.squeeze(generated_sentence_tensor, dim=0)
         encoded_story = torch.squeeze(encoded_story)
+
+        created_node = AnyNode(gold=False, story_tensor=encoded_story, sentence_ids=text_to_gen_from,
+                               sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
+                                              text_to_gen_from.tolist() if t in self.indexer.decoder],
+                               parent=parent)
+        print(created_node)
 
         if recursion > 0:
             for i in range(self.samples_per_level):
@@ -167,12 +202,8 @@ class UncertainReaderGenPredictor(Predictor):
                 if next_position == embedded_text_tensor.shape[0]:
                     break
 
-                out = self.generate_sentence(next_position, embedded_text_tensor, embedded_text_mask, encoded_story,
-                                             torch.tensor(gen_sentence).long(), len(gen_sentence), ctx_size, recursion=recursion-1)
-                print(out)
-
-
-        return generated_sentence_tensor, encoded_story, gen_sentence, decoded_sentence
+                self.generate_sentence(next_position, embedded_text_tensor, embedded_text_mask, encoded_story,
+                                       torch.tensor(gen_sentence).long(), len(gen_sentence), ctx_size, recursion=recursion-1)
 
     def predict(self, embedded_text, story, sentence_length, ctx_size):
         story = torch.unsqueeze(story, dim=0)
