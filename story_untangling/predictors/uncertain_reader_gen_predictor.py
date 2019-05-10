@@ -106,7 +106,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         logits = self._model.calculate_logits(parent_story_tensor.to(self._device),
                                               child_story_tensors.to(self._device))
-        probs = self._softmax(logits)
+        probs = self._softmax(logits, dim=-1)
         log_probs = torch.log(probs)
 
         logits = torch.squeeze(logits).tolist()
