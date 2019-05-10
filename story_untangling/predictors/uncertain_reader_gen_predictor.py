@@ -49,13 +49,13 @@ class UncertainReaderGenPredictor(Predictor):
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
-        self.sentences_to_rollout = 3
-        self.samples_per_level = 5
+        self.sentences_to_rollout = 2
+        self.samples_per_level = 3
         self.keep_tensor_output = False
 
         self._device = self._model._lm_model._decoder.weight.device
 
-        self._softmax = Softmax()
+        self._softmax = Softmax(dim=-1)
 
 
 
@@ -106,7 +106,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         logits = self._model.calculate_logits(parent_story_tensor.to(self._device),
                                               child_story_tensors.to(self._device))
-        probs = self._softmax(logits, dim=-1)
+        probs = self._softmax(logits)
         log_probs = torch.log(probs)
 
         logits = torch.squeeze(logits).tolist()
