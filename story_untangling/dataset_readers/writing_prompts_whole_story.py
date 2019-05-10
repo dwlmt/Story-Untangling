@@ -1,11 +1,10 @@
 import asyncio
 import logging
-import pickle
 import textwrap
-from pathlib import Path
 from typing import Dict, List, Union, Any
 
 import dataset
+import enchant
 import more_itertools
 import nltk
 from PyDictionary import PyDictionary
@@ -20,8 +19,6 @@ from allennlp.data.tokenizers import Tokenizer, WordTokenizer
 from nostril import nonsense
 from overrides import overrides
 from spacy.lang.en import STOP_WORDS
-import enchant
-
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db
 
@@ -293,7 +290,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             text_field = TextField([], self._token_indexers).empty_field()
             story_text_fields.extend([text_field] * (self._story_chunking - len(story_text_fields)))
 
-        metadata = {"story_id": story["id"], "number_of_sentences": story["sentence_num"]}
+        metadata = {"story_id": story["id"], "sentence_ids": [s["id"] for s in sentences],
+                    "sentence_nums": [s["sentence_num"] for s in sentences],
+                    "number_of_sentences": story["sentence_num"]}
         metadata["text"] = story_text_original
 
         text_field = ListField(story_text_fields)
