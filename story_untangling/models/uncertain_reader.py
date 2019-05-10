@@ -354,8 +354,7 @@ class UncertainReader(Model):
         encoded_stories_flat = encoded_stories.view(batch_size * sentence_num, feature_size)
         target_encoded_sentences_flat = target_encoded_stories.view(batch_size * sentence_num, feature_size)
 
-        dot_product_scores = torch.matmul(encoded_stories_flat,
-                                          torch.t(target_encoded_sentences_flat))
+        dot_product_scores = self.calculate_logits(encoded_stories_flat, target_encoded_sentences_flat)
 
         dot_product_mask = (
                     1.0 - torch.diag(torch.ones(dot_product_scores.shape[0]), 0).float().to(dot_product_scores.device))
@@ -442,6 +441,11 @@ class UncertainReader(Model):
                     output_dict[f"disc_log_probs_{i}"] = scores_softmax
 
         return loss, output_dict
+
+    def calculate_logits(self, encoded_stories_flat, target_encoded_sentences_flat):
+        dot_product_scores = torch.matmul(encoded_stories_flat,
+                                          torch.t(target_encoded_sentences_flat))
+        return dot_product_scores
 
     def batch_group_mask(self, batch_size, sentence_num, i=1):
         """ Mask out the last row in each batch as will not have a prediction for for the next row.
