@@ -1,3 +1,4 @@
+import copy
 from collections import OrderedDict
 
 import torch
@@ -8,7 +9,7 @@ from allennlp.models import Model
 from allennlp.predictors import Predictor
 from anytree import AnyNode, Node, PreOrderIter
 from anytree.exporter import DictExporter
-from torch.nn import Softmax
+from torch.nn import Softmax, PairwiseDistance
 
 full_stop_token = 239
 exporter = DictExporter(dictcls=OrderedDict, attriter=sorted)
@@ -42,6 +43,7 @@ class UncertainReaderGenPredictor(Predictor):
         super().__init__(model, dataset_reader)
 
         self._model.full_output_embedding = True
+        self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
         self.embedder = model._text_field_embedder._token_embedders["openai_transformer"]
         self.embedder._top_layer_only = True
@@ -49,7 +51,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
-        self.sentences_to_rollout = 2
+        self.sentences_to_rollout = 3
         self.samples_per_level = 3
         self.keep_tensor_output = False
 
@@ -57,6 +59,8 @@ class UncertainReaderGenPredictor(Predictor):
 
         self._softmax = Softmax(dim=-1)
 
+        self._l1 = PairwiseDistance(p=1.0)
+        self._l2 = PairwiseDistance(p=2.0)
 
 
     def predict_instance(self, instance: Instance) -> JsonDict:
@@ -65,9 +69,12 @@ class UncertainReaderGenPredictor(Predictor):
         root = self._sample_tree(instance, outputs)
 
         for n in PreOrderIter(root, only_tensor_nodes):
-            if self.keep_tensor_output:
-                n.story_tensor = n.story_tensor.tolist()
-            else:
+
+            for attr, value in n.__dict__.items():
+                if isinstance(value, torch.Tensor):
+                    n.__dict__[attr] = value.tolist()
+
+            if not self.keep_tensor_output:
                 n.story_tensor = None
 
         root_as_dict = exporter.export(root)
@@ -109,9 +116,9 @@ class UncertainReaderGenPredictor(Predictor):
         probs = self._softmax(logits)
         log_probs = torch.log(probs)
 
-        logits = torch.squeeze(logits).tolist()
-        probs = torch.squeeze(probs).tolist()
-        log_probs = torch.squeeze(log_probs).tolist()
+        logits = torch.squeeze(logits)
+        probs = torch.squeeze(probs)
+        log_probs = torch.squeeze(log_probs)
 
         for c, l, p, lb in zip(child_list, logits, probs, log_probs):
             c.logit = l
@@ -122,22 +129,39 @@ class UncertainReaderGenPredictor(Predictor):
         root.probs = probs
         root.log_probs = log_probs
 
-        for child in child_list:
-            if not hasattr(child, "prob"):
-                child.prob_path = child.prob
-                child.log_prob_path = child.log_prob
-
-            # If gold, setup a separate culmative probaility path.
-            if child.gold:
-                child.gold_prob_path = child.prob
-                child.gold_log_prob_path = child.log_prob
-
         root.gold_index = gold_index
 
-        # print(root)
-        # print(child_list)
+        self._calculate_distances(root, parent_story_tensor, child_story_tensors, gold_index)
+
+        # print(RenderTree(root))
 
         return root
+
+    def _calculate_distances(self, root, parent_story_tensor, child_story_tensors, gold_index):
+        ''' Compute 1 level differences. May need to change if multiple skip steps are added.
+        '''
+
+        # print("Gold Index", gold_index)
+
+        gold_child_tensor = child_story_tensors[gold_index]
+
+        gold_child_tensor = gold_child_tensor.unsqueeze(dim=0).expand_as(child_story_tensors)
+
+        root.surprise_distances_l1 = self._l1(gold_child_tensor, child_story_tensors)
+        root.surprise_distances_l1[gold_index] = 0.0
+        # print("Surprise L1", root.surprise_distances_l1)
+        root.surprise_distances_l2 = self._l2(gold_child_tensor, child_story_tensors)
+        root.surprise_distances_l2[gold_index] = 0.0
+        # print("Surprise L2", root.surprise_distances_l2)
+
+        parent_story_tensor = parent_story_tensor.expand_as(child_story_tensors)
+        root.suspense_distances_l1 = self._l1(parent_story_tensor, child_story_tensors)
+        root.suspense_distances_l1[gold_index] = 0.0
+        # print("Suspense L1", root.suspense_distances_l1)
+        root.suspense_distances_l2 = self._l2(parent_story_tensor, child_story_tensors)
+        root.suspense_distances_l2[gold_index] = 0.0
+        #print("Suspense L2", root.suspense_distances_l2)
+
 
     def _sample_tree(self, instance, outputs):
         ''' Create a hierarchy of possibilities by generating sentences in a tree structure.
@@ -171,10 +195,12 @@ class UncertainReaderGenPredictor(Predictor):
 
             # This is the correct answer from the story.
             correct_base = AnyNode(gold=True, story_tensor=encoded_story.clone().cpu().detach(),
-                                   sentence_ids=text_to_gen_from.tolist(),
+                                   sentence_ids=text_to_gen_from,
                                    sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                                  text_to_gen_from.tolist() if t in self.indexer.decoder],
+                                                  text_to_gen_from if t in self.indexer.decoder],
                                    sentence_length=sentence_length, parent=paths)
+
+            correct_futures = []
 
             # Put the correct representations into the sentences at the given point.
             for i in range(1, self.sentences_to_rollout + 1):
@@ -189,26 +215,34 @@ class UncertainReaderGenPredictor(Predictor):
                 text_to_gen_from_future = text_to_gen_from_future[0:sentence_length_future]
 
                 correct_future = AnyNode(gold=True,
-                                       story_tensor=encoded_stories[position + i].cpu().detach(),
-                                       sentence_ids=text_to_gen_from_future.tolist(),
-                                       sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                                      text_to_gen_from_future.tolist() if
-                                                      t in self.indexer.decoder],
-                                       sentence_length=sentence_length_future,
-                                       parent=correct_base)
+                                         story_tensor=encoded_stories[position + i].cpu().detach(),
+                                         sentence_ids=text_to_gen_from_future,
+                                         sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
+                                                        text_to_gen_from_future if
+                                                        t in self.indexer.decoder],
+                                         sentence_length=sentence_length_future)
+                correct_futures.append(correct_future)
                 # print(f"Add Node: {correct_base}")
 
+            print(len(correct_futures))
+
+            correct_futures = copy.copy(correct_futures)
+            future = correct_futures.pop()
+            future.parent = correct_base
+
             for sample_num in range(self.samples_per_level):
+
                 self.generate_sentence(position, embedded_text_tensor, embedded_text_mask, encoded_story,
                                        text_to_gen_from,
                                        sentence_length, ctx_size, recursion=self.sentences_to_rollout - 1,
-                                       parent=correct_base)
+                                       parent=correct_base, correct_futures=correct_futures)
 
-            self._calculate_disc_probabilities(correct_base)
+            # print(RenderTree(root))
+            #self._calculate_disc_probabilities(correct_base)
         return root
 
     def generate_sentence(self, position, embedded_text_tensor, embedded_text_mask, encoded_story,
-                          text_to_gen_from, sentence_length, ctx_size, recursion=0, parent=None):
+                          text_to_gen_from, sentence_length, ctx_size, recursion=0, parent=None, correct_futures=None):
 
         gen_sentence = []
 
@@ -282,6 +316,11 @@ class UncertainReaderGenPredictor(Predictor):
         #print(created_node)
 
         if recursion > 0:
+
+            correct_futures = copy.copy(correct_futures)
+            future = correct_futures.pop()
+            future.parent = created_node
+
             for i in range(self.samples_per_level):
 
                 next_position = position + 1
@@ -292,7 +331,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                 self.generate_sentence(next_position, embedded_text_tensor, embedded_text_mask, encoded_story,
                                        torch.tensor(gen_sentence).long(), len(gen_sentence), ctx_size,
-                                       recursion=recursion - 1, parent=created_node)
+                                       recursion=recursion - 1, parent=created_node, correct_futures=correct_futures)
 
             self._calculate_disc_probabilities(created_node)
 
