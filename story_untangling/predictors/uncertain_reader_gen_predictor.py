@@ -83,7 +83,7 @@ class UncertainReaderGenPredictor(Predictor):
             if child.parent == root:
                 child_list.append(child)
 
-        if len(child_list) == None:
+        if len(child_list) == 0:
             return
 
         parent_story_tensor = root.story_tensor
