@@ -7,7 +7,7 @@ from allennlp.common.util import sanitize
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
 from allennlp.predictors import Predictor
-from anytree import AnyNode, Node, PreOrderIter
+from anytree import AnyNode, Node, PreOrderIter, RenderTree
 from anytree.exporter import DictExporter
 from torch.nn import Softmax, PairwiseDistance
 
@@ -52,7 +52,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
         self.sentences_to_rollout = 3
-        self.samples_per_level = 3
+        self.samples_per_level = 5
         self.keep_tensor_output = False
 
         self._device = self._model._lm_model._decoder.weight.device
@@ -193,13 +193,6 @@ class UncertainReaderGenPredictor(Predictor):
             paths = Node(name="paths", parent=position_node)
             stats = Node(name="stats", parent=position_node)
 
-            # This is the correct answer from the story.
-            correct_base = AnyNode(gold=True, story_tensor=encoded_story.clone().cpu().detach(),
-                                   sentence_ids=text_to_gen_from,
-                                   sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                                  text_to_gen_from if t in self.indexer.decoder],
-                                   sentence_length=sentence_length, parent=paths)
-
             correct_futures = []
 
             # Put the correct representations into the sentences at the given point.
@@ -224,20 +217,20 @@ class UncertainReaderGenPredictor(Predictor):
                 correct_futures.append(correct_future)
                 # print(f"Add Node: {correct_base}")
 
-            print(len(correct_futures))
+            # print(len(correct_futures))
 
             correct_futures = copy.copy(correct_futures)
-            future = correct_futures.pop()
-            future.parent = correct_base
+            base = correct_futures.pop()
+            base.parent = paths
 
             for sample_num in range(self.samples_per_level):
 
                 self.generate_sentence(position, embedded_text_tensor, embedded_text_mask, encoded_story,
                                        text_to_gen_from,
                                        sentence_length, ctx_size, recursion=self.sentences_to_rollout - 1,
-                                       parent=correct_base, correct_futures=correct_futures)
+                                       parent=base, correct_futures=correct_futures)
 
-            # print(RenderTree(root))
+            print(RenderTree(base))
             #self._calculate_disc_probabilities(correct_base)
         return root
 

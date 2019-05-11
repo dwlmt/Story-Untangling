@@ -163,6 +163,8 @@ class UncertainReader(Model):
         self._full_output_scores = full_output_scores
         self.full_output_embedding = full_output_embeddings
 
+        self.run_feedforwards = True
+
         if self._disc_loss:
 
             for i in range(1, len(distance_weights) + 1):
@@ -186,8 +188,7 @@ class UncertainReader(Model):
         initializer(self)
 
     def forward(self,
-                text: Dict[str, torch.LongTensor],
-                metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
+                text: Dict[str, torch.LongTensor], metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
         """
            Parameters
            ----------
@@ -249,10 +250,10 @@ class UncertainReader(Model):
         source_encoded_stories = batch_encoded_stories
         target_encoded_stories = batch_encoded_stories
 
-        if self._story_feedforward:
+        if self._story_feedforward and self.run_feedforwards:
             source_encoded_stories = self._story_feedforward(source_encoded_stories)
 
-        if self._target_feedforward:
+        if self._target_feedforward and self.run_feedforwards:
             target_encoded_stories = self._target_feedforward(target_encoded_stories)
 
         if self._disc_loss:
