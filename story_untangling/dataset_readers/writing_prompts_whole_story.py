@@ -84,6 +84,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  max_word_length = 25,
                  min_check_word_length=8,
                  story_chunking: int = 50,
+                 ner_model: str = None,
+                 coreference_model: str = None,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -103,6 +105,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._min_check_word_length = min_check_word_length
         self._truncate_sequences = (truncate_sequence_length != 0)
         self._story_chunking = story_chunking
+        self._ner_model = ner_model
+        self._coreference_model = coreference_model
 
         self._cuda_device = cuda_device
 
@@ -135,6 +139,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         dataset_db = loop.run_until_complete(
             create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
                               file_path=file_path, use_existing_database=self._use_existing_cached_db,
+                              ner_model=self._ner_model, coreference_model=self._coreference_model,
                               cuda_device=self._cuda_device))
 
         db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})

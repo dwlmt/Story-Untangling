@@ -39,8 +39,8 @@ engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 1000, "check_
 async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
                             sentence_splitter: SentenceSplitter = SpacySentenceSplitter(),
                             should_save_sentiment: bool = True,
-                            ner_model: str = None,
-                            coreference_model: str = None,
+                            ner_model: str = True,
+                            coreference_model: str = True,
                             batch_size: int = 100,
                             max_workers: int = 16,
                             cuda_device: Union[List[int], int] = None) -> str:
@@ -178,7 +178,6 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_devi
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
         
         db["sentence"].create_column('ner_tags', db.types.text)
-        
 
         ner_batch = []
 
@@ -209,8 +208,8 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_devi
 
                     if len(tasks) == save_batch_size:
                         results = await asyncio.gather(*tasks)
-                        for ner_data_to_save in results:
-                            update_table_on_id(db, "sentence", ner_data_to_save)
+                        for res in results:
+                            db["named_entity_sentence"].insert_many(res)
                         tasks = []
                     ner_batch = []
 
@@ -218,8 +217,10 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_devi
                 loop.run_in_executor(executor, next(processors_cycle),
                                      ner_batch))
             results = await asyncio.gather(*tasks)
-            for ner_data_to_save in results:
-                update_table_on_id(db, "sentence", ner_data_to_save)
+            for res in results:
+                db["named_entity_sentence"].insert_many(res)
+
+            db["named_entity_sentence"].create_index(['sentence_id'])
 
             logger.info(f"Named Entity Tags Saved")
 
@@ -456,7 +457,8 @@ class NERProcessor(object):
             batch_json
         )
         for ner_dict, sentence_dict in zip(batch_result, stories_sentences):
-            ner_tags = dict(id=sentence_dict["id"], ner_tags=" ".join(ner_dict["tags"]))
+            ner_tags = dict(sentence_id=sentence_dict["id"], story_id=sentence_dict["story_id"],
+                            ner_tags=" ".join(ner_dict["tags"]))
             stories_ner.append(ner_tags)
         return stories_ner
 
