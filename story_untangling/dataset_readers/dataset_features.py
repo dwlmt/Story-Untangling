@@ -16,8 +16,6 @@ from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
 from allennlp.models import Model
 from allennlp.predictors import Predictor
 from dataset import Database
-
-
 from nltk.sentiment import SentimentIntensityAnalyzer
 from nostril import nonsense
 from textblob import TextBlob
@@ -84,6 +82,8 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             sentence_table.create_index(['story_id'])
             sentence_table.create_index(['start_span'])
             sentence_table.create_index(['end_span'])
+
+            db.query("PRAGMA journal_mode=WAL;")
 
         create_story_tasks = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
