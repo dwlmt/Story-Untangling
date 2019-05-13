@@ -76,6 +76,8 @@ class FusionLM(BaseLMHead):
                  accuracy_top_k: List = None):
         super(FusionLM, self).__init__(transformer, metrics, accuracy_top_k)
 
+        self._decoder.requires_grad = True
+
         self._encoder = encoder
 
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
