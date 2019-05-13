@@ -1,7 +1,7 @@
 import logging
 import math
 import time
-from typing import Dict, Optional, List, Tuple, Union, Iterable
+from typing import Dict, Optional, List, Union, Iterable
 
 import torch
 import torch.optim.lr_scheduler
@@ -11,25 +11,23 @@ from allennlp.common.tqdm import Tqdm
 from allennlp.common.util import (gpu_memory_mb, peak_memory_mb,
                                   lazy_groups_of)
 from allennlp.data.instance import Instance
-from allennlp.data.iterators.data_iterator import DataIterator, TensorDict
+from allennlp.data.iterators.data_iterator import DataIterator
 from allennlp.models.model import Model
-from allennlp.nn import util as nn_util
-from allennlp.training import Trainer
 from allennlp.training import util as training_util
 from allennlp.training.checkpointer import Checkpointer
 from allennlp.training.learning_rate_schedulers import LearningRateScheduler
 from allennlp.training.momentum_schedulers import MomentumScheduler
 from allennlp.training.moving_average import MovingAverage
 from allennlp.training.optimizers import Optimizer
+from allennlp.training.trainer import Trainer
 from allennlp.training.trainer_base import TrainerBase
 from apex import amp
 
-from story_untangling.modules.gpt_lm import MixtureLM, FusionLM
-
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
-@TrainerBase.register("uncertain_trainer_split_lm")
-class SplitUncertainModelTrainer(Trainer):
+
+@TrainerBase.register("apex")
+class ApexModelTrainer(Trainer):
 
     def __init__(self,
                  model: Model,
@@ -58,59 +56,17 @@ class SplitUncertainModelTrainer(Trainer):
                  should_log_learning_rate: bool = False,
                  log_batch_size_period: Optional[int] = None,
                  moving_average: Optional[MovingAverage] = None) -> None:
+
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
         super().__init__(model, optimizer, iterator, train_dataset, validation_dataset, patience,
-                         validation_metric, validation_iterator, shuffle, num_epochs, serialization_dir, num_serialized_models_to_keep,
-                         keep_serialized_model_every_num_seconds, checkpointer, model_save_interval, cuda_device, grad_norm, grad_clipping,
-                         learning_rate_scheduler, momentum_scheduler, summary_interval, histogram_interval, should_log_parameter_statistics,
+                         validation_metric, validation_iterator, shuffle, num_epochs, serialization_dir,
+                         num_serialized_models_to_keep,
+                         keep_serialized_model_every_num_seconds, checkpointer, model_save_interval, cuda_device,
+                         grad_norm, grad_clipping,
+                         learning_rate_scheduler, momentum_scheduler, summary_interval, histogram_interval,
+                         should_log_parameter_statistics,
                          should_log_learning_rate, log_batch_size_period, moving_average
                          )
-
-    def batch_loss(self, batch_group: List[TensorDict], for_training: bool) -> torch.Tensor:
-        """
-        Does a forward pass on the given batches and returns the ``loss`` value in the result.
-        If ``for_training`` is `True` also applies regularization penalty.
-        """
-        if self._multiple_gpu:
-
-            batch = batch_group[0]
-            batch = nn_util.move_to_device(batch, self._cuda_devices[0])
-
-            self.model._lm_model = self.model._lm_model.to(self._cuda_devices[1])
-            self.model._text_field_embedder = self.model._text_field_embedder.to((self._cuda_devices[1]))
-
-            if isinstance(self.model._lm_model, MixtureLM):
-                self.model._lm_model._lm_weighting.to(self._cuda_devices[0])
-                self.model._lm_model._feature_decoder.to(self._cuda_devices[0])
-
-            if isinstance(self.model._lm_model, FusionLM):
-                self.model._lm_model._encoder =  self.model._lm_model._encoder.to(self._cuda_devices[0])
-                self.model._lm_model._decoder.weight.requires_grad = True
-
-            #self.model._lm_model._decoder.weight.requires_grad = True
-            self.model._lm_model._decoder.to(self._cuda_devices[1])
-
-
-            output_dict = self.model(**batch)
-
-        else:
-            assert len(batch_group) == 1
-            batch = batch_group[0]
-            batch = nn_util.move_to_device(batch, self._cuda_devices[0])
-            output_dict = self.model(**batch)
-
-        try:
-            loss = output_dict["loss"]
-            if for_training:
-                loss += self.model.get_regularization_penalty()
-        except KeyError:
-            if for_training:
-                raise RuntimeError("The model you are trying to optimize does not contain a"
-                                   " 'loss' key in the output of model.forward(inputs).")
-            loss = None
-
-        return loss
-
 
     def _train_epoch(self, epoch: int) -> Dict[str, float]:
         """
@@ -128,14 +84,14 @@ class SplitUncertainModelTrainer(Trainer):
         # Set the model to "train" mode.
         self.model.train()
 
-        num_gpus = 1#len(self._cuda_devices)
+        num_gpus = len(self._cuda_devices)
 
         # Get tqdm for the training batches
         raw_train_generator = self.iterator(self.train_data,
                                             num_epochs=1,
                                             shuffle=self.shuffle)
         train_generator = lazy_groups_of(raw_train_generator, num_gpus)
-        num_training_batches = math.ceil(self.iterator.get_num_batches(self.train_data)/num_gpus)
+        num_training_batches = math.ceil(self.iterator.get_num_batches(self.train_data) / num_gpus)
         self._last_log = time.time()
         last_save_time = time.time()
 
@@ -144,7 +100,6 @@ class SplitUncertainModelTrainer(Trainer):
             self._batch_num_total = 0
 
         histogram_parameters = set(self.model.get_parameters_for_histogram_tensorboard_logging())
-
 
         logger.info("Training")
         train_generator_tqdm = Tqdm.tqdm(train_generator,
@@ -162,9 +117,11 @@ class SplitUncertainModelTrainer(Trainer):
             if torch.isnan(loss):
                 raise ValueError("nan loss encountered")
 
+            # with self.optimizer.scale_loss(loss) as scaled_loss:
+            #    scaled_loss.backward()
+            # loss.backward()
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
-            # loss.backward()
 
             train_loss += loss.item()
 
@@ -218,7 +175,7 @@ class SplitUncertainModelTrainer(Trainer):
                 cur_batch = sum([training_util.get_batch_size(batch) for batch in batch_group])
                 cumulative_batch_size += cur_batch
                 if (batches_this_epoch - 1) % self._log_batch_size_period == 0:
-                    average = cumulative_batch_size/batches_this_epoch
+                    average = cumulative_batch_size / batches_this_epoch
                     logger.info(f"current batch size: {cur_batch} mean batch size: {average}")
                     self._tensorboard.add_train_scalar("current_batch_size", cur_batch)
                     self._tensorboard.add_train_scalar("mean_batch_size", average)
@@ -229,65 +186,13 @@ class SplitUncertainModelTrainer(Trainer):
             ):
                 last_save_time = time.time()
                 self._save_checkpoint(
-                        '{0}.{1}'.format(epoch, training_util.time_to_str(int(last_save_time)))
+                    '{0}.{1}'.format(epoch, training_util.time_to_str(int(last_save_time)))
                 )
         metrics = training_util.get_metrics(self.model, train_loss, batches_this_epoch, reset=True)
         metrics['cpu_memory_MB'] = peak_cpu_usage
         for (gpu_num, memory) in gpu_usage:
-            metrics['gpu_'+str(gpu_num)+'_memory_MB'] = memory
+            metrics['gpu_' + str(gpu_num) + '_memory_MB'] = memory
         return metrics
-
-    def _validation_loss(self) -> Tuple[float, int]:
-        """
-        Computes the validation loss. Returns it and the number of batches.
-        """
-        logger.info("Validating")
-
-        self.model.eval()
-
-        # Replace parameter values with the shadow values from the moving averages.
-        if self._moving_average is not None:
-            self._moving_average.assign_average_value()
-
-        if self._validation_iterator is not None:
-            val_iterator = self._validation_iterator
-        else:
-            val_iterator = self.iterator
-
-        num_gpus = 1#len(self._cuda_devices)
-
-        raw_val_generator = val_iterator(self._validation_data,
-                                         num_epochs=1,
-                                         shuffle=False)
-        val_generator = lazy_groups_of(raw_val_generator, num_gpus)
-        num_validation_batches = math.ceil(val_iterator.get_num_batches(self._validation_data)/num_gpus)
-        val_generator_tqdm = Tqdm.tqdm(val_generator,
-                                       total=num_validation_batches)
-        batches_this_epoch = 0
-        val_loss = 0
-        for batch_group in val_generator_tqdm:
-
-            loss = self.batch_loss(batch_group, for_training=False)
-            if loss is not None:
-                # You shouldn't necessarily have to compute a loss for validation, so we allow for
-                # `loss` to be None.  We need to be careful, though - `batches_this_epoch` is
-                # currently only used as the divisor for the loss function, so we can safely only
-                # count those batches for which we actually have a loss.  If this variable ever
-                # gets used for something else, we might need to change things around a bit.
-                batches_this_epoch += 1
-                val_loss += loss.detach().cpu().numpy()
-
-            # Update the description with the latest metrics
-            val_metrics = training_util.get_metrics(self.model, val_loss, batches_this_epoch)
-            description = training_util.description_from_metrics(val_metrics)
-            val_generator_tqdm.set_description(description, refresh=False)
-
-        # Now restore the original parameter values.
-        if self._moving_average is not None:
-            self._moving_average.restore()
-
-        return val_loss, batches_this_epoch
-
 
     @classmethod
     def from_params(cls,  # type: ignore
@@ -298,23 +203,23 @@ class SplitUncertainModelTrainer(Trainer):
         from allennlp.training.trainer import TrainerPieces
 
         pieces = TrainerPieces.from_params(params, serialization_dir, recover)  # pylint: disable=no-member
-        return SplitUncertainModelTrainer.this_from_params(model=pieces.model,
-                                   serialization_dir=serialization_dir,
-                                   iterator=pieces.iterator,
-                                   train_data=pieces.train_dataset,
-                                   validation_data=pieces.validation_dataset,
-                                   params=pieces.params,
-                                   validation_iterator=pieces.validation_iterator)
+        return ApexModelTrainer.this_from_params(model=pieces.model,
+                                                 serialization_dir=serialization_dir,
+                                                 iterator=pieces.iterator,
+                                                 train_data=pieces.train_dataset,
+                                                 validation_data=pieces.validation_dataset,
+                                                 params=pieces.params,
+                                                 validation_iterator=pieces.validation_iterator)
 
     @classmethod
     def this_from_params(cls,  # type: ignore
-                    model: Model,
-                    serialization_dir: str,
-                    iterator: DataIterator,
-                    train_data: Iterable[Instance],
-                    validation_data: Optional[Iterable[Instance]],
-                    params: Params,
-                    validation_iterator: DataIterator = None) -> 'Trainer':
+                         model: Model,
+                         serialization_dir: str,
+                         iterator: DataIterator,
+                         train_data: Iterable[Instance],
+                         validation_data: Optional[Iterable[Instance]],
+                         params: Params,
+                         validation_iterator: DataIterator = None) -> 'Trainer':
         # pylint: disable=arguments-differ
         patience = params.pop_int("patience", None)
         validation_metric = params.pop("validation_metric", "-loss")
@@ -355,18 +260,18 @@ class SplitUncertainModelTrainer(Trainer):
             if 'keep_serialized_model_every_num_seconds' in params or \
                     'num_serialized_models_to_keep' in params:
                 raise ConfigurationError(
-                        "Checkpointer may be initialized either from the 'checkpointer' key or from the "
-                        "keys 'num_serialized_models_to_keep' and 'keep_serialized_model_every_num_seconds'"
-                        " but the passed config uses both methods.")
+                    "Checkpointer may be initialized either from the 'checkpointer' key or from the "
+                    "keys 'num_serialized_models_to_keep' and 'keep_serialized_model_every_num_seconds'"
+                    " but the passed config uses both methods.")
             checkpointer = Checkpointer.from_params(params.pop("checkpointer"))
         else:
             num_serialized_models_to_keep = params.pop_int("num_serialized_models_to_keep", 20)
             keep_serialized_model_every_num_seconds = params.pop_int(
-                    "keep_serialized_model_every_num_seconds", None)
+                "keep_serialized_model_every_num_seconds", None)
             checkpointer = Checkpointer(
-                    serialization_dir=serialization_dir,
-                    num_serialized_models_to_keep=num_serialized_models_to_keep,
-                    keep_serialized_model_every_num_seconds=keep_serialized_model_every_num_seconds)
+                serialization_dir=serialization_dir,
+                num_serialized_models_to_keep=num_serialized_models_to_keep,
+                keep_serialized_model_every_num_seconds=keep_serialized_model_every_num_seconds)
         model_save_interval = params.pop_float("model_save_interval", None)
         summary_interval = params.pop_int("summary_interval", 100)
         histogram_interval = params.pop_int("histogram_interval", None)
@@ -375,30 +280,24 @@ class SplitUncertainModelTrainer(Trainer):
         log_batch_size_period = params.pop_int("log_batch_size_period", None)
 
         params.assert_empty(cls.__name__)
-        return SplitUncertainModelTrainer(model, optimizer, iterator,
-                   train_data, validation_data,
-                   patience=patience,
-                   validation_metric=validation_metric,
-                   validation_iterator=validation_iterator,
-                   shuffle=shuffle,
-                   num_epochs=num_epochs,
-                   serialization_dir=serialization_dir,
-                   cuda_device=cuda_device,
-                   grad_norm=grad_norm,
-                   grad_clipping=grad_clipping,
-                   learning_rate_scheduler=lr_scheduler,
-                   momentum_scheduler=momentum_scheduler,
-                   checkpointer=checkpointer,
-                   model_save_interval=model_save_interval,
-                   summary_interval=summary_interval,
-                   histogram_interval=histogram_interval,
-                   should_log_parameter_statistics=should_log_parameter_statistics,
-                   should_log_learning_rate=should_log_learning_rate,
-                   log_batch_size_period=log_batch_size_period,
-                   moving_average=moving_average)
-
-
-
-
-
-
+        return ApexModelTrainer(model, optimizer, iterator,
+                                train_data, validation_data,
+                                patience=patience,
+                                validation_metric=validation_metric,
+                                validation_iterator=validation_iterator,
+                                shuffle=shuffle,
+                                num_epochs=num_epochs,
+                                serialization_dir=serialization_dir,
+                                cuda_device=cuda_device,
+                                grad_norm=grad_norm,
+                                grad_clipping=grad_clipping,
+                                learning_rate_scheduler=lr_scheduler,
+                                momentum_scheduler=momentum_scheduler,
+                                checkpointer=checkpointer,
+                                model_save_interval=model_save_interval,
+                                summary_interval=summary_interval,
+                                histogram_interval=histogram_interval,
+                                should_log_parameter_statistics=should_log_parameter_statistics,
+                                should_log_learning_rate=should_log_learning_rate,
+                                log_batch_size_period=log_batch_size_period,
+                                moving_average=moving_average)
