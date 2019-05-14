@@ -82,6 +82,7 @@ class SplitUncertainModelTrainer(Trainer):
             if isinstance(self.model._lm_model, MixtureLM):
                 self.model._lm_model._lm_weighting.to(self._cuda_devices[0])
                 self.model._lm_model._feature_decoder.to(self._cuda_devices[0])
+                self.model._lm_model._decoder.weight.requires_grad = True
 
             if isinstance(self.model._lm_model, FusionLM):
                 self.model._lm_model._encoder =  self.model._lm_model._encoder.to(self._cuda_devices[0])
