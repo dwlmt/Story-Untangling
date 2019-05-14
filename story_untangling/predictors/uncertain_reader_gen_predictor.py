@@ -1,6 +1,9 @@
 import copy
 from collections import OrderedDict
 
+import more_itertools
+import numpy
+import scipy
 import torch
 from allennlp.common import JsonDict
 from allennlp.common.util import sanitize
@@ -56,7 +59,7 @@ def probability_and_tensor(node):
 
 
 def only_position_nodes(node):
-    if isinstance(node, AnyNode) and hasattr(node, "sentence_id"):
+    if isinstance(node, AnyNode) and hasattr(node, "sentence_id") and hasattr(node, "suspense_l2"):
         return True
     else:
         return False
@@ -73,13 +76,15 @@ class UncertainReaderGenPredictor(Predictor):
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
+        self._sliding_windows = [3, 5, 7]
+
         self.embedder = model._text_field_embedder._token_embedders["openai_transformer"]
         self.embedder._top_layer_only = True
 
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
-        self.sentences_to_rollout = 2
+        self.sentences_to_rollout = 3
         self.samples_per_level = 3
         self.keep_tensor_output = False
 
@@ -283,7 +288,43 @@ class UncertainReaderGenPredictor(Predictor):
                 metrics = self._calc_state_based_suspense_ely(base)
                 position_node.__dict__ = {**position_node.__dict__, **metrics}
 
-            #print(RenderTree(base))
+        stats_source_dict = {"suspense_l1": [], "suspense_l2": [], "surprise_l1": [], "surprise_l2": []}
+        for n in PreOrderIter(root, only_position_nodes):
+            for k, v in stats_source_dict.items():
+                stat = n.__dict__[k]
+                stats_source_dict[k].append(stat)
+
+        stats_dict = {}
+        for k, v in stats_source_dict.items():
+            v_array = numpy.asarray(v)
+            nobs, minmax, mean, variance, skewness, kurtosis = scipy.stats.describe(v_array)
+            stats_dict[f"{k}_num"] = nobs
+            stats_dict[f"{k}_min"] = minmax[0]
+            stats_dict[f"{k}_max"] = minmax[1]
+            stats_dict[f"{k}_variance"] = variance
+            stats_dict[f"{k}_std"] = variance ** (.5)
+            stats_dict[f"{k}_skew"] = skewness
+            stats_dict[f"{k}_kurtosis"] = kurtosis
+
+            for p in [25, 50, 75]:
+                stats_dict[f"{k}_{p}_perc"] = numpy.percentile(v_array, p)
+
+            stats = AnyNode(parent=root, name="batch_stats", **stats_dict)
+
+            window_stats_node = Node(name="window_stats")
+
+            for n in self._sliding_windows:
+                window_node = Node(name=f"{n}", parent=window_stats_node)
+                windows = more_itertools.windowed(v, n)
+                for w in windows:
+                    v_array = numpy.asarray(w)
+                    mean = numpy.mean(v_array)
+                    median = numpy.median(v_array)
+                    variance = numpy.var(v_array)
+                    std = variance ** (.5)
+                    AnyNode(parent=window_node, mean=mean, median=median, variance=variance, std=std)
+
+
         return root
 
     def _calc_state_based_suspense_ely(self, root):
@@ -311,12 +352,12 @@ class UncertainReaderGenPredictor(Predictor):
             suspense_l1 = torch.stack([n.suspense_distance_l1 for n in node_group]).to(self._device)
             suspense_l1_stat = torch.squeeze(torch.sum((suspense_l1 * probs), dim=-1)).cpu().item()
             suspense_l1_culm += suspense_l1_stat
-            metrics_dict[f"suspense_l1_state_{i}"] = suspense_l1_stat
+            metrics_dict[f"suspense_l1_{i}"] = suspense_l1_stat
 
             suspense_l2 = torch.stack([n.suspense_distance_l2 for n in node_group]).to(self._device)
             suspense_l2_stat = torch.squeeze(torch.sum((suspense_l2 * probs), dim=-1)).cpu().item()
             suspense_l2_culm += suspense_l2_stat
-            metrics_dict[f"suspense_l2_state_{i}"] = suspense_l2_stat
+            metrics_dict[f"suspense_l2_{i}"] = suspense_l2_stat
 
             # Exclude gold for surprise as already calculated in the distances.
             nodes_exclude_gold = [n for n in node_group if n.gold == False]
@@ -325,13 +366,13 @@ class UncertainReaderGenPredictor(Predictor):
                 torch.sum((torch.stack([n.surprise_distance_l1 for n in nodes_exclude_gold]).to(self._device)),
                           dim=-1)).cpu().item()
             surprise_l1_culm += surprise_l1_stat
-            metrics_dict[f"surprise_l1_state_{i}"] = surprise_l1_stat
+            metrics_dict[f"surprise_l1_{i}"] = surprise_l1_stat
 
             surprise_l2_stat = torch.squeeze(
                 torch.sum((torch.stack([n.surprise_distance_l2 for n in nodes_exclude_gold]).to(self._device)),
                           dim=-1)).cpu().item()
             surprise_l2_culm += surprise_l2_stat
-            metrics_dict[f"surprise_l2_state_{i}"] = surprise_l2_stat
+            metrics_dict[f"surprise_l2_{i}"] = surprise_l2_stat
 
         metrics_dict["suspense_l1"] = suspense_l1_culm
         metrics_dict["suspense_l2"] = suspense_l2_culm
