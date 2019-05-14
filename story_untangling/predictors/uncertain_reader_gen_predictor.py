@@ -253,7 +253,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                 correct_futures_copy = copy.deepcopy(correct_futures)
                 base = correct_futures_copy.pop()
-                base.parent = per_sentence
+                base.parent = position_node
 
                 for sample_num in range(self.samples_per_level):
                     self.generate_sentence(position, embedded_text_tensor, embedded_text_mask, encoded_story,
@@ -265,7 +265,9 @@ class UncertainReaderGenPredictor(Predictor):
 
                 self._calc_chain_probs(base)
 
-                self._calc_state_based_suspense_ely(base)
+                # Calculate suspense across the tree and merge into the base.
+                metrics = self._calc_state_based_suspense_ely(base)
+                position_node.__dict__ == {**position_node.__dict__, **metrics}
 
             #print(RenderTree(base))
         return root
@@ -297,7 +299,7 @@ class UncertainReaderGenPredictor(Predictor):
             suspense_l1_culm += suspense_l1_stat
             metrics_dict[f"suspense_l1_state_{i}"] = suspense_l1_stat
 
-            suspense_l2 = torch.stack([n.suspense_distance_l1 for n in node_group]).to(self._device)
+            suspense_l2 = torch.stack([n.suspense_distance_l2 for n in node_group]).to(self._device)
             suspense_l2_stat = torch.squeeze(torch.sum((suspense_l2 * probs), dim=-1)).cpu()
             suspense_l2_culm += suspense_l2_stat
             metrics_dict[f"suspense_l2_state_{i}"] = suspense_l2_stat
@@ -324,8 +326,7 @@ class UncertainReaderGenPredictor(Predictor):
         metrics_dict["surprise_l2"] = suspense_l2_culm
 
         metrics_dict["steps"] = steps_counter
-
-        print(metrics_dict)
+        # print(metrics_dict)
         return metrics_dict
 
     def _calc_chain_probs(self, root):
