@@ -41,8 +41,22 @@ def only_probability_nodes(node):
         return False
 
 
+def only_state_nodes(node):
+    if isinstance(node, AnyNode) and hasattr(node, "chain_prob") and hasattr(node, "suspense_distance_l2"):
+        return True
+    else:
+        return False
+
+
 def probability_and_tensor(node):
     if only_probability_nodes(node) and only_tensor_nodes():
+        return True
+    else:
+        return False
+
+
+def only_position_nodes(node):
+    if isinstance(node, AnyNode) and hasattr(node, "sentence_id"):
         return True
     else:
         return False
@@ -267,7 +281,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                 # Calculate suspense across the tree and merge into the base.
                 metrics = self._calc_state_based_suspense_ely(base)
-                position_node.__dict__ == {**position_node.__dict__, **metrics}
+                position_node.__dict__ = {**position_node.__dict__, **metrics}
 
             #print(RenderTree(base))
         return root
@@ -276,15 +290,15 @@ class UncertainReaderGenPredictor(Predictor):
         # Use to keep results
         metrics_dict = {}
 
-        suspense_l1_culm = torch.tensor([0.0])
-        suspense_l2_culm = torch.tensor([0.0])
-        surprise_l1_culm = torch.tensor([0.0])
-        surprise_l2_culm = torch.tensor([0.0])
+        suspense_l1_culm = 0.0
+        suspense_l2_culm = 0.0
+        surprise_l1_culm = 0.0
+        surprise_l2_culm = 0.0
 
         steps_counter = 0
 
         # Iterate and add chain probabilities through the tree structure.
-        for i, node_group in enumerate(LevelOrderGroupIter(root, only_probability_nodes), start=0):
+        for i, node_group in enumerate(LevelOrderGroupIter(root, only_state_nodes), start=0):
 
             # Don't calculate on the base root.
             if len(node_group) <= 1:
@@ -295,12 +309,12 @@ class UncertainReaderGenPredictor(Predictor):
             probs = torch.stack([n.chain_prob for n in node_group]).to(self._device)
 
             suspense_l1 = torch.stack([n.suspense_distance_l1 for n in node_group]).to(self._device)
-            suspense_l1_stat = torch.squeeze(torch.sum((suspense_l1 * probs), dim=-1)).cpu()
+            suspense_l1_stat = torch.squeeze(torch.sum((suspense_l1 * probs), dim=-1)).cpu().item()
             suspense_l1_culm += suspense_l1_stat
             metrics_dict[f"suspense_l1_state_{i}"] = suspense_l1_stat
 
             suspense_l2 = torch.stack([n.suspense_distance_l2 for n in node_group]).to(self._device)
-            suspense_l2_stat = torch.squeeze(torch.sum((suspense_l2 * probs), dim=-1)).cpu()
+            suspense_l2_stat = torch.squeeze(torch.sum((suspense_l2 * probs), dim=-1)).cpu().item()
             suspense_l2_culm += suspense_l2_stat
             metrics_dict[f"suspense_l2_state_{i}"] = suspense_l2_stat
 
@@ -309,13 +323,13 @@ class UncertainReaderGenPredictor(Predictor):
 
             surprise_l1_stat = torch.squeeze(
                 torch.sum((torch.stack([n.surprise_distance_l1 for n in nodes_exclude_gold]).to(self._device)),
-                          dim=-1)).cpu()
+                          dim=-1)).cpu().item()
             surprise_l1_culm += surprise_l1_stat
             metrics_dict[f"surprise_l1_state_{i}"] = surprise_l1_stat
 
             surprise_l2_stat = torch.squeeze(
                 torch.sum((torch.stack([n.surprise_distance_l2 for n in nodes_exclude_gold]).to(self._device)),
-                          dim=-1)).cpu()
+                          dim=-1)).cpu().item()
             surprise_l2_culm += surprise_l2_stat
             metrics_dict[f"surprise_l2_state_{i}"] = surprise_l2_stat
 
