@@ -1,6 +1,6 @@
-import copy
 from collections import OrderedDict
 
+import copy
 import more_itertools
 import numpy
 import scipy
@@ -303,8 +303,13 @@ class UncertainReaderGenPredictor(Predictor):
             for n in self._sliding_windows:
                 window_node = Node(name=f"{n}", parent=window_stats_node)
                 windows = more_itertools.windowed(v, n)
-                for w in windows:
-                    v_array = numpy.asarray(w)
+                for window in windows:
+                    window = [w for w in window if w is not None]
+
+                    if len(window) == 0:
+                        continue
+
+                    v_array = numpy.asarray(window)
                     mean = numpy.mean(v_array)
                     median = numpy.median(v_array)
                     variance = numpy.var(v_array)
