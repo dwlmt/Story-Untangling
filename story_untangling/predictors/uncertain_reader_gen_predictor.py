@@ -72,6 +72,8 @@ class UncertainReaderGenPredictor(Predictor):
         self.generate_per_level = 5
         self.prob_threshold = 0.02
 
+        self._remove_sentence_output = False
+
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
@@ -97,6 +99,10 @@ class UncertainReaderGenPredictor(Predictor):
         outputs = self._model.forward_on_instance(instance)
 
         root = self._sample_tree(instance, outputs)
+
+        if self._remove_sentence_output:
+            for n in PreOrderIter(root, only_position_nodes):
+                n.children = ()
 
         for n in PreOrderIter(root, only_tensor_nodes):
 
@@ -208,7 +214,7 @@ class UncertainReaderGenPredictor(Predictor):
         embedded_text_mask = torch.from_numpy(outputs["masks"]).cpu()
         encoded_stories = torch.from_numpy(outputs["source_encoded_stories"]).cpu()
         text = instance["text"]
-        root = Node(name="root")
+        root = Node(name="predictions")
         per_sentence = Node(name="position", parent=root)
         # aggregate = Node(name="aggregate_stats", parent=root)
         for position, (text_field, encoded_story) in enumerate(zip(text, encoded_stories)):
@@ -290,6 +296,7 @@ class UncertainReaderGenPredictor(Predictor):
     def _calc_summary_stats(self, root):
 
         stats_node = Node(name="batch_stats", parent=root)
+        window_stats_node = Node(name="window_stats", parent=root)
         stats_source_dict = {"suspense_l1": [], "suspense_l2": [],
                              "surprise_l1": [], "surprise_l2": [], "suspense_entropy": []}
 
@@ -316,10 +323,11 @@ class UncertainReaderGenPredictor(Predictor):
 
             AnyNode(parent=stats_node, name=f"{k}", **stats_dict)
 
-            window_stats_node = Node(name="window_stats", parent=root)
+            window_variable_node = Node(name=f"{k}", parent=window_stats_node)
+
 
             for n in self._sliding_windows:
-                window_node = Node(name=f"{n}", parent=window_stats_node)
+                window_node = Node(name=f"{n}", parent=window_variable_node)
                 windows = more_itertools.windowed(v, n)
                 for i, window in enumerate(windows):
                     window = [w for w in window if w is not None]
