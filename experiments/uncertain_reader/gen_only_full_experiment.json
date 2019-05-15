@@ -14,7 +14,7 @@
         "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
-    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/base",
+    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
       0,
@@ -89,7 +89,7 @@
       "type": "feedforward",
       "feedforward": {
         "input_dim": 1536,
-        "num_layers": 1,
+        "num_layers": 2,
         "hidden_dims": 768,
         "activations": "elu",
         "dropout": 0.0

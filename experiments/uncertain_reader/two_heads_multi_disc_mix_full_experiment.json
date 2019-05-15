@@ -34,6 +34,7 @@
     "type": "uncertain_reader",
     "disc_loss": true,
     "gen_loss": true,
+    //  "lm_finetune_top_layers": 2,
     "distance_weights": [
       1.0,
       0.5,

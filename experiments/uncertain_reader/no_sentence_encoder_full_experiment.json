@@ -78,6 +78,7 @@
     "batch_size": 2
   },
   "trainer": {
+    "type": "apex",
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [

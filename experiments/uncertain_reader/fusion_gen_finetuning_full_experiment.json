@@ -52,9 +52,9 @@
           "transformer": {
             "n_ctx": 150,
             "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
-          }
-        },
-        "top_layer_only": true
+          },
+          "top_layer_only": true
+        }
       }
     },
     "sentence_seq2seq_encoder": {
@@ -91,7 +91,8 @@
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      0, 3
+      0,
+      1
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

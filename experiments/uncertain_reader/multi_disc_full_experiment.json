@@ -52,7 +52,7 @@
           "type": "openai_transformer_embedder",
           "transformer": {
             "n_ctx": 150,
-            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
+            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
 
           },
            "top_layer_only": true
@@ -72,27 +72,29 @@
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
-    },
-    "fusion_seq2seq_encoder": {
-      "type": "feedforward",
-      "feedforward": {
-        "input_dim": 1536,
-        "num_layers": 2,
-        "hidden_dims": 768,
-        "activations": "elu",
-        "dropout": 0.0
-      }
     }
+    /*,
+        "fusion_seq2seq_encoder": {
+          "type": "feedforward",
+          "feedforward": {
+            "input_dim": 1536,
+            "num_layers": 2,
+            "hidden_dims": 768,
+            "activations": "elu",
+            "dropout": 0.0
+          }
+        }*/
   },
   "iterator": {
     "type": "basic",
     "batch_size": 2
   },
   "trainer": {
+    "type": "apex",
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      3
+      0
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

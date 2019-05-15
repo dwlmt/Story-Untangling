@@ -17,12 +17,11 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",//,"/disk/scratch/s1569885/dataset",
     "use_existing_cached_db": true,
     "cuda_device": [
-      0,
-      1,
-      2,
       3
     ],
     "story_chunking": 60,
+    "ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.12.21.tar.gz",
+    "coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -51,7 +50,7 @@
           "type": "openai_transformer_embedder",
           "transformer": {
             "n_ctx": 150,
-            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
+            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
           },
           "top_layer_only": true
         }
@@ -70,7 +69,7 @@
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
-    },/*
+    }/*
     "story_feedforward": {
       "input_dim": 768,
       "num_layers": 2,
@@ -87,8 +86,7 @@
           "dropout": 0.0
         },*/
     //"bilinear_fusion": true,
-   /*
-    "fusion_seq2seq_encoder": {
+    /*"fusion_seq2seq_encoder": {
       "type": "feedforward",
       "feedforward": {
         "input_dim": 1536,
@@ -104,11 +102,11 @@
     "batch_size": 2
   },
   "trainer": {
-    //"type" : "uncertain_trainer_split_lm",
-    "num_epochs": 1,
+    "type": "apex",
+    "num_epochs": 100,
     "patience": 5,
     "cuda_device": [
-      3
+      2
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

@@ -11,7 +11,7 @@
       "openai_transformer": {
         "type": "openai_transformer_byte_pair",
         "n_ctx": 150,
-        "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
+        "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
@@ -22,7 +22,7 @@
       2,
       3
     ],
-     "story_chunking": 50,
+    "story_chunking": 50,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -53,9 +53,9 @@
           "type": "openai_transformer_embedder",
           "transformer": {
             "n_ctx": 150,
-            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
+            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
           },
-           "top_layer_only": true
+          "top_layer_only": true
         }
       }
     },
@@ -73,6 +73,22 @@
       "num_layers": 3,
       "dropout": 0.0
     },
+    "story_feedforward": {
+      "input_dim": 768,
+      "num_layers": 2,
+      "hidden_dims": 768,
+      "activations": "elu",
+      "dropout": 0.0
+    }
+    ,
+        "target_feedforward": {
+          "input_dim": 768,
+          "num_layers": 2,
+          "hidden_dims": 768,
+          "activations": "elu",
+          "dropout": 0.0
+        },
+    //"bilinear_fusion": true,
     "fusion_seq2seq_encoder": {
       "type": "feedforward",
       "feedforward": {
@@ -89,9 +105,11 @@
     "batch_size": 2
   },
   "trainer": {
+    "type": "apex",
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
+      1,
       3
     ],
     //"validation_metric": "+neighbour_accuracy",
@@ -99,8 +117,8 @@
     "optimizer": {
       "type": "sgd",
       "lr": 0.01,
-      //"momentum": 0.9,
-      //"nesterov": true
+      "momentum": 0.9,
+      "nesterov": true
     },
     "learning_rate_scheduler": {
       "type": "reduce_on_plateau",
