@@ -176,18 +176,21 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 yield self.text_to_instance(sentence_batch, story, db)
 
             if i % 100 == 0:
-                try:
-                    if len(self._tried_to_insert) > 0:
-                        db["tried_tokens"].insert_many(self._tried_to_insert)
-                        print(f"Tried tokens inserted: {len(self._tried_to_insert)}")
-                    if len(self._allowed_to_insert) > 0:
-                        db["allowed_tokens"].insert_many(self._allowed_to_insert)
-                        print(f"Allowed tokens inserted: {len(self._allowed_to_insert)}")
+                self._insert_tried_and_allowed_tokens(db)
 
-                    self._tried_to_insert = []
-                    self._allowed_to_insert = []
-                except:
-                    print(f"Couldn't insert {self._tried_to_insert}, {self._allowed_to_insert}")
+    def _insert_tried_and_allowed_tokens(self, db):
+        try:
+            if len(self._tried_to_insert) > 0:
+                db["tried_tokens"].insert_many(self._tried_to_insert)
+                print(f"Tried tokens inserted: {len(self._tried_to_insert)}")
+            if len(self._allowed_to_insert) > 0:
+                db["allowed_tokens"].insert_many(self._allowed_to_insert)
+                print(f"Allowed tokens inserted: {len(self._allowed_to_insert)}")
+
+            self._tried_to_insert = []
+            self._allowed_to_insert = []
+        except:
+            print(f"Couldn't insert {self._tried_to_insert}, {self._allowed_to_insert}")
 
     @overrides
     def text_to_instance(self,
