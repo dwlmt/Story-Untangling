@@ -69,7 +69,7 @@ class UncertainReaderGenPredictor(Predictor):
         super().__init__(model, dataset_reader)
 
         self.levels_to_rollout = 2
-        self.generate_per_level = 10
+        self.generate_per_level = 5
         self.prob_threshold = 0.02
 
         self._model.full_output_embedding = True
@@ -155,7 +155,7 @@ class UncertainReaderGenPredictor(Predictor):
             # Detach all child nodes that don't meet the probability threshold.
             if c.gold:
                 pass
-            elif self.prob_threshold is not None and c.prob < self.prob_threshold:
+            elif c.prob < self.prob_threshold:
                 print(f"Remove low probability continuation, prob {c.prob}, {c.sentence_text}")
                 c.parent = None
                 root.children = root.children[: i] + root.children[i + 1:]
