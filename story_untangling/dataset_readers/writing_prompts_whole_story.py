@@ -178,6 +178,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             if i % 100 == 0:
                 self._insert_tried_and_allowed_tokens(db)
 
+        self._insert_tried_and_allowed_tokens(db)
+
     def _insert_tried_and_allowed_tokens(self, db):
         try:
             if len(self._tried_to_insert) > 0:
