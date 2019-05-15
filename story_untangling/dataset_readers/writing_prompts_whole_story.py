@@ -142,43 +142,41 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                               ner_model=self._ner_model, coreference_model=self._coreference_model,
                               cuda_device=self._cuda_device))
 
-        db = dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600})
+        with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
 
-        if not self._reloaded_dicts:
-            self._reloaded_dicts = True
-            allowed_tokens = db.get_table("allowed_tokens")
-            for t in allowed_tokens:
-                self._allowed_tokens[t["token"]] = True
-            print(f"Starting Allowed Tokens Size: {len(self._allowed_tokens)}")
-            tried_tokens = db.get_table("tried_tokens")
-            for t in tried_tokens:
-                self._tried_tokens[t["token"]] = True
-            print(f"Starting Tried Tokens Size: {len(self._tried_tokens)}")
+            if not self._reloaded_dicts:
+                self._reloaded_dicts = True
+                allowed_tokens = db.get_table("allowed_tokens")
+                for t in allowed_tokens:
+                    self._allowed_tokens[t["token"]] = True
+                print(f"Starting Allowed Tokens Size: {len(self._allowed_tokens)}")
+                tried_tokens = db.get_table("tried_tokens")
+                for t in tried_tokens:
+                    self._tried_tokens[t["token"]] = True
+                print(f"Starting Tried Tokens Size: {len(self._tried_tokens)}")
 
-        # Randomize the order of the stories. With repeated epochs and lazy dataloaders will produce different negative examples each epoch.
-        stories = db.query(
-            f'SELECT * FROM story  WHERE sentence_num >= {self._min_story_sentences} '
-            f'AND sentence_num <= {self._max_story_sentences} ORDER BY random()')
+            # Randomize the order of the stories. With repeated epochs and lazy dataloaders will produce different negative examples each epoch.
+            stories = db.query(
+                f'SELECT * FROM story  WHERE sentence_num >= {self._min_story_sentences} '
+                f'AND sentence_num <= {self._max_story_sentences} ORDER BY random()')
 
-        for i, story in enumerate(stories):
+            for i, story in enumerate(stories):
 
-            story_id = story["id"]
+                story_id = story["id"]
 
-            # Id will be the same as the sentence num as they are inserted as a batch in sequence.
-            sentences = [s for s in db.query(f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
-                                             f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
-                                             f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true ORDER BY id')]
+                # Id will be the same as the sentence num as they are inserted as a batch in sequence.
+                sentences = [s for s in db.query(
+                    f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
+                    f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
+                    f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true ORDER BY id')]
 
-            for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
+                for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
+                    # Filter out non English and gibberish sentences.
 
-                # Filter out non English and gibberish sentences.
+                    yield self.text_to_instance(sentence_batch, story, db)
 
-                yield self.text_to_instance(sentence_batch, story, db)
-
-            if i % 100 == 0:
-                self._insert_tried_and_allowed_tokens(db)
-
-        self._insert_tried_and_allowed_tokens(db)
+        with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
+            self._insert_tried_and_allowed_tokens(db)
 
     def _insert_tried_and_allowed_tokens(self, db):
         try:
