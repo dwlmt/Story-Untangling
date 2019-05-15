@@ -1,6 +1,6 @@
+import copy
 from collections import OrderedDict
 
-import copy
 import more_itertools
 import numpy
 import scipy
@@ -68,6 +68,10 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
+        self.levels_to_rollout = 2
+        self.generate_per_level = 10
+        self.prob_threshold = 0.02
+
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
@@ -79,8 +83,6 @@ class UncertainReaderGenPredictor(Predictor):
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
-        self.sentences_to_rollout = 2
-        self.samples_per_level = 3
         self.keep_tensor_output = False
 
         self._device = self._model._lm_model._decoder.weight.device
@@ -145,10 +147,21 @@ class UncertainReaderGenPredictor(Predictor):
         probs = torch.squeeze(probs)
         log_probs = torch.squeeze(log_probs)
 
-        for c, l, p, lb in zip(child_list, logits, probs, log_probs):
+        for i, (c, l, p, lb) in enumerate(zip(child_list, logits, probs, log_probs)):
             c.logit = l
             c.prob = p
             c.log_prob = lb
+
+            # Detach all child nodes that don't meet the probability threshold.
+            if c.gold:
+                pass
+            elif self.prob_threshold is not None and c.prob < self.prob_threshold:
+                print(f"Remove low probability continuation, prob {c.prob}, {c.sentence_text}")
+                c.parent = None
+                root.children = root.children[: i] + root.children[i + 1:]
+            else:
+                pass  # print(f"Include, prob {c.prob}, {c.sentence_text}")
+
 
         root.gold_index = gold_index
 
@@ -218,7 +231,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             # Put the correct representations into the sentences at the given point.
             parent_story_tensor = None
-            for i in range(1, self.sentences_to_rollout + 2):
+            for i in range(1, self.levels_to_rollout + 2):
 
                 if position + i > len(text) - 1 or len(text[position + i]) == 0:
                     continue
@@ -256,10 +269,10 @@ class UncertainReaderGenPredictor(Predictor):
                 base = correct_futures_copy.pop()
                 base.parent = position_node
 
-                for sample_num in range(self.samples_per_level):
+                for sample_num in range(self.generate_per_level):
                     self.generate_sentence(position, embedded_text_tensor, embedded_text_mask, encoded_story,
                                            text_to_gen_from,
-                                           sentence_length, ctx_size, recursion=self.sentences_to_rollout - 1,
+                                           sentence_length, ctx_size, recursion=self.levels_to_rollout - 1,
                                            parent=base, correct_futures=correct_futures)
 
                 self._calculate_disc_probabilities(base)
@@ -275,35 +288,40 @@ class UncertainReaderGenPredictor(Predictor):
         return root
 
     def _calc_summary_stats(self, root):
+
+        stats_node = Node(name="batch_stats", parent=root)
         stats_source_dict = {"suspense_l1": [], "suspense_l2": [],
                              "surprise_l1": [], "surprise_l2": [], "suspense_entropy": []}
+
         for n in PreOrderIter(root, only_position_nodes):
             for k, v in stats_source_dict.items():
                 stat = n.__dict__[k]
                 stats_source_dict[k].append(stat)
+
         stats_dict = {}
         for k, v in stats_source_dict.items():
             v_array = numpy.asarray(v)
             nobs, minmax, mean, variance, skewness, kurtosis = scipy.stats.describe(v_array)
-            stats_dict[f"{k}_num"] = nobs
-            stats_dict[f"{k}_min"] = minmax[0]
-            stats_dict[f"{k}_max"] = minmax[1]
-            stats_dict[f"{k}_variance"] = variance
-            stats_dict[f"{k}_std"] = variance ** (.5)
-            stats_dict[f"{k}_skew"] = skewness
-            stats_dict[f"{k}_kurtosis"] = kurtosis
+
+            stats_dict["num"] = nobs
+            stats_dict["min"] = minmax[0]
+            stats_dict["max"] = minmax[1]
+            stats_dict["variance"] = variance
+            stats_dict["std"] = variance ** (.5)
+            stats_dict["skew"] = skewness
+            stats_dict["kurtosis"] = kurtosis
 
             for p in [25, 50, 75]:
-                stats_dict[f"{k}_{p}_perc"] = numpy.percentile(v_array, p)
+                stats_dict[f"{p}_perc"] = numpy.percentile(v_array, p)
 
-            stats = AnyNode(parent=root, name="batch_stats", **stats_dict)
+            AnyNode(parent=stats_node, name=f"{k}", **stats_dict)
 
-            window_stats_node = Node(name="window_stats")
+            window_stats_node = Node(name="window_stats", parent=root)
 
             for n in self._sliding_windows:
                 window_node = Node(name=f"{n}", parent=window_stats_node)
                 windows = more_itertools.windowed(v, n)
-                for window in windows:
+                for i, window in enumerate(windows):
                     window = [w for w in window if w is not None]
 
                     if len(window) == 0:
@@ -314,7 +332,7 @@ class UncertainReaderGenPredictor(Predictor):
                     median = numpy.median(v_array)
                     variance = numpy.var(v_array)
                     std = variance ** (.5)
-                    AnyNode(parent=window_node, mean=mean, median=median, variance=variance, std=std)
+                    AnyNode(parent=window_node, position=i, mean=mean, median=median, variance=variance, std=std)
 
     def _calc_state_based_suspense(self, root):
         # Use to keep results
@@ -472,7 +490,7 @@ class UncertainReaderGenPredictor(Predictor):
             future = correct_futures_copy.pop()
             future.parent = created_node
 
-            for i in range(self.samples_per_level):
+            for i in range(self.generate_per_level):
 
                 next_position = position + 1
 
