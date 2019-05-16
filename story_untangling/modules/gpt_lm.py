@@ -81,12 +81,16 @@ class FusionLM(BaseLMHead):
         self._encoder = encoder
 
     def forward(self, lm_hidden_states, feature_hidden_states, lm_labels=None):
+
+        if len(lm_hidden_states.shape) == 2:
+            lm_hidden_states = lm_hidden_states.unsqueeze(dim=0)
+
         feature_hidden_states = feature_hidden_states.unsqueeze(dim=1)
 
         feature_hidden_states = feature_hidden_states.expand(feature_hidden_states.shape[0], lm_hidden_states.shape[1],
                                                              feature_hidden_states.shape[2])
 
-        fused_states = torch.cat((lm_hidden_states, feature_hidden_states), dim=2)
+        fused_states = torch.cat((lm_hidden_states, feature_hidden_states), dim=-1)
 
         fused_states = self._encoder(fused_states)
 
