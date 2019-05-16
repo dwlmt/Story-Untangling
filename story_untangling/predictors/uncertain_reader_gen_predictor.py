@@ -68,7 +68,7 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        self.levels_to_rollout = 2
+        self.levels_to_rollout = 3
         self.generate_per_level = 5
         self.prob_threshold = 0.02
 
@@ -489,7 +489,7 @@ class UncertainReaderGenPredictor(Predictor):
         created_node = AnyNode(gold=False, story_tensor=encoded_story.cpu().detach(), sentence_ids=gen_sentence,
                                sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
                                               gen_sentence if t in self.indexer.decoder],
-                               sentence_length=len(gen_sentence),
+                               sentence_length=len(gen_sentence), type="generated",
                                parent=parent)
 
         if recursion > 0:
