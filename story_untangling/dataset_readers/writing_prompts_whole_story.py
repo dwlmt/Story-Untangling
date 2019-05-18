@@ -142,6 +142,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                               ner_model=self._ner_model, coreference_model=self._coreference_model,
                               cuda_device=self._cuda_device))
 
+        self._dataset_db = dataset_db
+
         with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
 
             if not self._reloaded_dicts:
@@ -191,6 +193,43 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             self._allowed_to_insert = []
         except:
             print(f"Couldn't insert {self._tried_to_insert}, {self._allowed_to_insert}")
+
+    def sample_random_sentences(self, n, story_id=None, sentence_id=None):
+        ''' Sample n random sentences from the corpus.
+            If sentence and story id specified then always choose the sentences real successor as well.
+        '''
+        sentence_batch = []
+        story_batch = []
+
+        if sentence_id:
+            n = n - 1
+        with dataset.connect(self._dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
+            sentences = list(db.query(
+                f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
+                f'WHERE sentence_lang.lang = "en" '
+                f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true ORDER BY random() LIMIT {n}'))
+
+            if sentence_id:
+                next_sentence = db.query(
+                    f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
+                    f'WHERE sentence.id = {sentence_id + 1} and sentence.story_id={story_id} and sentence_lang.lang = "en" '
+                    f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true')
+
+                for n in next_sentence:
+                    # print(n)
+                    sentences.append(n)
+
+            for sentence in sentences:
+                story = db.query(
+                    f'SELECT * FROM story WHERE id={sentence["story_id"]}')
+
+                for s in story:
+                    story_batch.append(s)
+                # The story fields are in the dict which is why sentences is parsed twice.
+                sentence_batch.append(sentence)
+
+        return self.text_to_instance(sentence_batch, story_batch, db)
+
 
     @overrides
     def text_to_instance(self,
@@ -299,9 +338,16 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             text_field = TextField([], self._token_indexers).empty_field()
             story_text_fields.extend([text_field] * (self._story_chunking - len(story_text_fields)))
 
-        metadata = {"story_id": story["id"], "sentence_ids": [s["id"] for s in sentences],
+        if isinstance(story, list):
+            story_id = [s["id"] for s in story]
+            sentence_num = [s["sentence_num"] for s in story]
+        else:
+            story_id = story["id"]
+            sentence_num = story["sentence_num"]
+
+        metadata = {"story_id": story_id, "sentence_ids": [s["id"] for s in sentences],
                     "sentence_nums": [s["sentence_num"] for s in sentences],
-                    "number_of_sentences": story["sentence_num"]}
+                    "number_of_sentences": sentence_num}
         metadata["text"] = story_text_original
 
         text_field = ListField(story_text_fields)
