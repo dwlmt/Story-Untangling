@@ -182,18 +182,18 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
             self._insert_tried_and_allowed_tokens(db)
 
-        disgarded_tokens = self._tried_tokens.difference(self._allowed_to_insert)
-        print(f"Disgarded tokens: {disgarded_tokens}")
+        disgarded_tokens = self._tried_tokens.difference(self._allowed_tokens)
+        print(f"Disgarded tokens, num {len(disgarded_tokens)}: {disgarded_tokens}")
 
     def _insert_tried_and_allowed_tokens(self, db):
         try:
             if len(self._tried_to_insert) > 0:
                 db["tried_tokens"].insert_many(self._tried_to_insert)
-                print(f"Tried tokens inserted: {self._tried_to_insert}")
+                print(f"Tried tokens inserted: {len(self._tried_to_insert)}")
                 self._tried_to_insert = []
             if len(self._allowed_to_insert) > 0:
                 db["allowed_tokens"].insert_many(self._allowed_to_insert)
-                print(f"Allowed tokens inserted: {self._allowed_to_insert}")
+                print(f"Allowed tokens inserted: {len(self._allowed_to_insert)}")
                 self._allowed_to_insert = []
 
         except:
