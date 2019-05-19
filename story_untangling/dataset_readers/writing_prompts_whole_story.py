@@ -110,24 +110,26 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         self._cuda_device = cuda_device
 
-
-        self._allowed_tokens = {}
-        self._tried_tokens = {}
+        self._allowed_tokens = set([])
+        self._tried_tokens = set([])
 
         for t in nltk.corpus.stopwords.words('english'):
-            self._allowed_tokens[t] = True
+            self._allowed_tokens.add(t)
+            self._tried_tokens.add(t)
 
         for t in STOP_WORDS:
-            self._allowed_tokens[t] = True
+            self._allowed_tokens.add(t)
+            self._tried_tokens.add(t)
 
         for t in punctuation:
-            self._allowed_tokens[t] = True
+            self._allowed_tokens.add(t)
+            self._tried_tokens.add(t)
 
         self._py_dictionary = PyDictionary()
         self._enchant_dict_us = enchant.Dict("en_US")
         self._enchant_dict_uk = enchant.Dict("en_UK")
 
-        self._reloaded_dicts = False
+        self._seen_datasets = set()
 
         self._tried_to_insert = []
         self._allowed_to_insert = []
@@ -146,15 +148,15 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
 
-            if not self._reloaded_dicts:
-                self._reloaded_dicts = True
+            if not file_path in self._seen_datasets:
+                self._seen_datasets.add(file_path)
                 allowed_tokens = db.get_table("allowed_tokens")
                 for t in allowed_tokens:
-                    self._allowed_tokens[t["token"]] = True
+                    self._allowed_tokens.add(t["token"])
                 print(f"Starting Allowed Tokens Size: {len(self._allowed_tokens)}")
                 tried_tokens = db.get_table("tried_tokens")
                 for t in tried_tokens:
-                    self._tried_tokens[t["token"]] = True
+                    self._tried_tokens.add(t["token"])
                 print(f"Starting Tried Tokens Size: {len(self._tried_tokens)}")
 
             # Randomize the order of the stories. With repeated epochs and lazy dataloaders will produce different negative examples each epoch.
@@ -180,17 +182,20 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
             self._insert_tried_and_allowed_tokens(db)
 
+        disgarded_tokens = self._tried_tokens.difference(self._allowed_to_insert)
+        print(f"Disgarded tokens: {disgarded_tokens}")
+
     def _insert_tried_and_allowed_tokens(self, db):
         try:
             if len(self._tried_to_insert) > 0:
                 db["tried_tokens"].insert_many(self._tried_to_insert)
-                print(f"Tried tokens inserted: {len(self._tried_to_insert)}")
+                print(f"Tried tokens inserted: {self._tried_to_insert}")
+                self._tried_to_insert = []
             if len(self._allowed_to_insert) > 0:
                 db["allowed_tokens"].insert_many(self._allowed_to_insert)
-                print(f"Allowed tokens inserted: {len(self._allowed_to_insert)}")
+                print(f"Allowed tokens inserted: {self._allowed_to_insert}")
+                self._allowed_to_insert = []
 
-            self._tried_to_insert = []
-            self._allowed_to_insert = []
         except:
             print(f"Couldn't insert {self._tried_to_insert}, {self._allowed_to_insert}")
 
@@ -297,7 +302,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
             add_token = False
             if self._enchant_dict_us.check(token_text) or self._enchant_dict_uk.check(token_text):
-                # print("Enchant Dictionary", token_text)
+                print("Enchant Dictionary", token_text)
                 add_token = True
             elif self._py_dictionary.meaning(token_text) != None:
                 print("Py Dictionary", token_text)
@@ -305,16 +310,16 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             else:
                 try:
                     if not nonsense(token_text):
-                        # print("Not Nonsense", token_text)
+                        print("Not Nonsense", token_text)
                         add_token = True
                 except:
                     pass
 
             if add_token:
-                self._allowed_tokens[token_text] = True
+                self._allowed_tokens.add(token_text)
                 self._allowed_to_insert.append({"token": token_text})
 
-            self._tried_tokens[token_text] = True
+            self._tried_tokens.add(token_text)
             self._tried_to_insert.append({"token": token_text})
 
         def strip_repeating_punctuation(tokens):
