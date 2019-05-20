@@ -3,6 +3,7 @@ import copy
 import itertools
 import logging
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Union
@@ -395,37 +396,48 @@ class SaveStoryToDatabase:
         for sentences, story_num in zip(story_sentences, story_nums):
             with dataset.connect(self._dataset_db,
                                  engine_kwargs=engine_kwargs) as db:
-                try:
-                    
-                    story_table = db['story']
-                    sentence_table = db['sentence']
-                    story = dict(story_num=story_num)
-                    story_id = story_table.insert(story)
-                    sentences_to_save = []
 
-                    total_story_tokens = 0
-                    sentences = self._word_tokenizer.batch_tokenize(sentences)
+                retry = 100
+                while retry > 0:
+                    try:
 
-                    for i, sent in enumerate(sentences):
-                        start_span = total_story_tokens
-                        sentence_len = len(sent)
-                        total_story_tokens += sentence_len
-                        end_span = total_story_tokens
+                        db.begin()
 
-                        text = " ".join([s.text for s in sent])
+                        story_table = db['story']
+                        sentence_table = db['sentence']
+                        story = dict(story_num=story_num)
+                        story_id = story_table.insert(story)
+                        sentences_to_save = []
 
-                        sentences_to_save.append(
-                            dict(sentence_num=i, story_id=story_id, text=text,
-                                 sentence_len=sentence_len, start_span=start_span, end_span=end_span))
-                    sentence_table.insert_many(sentences_to_save)
+                        total_story_tokens = 0
+                        sentences = self._word_tokenizer.batch_tokenize(sentences)
 
-                    story_table.update(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
-                                       ['id'])
-                    story_ids.append(story_id)
-                    
+                        for i, sent in enumerate(sentences):
+                            start_span = total_story_tokens
+                            sentence_len = len(sent)
+                            total_story_tokens += sentence_len
+                            end_span = total_story_tokens
 
-                except Exception as e:
-                    logging.error(e)
+                            text = " ".join([s.text for s in sent])
+
+                            sentences_to_save.append(
+                                dict(sentence_num=i, story_id=story_id, text=text,
+                                     sentence_len=sentence_len, start_span=start_span, end_span=end_span))
+                        sentence_table.insert_many(sentences_to_save)
+
+                        story_table.update(
+                            dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
+                            ['id'])
+                        story_ids.append(story_id)
+
+                        db.commit()
+
+                        retry = 0
+
+                    except Exception as e:
+                        logging.error(e)
+                        retry -= 1
+                        time.sleep(5)
                     
                     
         return story_ids
