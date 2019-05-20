@@ -69,10 +69,12 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        self.levels_to_rollout = 2
+        self.levels_to_rollout = 3
         self.generate_per_level = 5
-        self.sample_from_corpus_per_level = 5
-        self.prob_threshold = 0.02
+        self.sample_from_corpus_per_level = 100
+        self.max_leaves_per_level = 20
+        self.min_ratio_of_most_likely = 0.1
+        self.prob_threshold = 0.01
 
         self._remove_sentence_output = False
 
@@ -160,6 +162,15 @@ class UncertainReaderGenPredictor(Predictor):
         probs = torch.squeeze(probs)
         log_probs = torch.squeeze(log_probs)
 
+        # Set the probability to prune unlikely nodes.
+        cutoff_prob = self.prob_threshold
+        probs_from_max_to_min = sorted(probs, reverse=True)
+        max_prob = probs_from_max_to_min[0]
+        if len(probs_from_max_to_min) > self.max_leaves_per_level:
+            cutoff_prob = max(cutoff_prob, probs_from_max_to_min[self.max_leaves_per_level - 1])
+        cutoff_prob = max(cutoff_prob, max_prob * self.min_ratio_of_most_likely)
+        # print(f"Cutoff prob: {cutoff_prob}")
+
         for i, (c, l, p, lb) in enumerate(zip(child_list, logits, probs, log_probs)):
             c.logit = l
             c.prob = p
@@ -168,13 +179,12 @@ class UncertainReaderGenPredictor(Predictor):
             # Detach all child nodes that don't meet the probability threshold.
             if c.gold:
                 pass
-            elif c.prob < self.prob_threshold:
-                print(f"Remove low probability continuation, prob {c.prob}, {c.sentence_text}")
+            elif c.prob < cutoff_prob:
+                #print(f"Remove low probability continuation, prob {c.prob}, {c.sentence_text}")
                 c.parent = None
                 root.children = root.children[: i] + root.children[i + 1:]
             else:
-                pass  # print(f"Include, prob {c.prob}, {c.sentence_text}")
-
+                pass  #print(f"Include, prob {c.prob}, {c.sentence_text}")
 
         root.gold_index = gold_index
 
