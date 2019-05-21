@@ -72,6 +72,8 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             # Create the main tables and columns that need indexing.
             story_table = db.create_table('story')
             story_table.create_column('story_num', db.types.integer)
+            story_table.create_index(['story_num'])
+
             sentence_table = db.create_table('sentence')
             sentence_table.create_column('story_id', db.types.bigint)
             sentence_table.create_column('sentence_num', db.types.integer)
@@ -91,11 +93,24 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
                 story_sentences = sentence_splitter.batch_split_sentences(lines)
-                create_story_tasks.append(
-                    loop.run_in_executor(executor, SaveStoryToDatabase(dataset_db),
-                                         story_sentences, story_nums))
 
-            story_ids = await asyncio.gather(*create_story_tasks)
+                stories_to_insert = [dict(story_num=story_num) for story_num in story_nums]
+                story_ids = []
+                for story in stories_to_insert:
+                    story_ids.append(db['story'].insert(story))
+
+                create_story_tasks.append(
+                    loop.run_in_executor(executor, ProcessStory(),
+                                         story_sentences, story_ids))
+
+            for i, t in enumerate(asyncio.as_completed(create_story_tasks)):
+                story_ids, sentences_to_save, story_metrics = await t
+                db["sentence"].insert_many(sentences_to_save)
+
+                for id, m in zip(sentences_to_save, story_metrics):
+                    db["story"].update(m,['id'])
+                print(f"Stories saved {story_ids}")
+
             logger.info(f"Saved stories to db with ids: {story_ids}")
 
             await save_language_features(batch_size, dataset_db, executor, loop)
@@ -386,61 +401,40 @@ def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
 
 
 
-class SaveStoryToDatabase:
-    def __init__(self, dataset_db: str):
-        self._dataset_db = dataset_db
+class ProcessStory:
+    def __init__(self):
         self._word_tokenizer = WordTokenizer()
 
-    def __call__(self, story_sentences: List[str], story_nums: List[int]) -> List[int]:
-        story_ids = []
-        for sentences, story_num in zip(story_sentences, story_nums):
-            with dataset.connect(self._dataset_db,
-                                 engine_kwargs=engine_kwargs) as db:
+    def __call__(self, story_sentences: List[str], story_ids: List[int]) -> List[int]:
+        sentences_to_save = []
+        story_metrics = []
 
-                retry = 100
-                while retry > 0:
-                    try:
+        for sentences, story_id in zip(story_sentences, story_ids):
+            try:
 
-                        db.begin()
+                sentences_to_save = []
 
-                        story_table = db['story']
-                        sentence_table = db['sentence']
-                        story = dict(story_num=story_num)
-                        story_id = story_table.insert(story)
-                        sentences_to_save = []
+                total_story_tokens = 0
+                sentences = self._word_tokenizer.batch_tokenize(sentences)
 
-                        total_story_tokens = 0
-                        sentences = self._word_tokenizer.batch_tokenize(sentences)
+                for i, sent in enumerate(sentences):
+                    start_span = total_story_tokens
+                    sentence_len = len(sent)
+                    total_story_tokens += sentence_len
+                    end_span = total_story_tokens
 
-                        for i, sent in enumerate(sentences):
-                            start_span = total_story_tokens
-                            sentence_len = len(sent)
-                            total_story_tokens += sentence_len
-                            end_span = total_story_tokens
+                    text = " ".join([s.text for s in sent])
 
-                            text = " ".join([s.text for s in sent])
+                    sentences_to_save.append(
+                        dict(sentence_num=i, story_id=story_id, text=text,
+                             sentence_len=sentence_len, start_span=start_span, end_span=end_span))
 
-                            sentences_to_save.append(
-                                dict(sentence_num=i, story_id=story_id, text=text,
-                                     sentence_len=sentence_len, start_span=start_span, end_span=end_span))
-                        sentence_table.insert_many(sentences_to_save)
+                story_metrics.append(dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id))
 
-                        story_table.update(
-                            dict(sentence_num=len(sentences), tokens_num=total_story_tokens, id=story_id),
-                            ['id'])
-                        story_ids.append(story_id)
+            except Exception as e:
+                logging.error(e)
 
-                        db.commit()
-
-                        retry = 0
-
-                    except Exception as e:
-                        logging.error(e)
-                        retry -= 1
-                        time.sleep(5)
-                    
-                    
-        return story_ids
+        return story_ids, sentences_to_save, story_metrics
 
 
 def negative_sentence_sampler(db: Database) -> Dict[str, Any]:

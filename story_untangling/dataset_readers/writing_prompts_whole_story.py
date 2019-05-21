@@ -161,7 +161,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
             # Randomize the order of the stories. With repeated epochs and lazy dataloaders will produce different negative examples each epoch.
             stories = db.query(
-                f'SELECT * FROM story  WHERE sentence_num >= {self._min_story_sentences} '
+                f'SELECT * FROM story WHERE sentence_num >= {self._min_story_sentences} '
                 f'AND sentence_num <= {self._max_story_sentences} ORDER BY random()')
 
             for i, story in enumerate(stories):
