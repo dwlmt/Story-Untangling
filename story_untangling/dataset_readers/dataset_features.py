@@ -192,8 +192,6 @@ async def save_language_features(batch_size, dataset_db, executor, loop):
 async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None,
                    save_batch_size: int = 25):
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
-        
-        db["sentence"].create_column('ner_tags', db.types.text)
 
         ner_batch = []
 
