@@ -92,24 +92,22 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
 
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
-                story_sentences = sentence_splitter.batch_split_sentences(lines)
 
-                stories_to_insert = [dict(story_num=story_num) for story_num in story_nums]
-                story_ids = []
-                for story in stories_to_insert:
-                    story_ids.append(db['story'].insert(story))
+                story_ids = [id for id in list(db['story'].insert(dict(story_num=story_num)) for story_num in story_nums)]
 
                 create_story_tasks.append(
-                    loop.run_in_executor(executor, ProcessStory(),
-                                         story_sentences, story_ids))
+                    loop.run_in_executor(executor, ProcessStory(sentence_splitter),
+                                         lines, story_ids))
 
             for i, t in enumerate(asyncio.as_completed(create_story_tasks)):
                 story_ids, sentences_to_save, story_metrics = await t
+
                 db["sentence"].insert_many(sentences_to_save)
 
-                for id, m in zip(sentences_to_save, story_metrics):
+                for m in story_metrics:
                     db["story"].update(m,['id'])
-                print(f"Stories saved {story_ids}")
+
+                print(f"Batch {i} - stories text saved: {story_ids}")
 
             logger.info(f"Saved stories to db with ids: {story_ids}")
 
@@ -400,30 +398,33 @@ def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
 
 
 class ProcessStory:
-    def __init__(self):
+    def __init__(self, sentence_splitter):
+        self._sentence_splitter = sentence_splitter
         self._word_tokenizer = WordTokenizer()
 
-    def __call__(self, story_sentences: List[str], story_ids: List[int]) -> List[int]:
-        sentences_to_save = []
-        story_metrics = []
+    def __call__(self, lines: List[List[str]], story_ids: List[int]) -> Tuple:
 
-        for sentences, story_id in zip(story_sentences, story_ids):
+        story_metrics = []
+        story_sentences_to_save = []
+
+        story_sentences_split = self._sentence_splitter.batch_split_sentences(lines)
+
+        for sentences, story_id in zip(story_sentences_split, story_ids):
             try:
 
-                sentences_to_save = []
+                tokenized_sentences = self._word_tokenizer.batch_tokenize(sentences)
 
                 total_story_tokens = 0
-                sentences = self._word_tokenizer.batch_tokenize(sentences)
 
-                for i, sent in enumerate(sentences):
+                for i, sentence in enumerate(tokenized_sentences):
                     start_span = total_story_tokens
-                    sentence_len = len(sent)
+                    sentence_len = len(sentence)
                     total_story_tokens += sentence_len
                     end_span = total_story_tokens
 
-                    text = " ".join([s.text for s in sent])
+                    text = " ".join([s.text for s in sentence])
 
-                    sentences_to_save.append(
+                    story_sentences_to_save.append(
                         dict(sentence_num=i, story_id=story_id, text=text,
                              sentence_len=sentence_len, start_span=start_span, end_span=end_span))
 
@@ -432,7 +433,7 @@ class ProcessStory:
             except Exception as e:
                 logging.error(e)
 
-        return story_ids, sentences_to_save, story_metrics
+        return story_ids, story_sentences_to_save, story_metrics
 
 
 def negative_sentence_sampler(db: Database) -> Dict[str, Any]:
