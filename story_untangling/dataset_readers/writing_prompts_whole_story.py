@@ -174,6 +174,10 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                     f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
                     f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true ORDER BY id')]
 
+                if sentences is None or len(sentences) == 0:
+                    print(f"Skip story {story_id} with no valid sentences")
+                    continue
+
                 for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
                     # Filter out non English and gibberish sentences.
 
