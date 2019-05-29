@@ -7,6 +7,7 @@ import dataset
 import enchant
 import more_itertools
 import nltk
+import torch
 from PyDictionary import PyDictionary
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data import Token
@@ -137,6 +138,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     @overrides
     def _read(self, file_path):
 
+        tensors = self.block_memory()
+
         loop = asyncio.get_event_loop()
         dataset_db = loop.run_until_complete(
             create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
@@ -188,6 +191,35 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         disgarded_tokens = self._tried_tokens.difference(self._allowed_tokens)
         print(f"Disgarded tokens, num {len(disgarded_tokens)}: {disgarded_tokens}")
+
+        self.unblock_memory(tensors)
+
+    def unblock_memory(self, tensors):
+        if tensors is None or len(tensors) == 0:
+            return
+
+        for t in tensors:
+            t = t.cpu()
+            del t
+        del tensors
+        #torch.cuda.empty_cache()
+
+    def block_memory(self):
+        ''' Blocks GPU memory unless 1GB is already being used. The random memory tensor is 8GB.
+        '''
+        tensors = []
+        with torch.no_grad():
+            if isinstance(self._cuda_device, int):
+                memory_used = max(torch.cuda.memory_allocated(self._cuda_device),torch.cuda.memory_cached(device=self._cuda_device))
+                if memory_used < 1e+9:
+                    tensors.append(torch.rand(int(20e8), device=self._cuda_device))
+            else:
+                for cuda_device in self._cuda_device:
+                    memory_used = max(torch.cuda.memory_allocated(cuda_device),torch.cuda.memory_cached(device=cuda_device))
+                    if memory_used < 1e+9:
+                        tensors.append(torch.rand(int(20e8), device=cuda_device))
+
+            return tensors
 
     def _insert_tried_and_allowed_tokens(self, db):
         try:
