@@ -1,4 +1,5 @@
 import logging
+import random
 from typing import Dict, Any, List, Optional, Tuple
 
 import torch
@@ -78,6 +79,7 @@ class UncertainReader(Model):
                  disc_loss_weight: float = 1.0,
                  full_output_scores: bool = False,
                  full_output_embeddings: bool = False,
+                 flip_loss = False,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  regularizer: Optional[RegularizerApplicator] = None
                  ) -> None:
@@ -99,6 +101,8 @@ class UncertainReader(Model):
             feature_dim = self._story_feedforward.get_output_dim()
 
         transformer = self._text_field_embedder._token_embedders[self._primary_token_namespace]._transformer
+
+        self._flip_loss = flip_loss
 
         # Finetune the top n layers.
 
@@ -196,9 +200,7 @@ class UncertainReader(Model):
                The output of a ``TextField`` representing the text of
                the document.
            metadata : ``List[Dict[str, Any]]``, optional (default = None).
-               A metadata dictionary for each instance in the batch. We use the "original_text" and "clusters" keys
-               from this dictionary, which respectively have the original text and the annotated gold coreference
-               clusters for that instance.
+               A metadata dictionary for each instance in the batch.
            Returns
            -------
            An output dictionary consisting of:
@@ -256,13 +258,19 @@ class UncertainReader(Model):
         if self._target_feedforward and self.run_feedforwards:
             target_encoded_stories = self._target_feedforward(target_encoded_stories)
 
-        if self._disc_loss:
+        if self._flip_loss:
+            flip = random.choice([True, False])
+        else:
+            flip = None
+        if (self._disc_loss and not self._flip_loss) or (self._flip_loss and flip):
+            print(f"Disc loss")
             disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
                                                                              target_encoded_stories)
             output_dict = {**output_dict, **disc_output_dict}
             loss += (disc_loss * self._disc_loss_weight)
 
-        if self._gen_loss:
+        if (self._gen_loss and not self._flip_loss) or (self._flip_loss and not flip):
+            print(f"Gen loss")
             gen_loss, output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor, masks_tensor,
                                                             text_mod, batch_size, num_sentences)
             loss += (gen_loss * self._gen_loss_weight)

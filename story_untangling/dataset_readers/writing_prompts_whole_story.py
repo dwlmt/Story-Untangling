@@ -138,6 +138,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
     @overrides
     def _read(self, file_path):
 
+        batch_num = 0
+
         tensors = self.block_memory()
 
         loop = asyncio.get_event_loop()
@@ -184,7 +186,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 for sentence_batch in list(more_itertools.chunked(sentences, self._story_chunking)):
                     # Filter out non English and gibberish sentences.
 
-                    yield self.text_to_instance(sentence_batch, story, db)
+                    yield self.text_to_instance(sentence_batch, story, db=db, batch_num=batch_num)
+                    batch_num += 1
 
         with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
             self._insert_tried_and_allowed_tokens(db)
@@ -274,7 +277,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
     @overrides
     def text_to_instance(self,
-                         sentences: Dict[str, Any], story: Dict[str, Any], db) -> Instance:  # type: ignore
+                         sentences: Dict[str, Any], story: Dict[str, Any], db, batch_num=None) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
         story_text_original = []
@@ -390,6 +393,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                     "sentence_nums": [s["sentence_num"] for s in sentences],
                     "number_of_sentences": sentence_num}
         metadata["text"] = story_text_original
+
+        if batch_num is not None:
+            metadata["batch_num"] = batch_num
 
         text_field = ListField(story_text_fields)
         field_dict['text'] = text_field
