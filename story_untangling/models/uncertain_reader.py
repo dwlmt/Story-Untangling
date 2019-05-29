@@ -207,82 +207,87 @@ class UncertainReader(Model):
            loss : ``torch.FloatTensor``, optional
                A scalar loss to be optimised.
            """
-        torch.set_printoptions(profile="full")
-
         output_dict = {}
         output_dict["metadata"] = metadata
 
-        # Because the batch has sentences need to reshape so can use the masking util function.
-        text_mod = {}
-        def_device = None
-        batch_size = None
-        for k, v in text.items():
-            if not batch_size:
-                batch_size, num_sentences, sentence_length = v.shape
-            def_device = v.device
-            text_mod[k] = v.view(batch_size * num_sentences, -1).to(self._lm_model.transformer.decoder.weight.device)
+        try:
+            torch.set_printoptions(profile="full")
 
-        masks_tensor = get_text_field_mask(text_mod).to(def_device)
-        masks_tensor = masks_tensor.view(batch_size, num_sentences, -1)
+            # Because the batch has sentences need to reshape so can use the masking util function.
+            text_mod = {}
+            def_device = None
+            batch_size = None
+            for k, v in text.items():
+                if not batch_size:
+                    batch_size, num_sentences, sentence_length = v.shape
+                def_device = v.device
+                text_mod[k] = v.view(batch_size * num_sentences, -1).to(self._lm_model.transformer.decoder.weight.device)
 
-        embedded_text_tensor = self._text_field_embedder(text_mod).to(def_device)
-        embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
+            masks_tensor = get_text_field_mask(text_mod).to(def_device)
+            masks_tensor = masks_tensor.view(batch_size, num_sentences, -1)
 
-
-        batch_encoded_stories = []
-        batch_encoded_sentences = []
-
-        story_sentence_masks = []
-        for story_embedded_text, story_mask in zip(embedded_text_tensor.split(1), masks_tensor.split(1)):
-            story_embedded_text = torch.squeeze(story_embedded_text, dim=0)
-            story_mask = torch.squeeze(story_mask)
-
-            encoded_sentences, encoded_story, story_sentence_mask = self.encode_story_vectors(story_embedded_text,
-                                                                                              story_mask)
-
-            story_sentence_masks.append(story_sentence_mask)
-            batch_encoded_stories.append(encoded_story)
-            batch_encoded_sentences.append(encoded_sentences)
-
-        batch_encoded_stories = torch.stack(batch_encoded_stories)
+            embedded_text_tensor = self._text_field_embedder(text_mod).to(def_device)
+            embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
 
 
-        loss = torch.tensor(0.0).to(batch_encoded_stories.device)
+            batch_encoded_stories = []
+            batch_encoded_sentences = []
 
-        source_encoded_stories = batch_encoded_stories
-        target_encoded_stories = batch_encoded_stories
+            story_sentence_masks = []
+            for story_embedded_text, story_mask in zip(embedded_text_tensor.split(1), masks_tensor.split(1)):
+                story_embedded_text = torch.squeeze(story_embedded_text, dim=0)
+                story_mask = torch.squeeze(story_mask)
 
-        if self._story_feedforward and self.run_feedforwards:
-            source_encoded_stories = self._story_feedforward(source_encoded_stories)
+                encoded_sentences, encoded_story, story_sentence_mask = self.encode_story_vectors(story_embedded_text,
+                                                                                                  story_mask)
 
-        if self._target_feedforward and self.run_feedforwards:
-            target_encoded_stories = self._target_feedforward(target_encoded_stories)
+                story_sentence_masks.append(story_sentence_mask)
+                batch_encoded_stories.append(encoded_story)
+                batch_encoded_sentences.append(encoded_sentences)
 
-        if self._flip_loss:
-            flip = random.choice([True, False])
-        else:
-            flip = None
-        if (self._disc_loss and not self._flip_loss) or (self._flip_loss and flip):
-            print(f"Disc loss")
-            disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
-                                                                             target_encoded_stories)
-            output_dict = {**output_dict, **disc_output_dict}
-            loss += (disc_loss * self._disc_loss_weight)
+            batch_encoded_stories = torch.stack(batch_encoded_stories)
 
-        if (self._gen_loss and not self._flip_loss) or (self._flip_loss and not flip):
-            print(f"Gen loss")
-            gen_loss, output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor, masks_tensor,
-                                                            text_mod, batch_size, num_sentences)
-            loss += (gen_loss * self._gen_loss_weight)
 
-        output_dict["loss"] = loss
+            loss = torch.tensor(0.0).to(batch_encoded_stories.device)
 
-        if self.full_output_embedding:
-            output_dict["source_encoded_stories"] = source_encoded_stories
-            output_dict["embedded_text_tensor"] = embedded_text_tensor
-            output_dict["masks"] = masks_tensor
+            source_encoded_stories = batch_encoded_stories
+            target_encoded_stories = batch_encoded_stories
 
-        return output_dict
+            if self._story_feedforward and self.run_feedforwards:
+                source_encoded_stories = self._story_feedforward(source_encoded_stories)
+
+            if self._target_feedforward and self.run_feedforwards:
+                target_encoded_stories = self._target_feedforward(target_encoded_stories)
+
+            if self._flip_loss:
+                flip = random.choice([True, False])
+            else:
+                flip = None
+            if (self._disc_loss and not self._flip_loss) or (self._flip_loss and flip):
+                print(f"Disc loss")
+                disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
+                                                                                 target_encoded_stories)
+                output_dict = {**output_dict, **disc_output_dict}
+                loss += (disc_loss * self._disc_loss_weight)
+
+            if (self._gen_loss and not self._flip_loss) or (self._flip_loss and not flip):
+                print(f"Gen loss")
+                gen_loss, output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor, masks_tensor,
+                                                                text_mod, batch_size, num_sentences)
+                loss += (gen_loss * self._gen_loss_weight)
+
+            output_dict["loss"] = loss
+
+            if self.full_output_embedding:
+                output_dict["source_encoded_stories"] = source_encoded_stories
+                output_dict["embedded_text_tensor"] = embedded_text_tensor
+                output_dict["masks"] = masks_tensor
+
+            return output_dict
+        except Exception as e:
+            print(e)
+            torch.cuda.empty_cache()
+            return output_dict
 
     def encode_story_vectors(self, story_embedded_text, story_mask):
         if self._sentence_seq2seq_encoder:
