@@ -285,7 +285,7 @@ class UncertainReader(Model):
 
             return output_dict
         except Exception as e:
-            print(e)
+            print(text, metadata, e)
             torch.cuda.empty_cache()
             return output_dict
 
