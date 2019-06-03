@@ -141,6 +141,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         batch_num = 0
 
         tensors = self.block_memory()
+        self.unblock_memory(tensors)
 
         loop = asyncio.get_event_loop()
         dataset_db = loop.run_until_complete(
@@ -194,8 +195,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         disgarded_tokens = self._tried_tokens.difference(self._allowed_tokens)
         print(f"Disgarded tokens, num {len(disgarded_tokens)}: {disgarded_tokens}")
-
-        self.unblock_memory(tensors)
 
     def unblock_memory(self, tensors):
         if tensors is None or len(tensors) == 0:

@@ -69,10 +69,10 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        self.levels_to_rollout = 3
-        self.generate_per_level = 5
-        self.sample_from_corpus_per_level = 100
-        self.max_leaves_per_level = 20
+        self.levels_to_rollout = 2
+        self.generate_per_level = 10
+        self.sample_from_corpus_per_level = 120
+        self.max_leaves_per_level = 10
         self.min_ratio_of_most_likely = 0.1
         self.prob_threshold = 0.01
 
@@ -632,7 +632,7 @@ class UncertainReaderGenPredictor(Predictor):
         new_embedded_text_mask[:, 0: embedded_text_mask.shape[1]] = embedded_text_mask
         embedded_text_mask = new_embedded_text_mask.long()
         # Encode as a story.
-        encoded_sentences, encoded_story, story_sentence_mask = self._model.encode_story_vectors(
+        encoded_story, story_sentence_mask = self._model.encode_story_vectors(
             embedded_text_tensor.to(self._device), embedded_text_mask.to(self._device))
         encoded_story = encoded_story[position]
         encoded_story = torch.squeeze(encoded_story, dim=0)

@@ -35,6 +35,7 @@ class BaseLMHead(nn.Module):
             with torch.no_grad():
                 for top_k in self._accuracy_top_k:
                     self._metrics[f"gen_accuracy_{top_k}"](scores_softmax, lm_labels)
+                    self._metrics["accuracy_combined"](self._metrics[f"gen_accuracy_{top_k}"].get_metric())
         return loss
 
 
