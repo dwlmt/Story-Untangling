@@ -117,8 +117,6 @@ class ApexModelTrainer(Trainer):
             if torch.isnan(loss):
                 raise ValueError("nan loss encountered")
 
-            # with self.optimizer.scale_loss(loss) as scaled_loss:
-            #    scaled_loss.backward()
             # loss.backward()
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
