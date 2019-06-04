@@ -281,6 +281,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         field_dict = {}
         story_text_original = []
         story_text_fields = []
+        sentence_lengths = []
 
         def tokenize(sentence, tokenizer, indexer):
             if isinstance(sentence, str):
@@ -371,6 +372,12 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         for i, sentence in enumerate(sentences, 1):
             sentence_text, sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
                                                            self._token_indexers)
+
+            sentence_length = sentence_text_field.sequence_length
+            sentence_lengths.append(sentence_length)
+            if sentence_length == 0:
+                print("Empty Sentence")
+                sentence_text_field = sentence_text_field.empty_field()
             story_text_original.append(sentence_text)
             story_text_fields.append(sentence_text_field)
 
@@ -389,6 +396,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                     "sentence_nums": [s["sentence_num"] for s in sentences],
                     "number_of_sentences": sentence_num}
         metadata["text"] = story_text_original
+        metadata["sentence_lengths"] = sentence_lengths
 
         if batch_num is not None:
             metadata["batch_num"] = batch_num
