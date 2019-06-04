@@ -17,10 +17,7 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
-      0,
-      1,
-      2,
-      3
+      1
     ],
     "story_chunking": 50,
     "lazy": true
@@ -34,7 +31,6 @@
     "type": "uncertain_reader",
     "disc_loss": true,
     "gen_loss": true,
-    "lm_finetune_top_layers": 2,
     "distance_weights": [
       1.0,
       0.5,
@@ -54,8 +50,9 @@
           "transformer": {
             "n_ctx": 150,
             "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
+
           },
-          "top_layer_only": true
+           "top_layer_only": true
         }
       }
     },
@@ -72,45 +69,29 @@
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
-    },
-    "story_feedforward": {
-      "input_dim": 768,
-      "num_layers": 2,
-      "hidden_dims": 768,
-      "activations": "elu",
-      "dropout": 0.0
     }
-    ,
-        "target_feedforward": {
-          "input_dim": 768,
-          "num_layers": 2,
-          "hidden_dims": 768,
-          "activations": "elu",
-          "dropout": 0.0
-        },
-    //"bilinear_fusion": true,
-    "fusion_seq2seq_encoder": {
-      "type": "feedforward",
-      "feedforward": {
-        "input_dim": 1536,
-        "num_layers": 2,
-        "hidden_dims": 768,
-        "activations": "elu",
-        "dropout": 0.0
-      }
-    }
+    /*,
+        "fusion_seq2seq_encoder": {
+          "type": "feedforward",
+          "feedforward": {
+            "input_dim": 1536,
+            "num_layers": 2,
+            "hidden_dims": 768,
+            "activations": "elu",
+            "dropout": 0.0
+          }
+        }*/
   },
   "iterator": {
     "type": "basic",
     "batch_size": 2
   },
   "trainer": {
-    "type": "apex",
+    //"type": "apex",
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      1,
-      3
+      0
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,

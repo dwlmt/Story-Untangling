@@ -17,12 +17,9 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
-      0,
-      1,
-      2,
-      3
+      0
     ],
-    "story_chunking": 50,
+    "story_chunking": 60,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -34,12 +31,8 @@
     "type": "uncertain_reader",
     "disc_loss": true,
     "gen_loss": true,
-    "lm_finetune_top_layers": 2,
     "distance_weights": [
-      1.0,
-      0.5,
-      0.25,
-      0.125
+      1.0
     ],
     "text_field_embedder": {
       "allow_unmatched_keys": true,
@@ -72,48 +65,25 @@
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
-    },
-    "story_feedforward": {
-      "input_dim": 768,
-      "num_layers": 2,
-      "hidden_dims": 768,
-      "activations": "elu",
-      "dropout": 0.0
-    }
-    ,
-        "target_feedforward": {
-          "input_dim": 768,
-          "num_layers": 2,
-          "hidden_dims": 768,
-          "activations": "elu",
-          "dropout": 0.0
-        },
-    //"bilinear_fusion": true,
-    "fusion_seq2seq_encoder": {
-      "type": "feedforward",
-      "feedforward": {
-        "input_dim": 1536,
-        "num_layers": 2,
-        "hidden_dims": 768,
-        "activations": "elu",
-        "dropout": 0.0
-      }
     }
   },
   "iterator": {
     "type": "basic",
-    "batch_size": 2
+    "batch_size": 2,
+    "instances_per_epoch": 100000,
+    "max_instances_in_memory": 100
   },
   "trainer": {
     "type": "apex",
-    "num_epochs": 1,
-    "patience": 5,
+    "num_epochs": 50,
+    "patience": 1,
+    "shuffle": false,
     "cuda_device": [
-      1,
-      3
+      0
     ],
-    //"validation_metric": "+neighbour_accuracy",
-    "num_serialized_models_to_keep": 3,
+    "grad_clipping": 5.0,
+    "model_save_interval": 3600.0,
+    "num_serialized_models_to_keep": 1,
     "optimizer": {
       "type": "sgd",
       "lr": 0.01,

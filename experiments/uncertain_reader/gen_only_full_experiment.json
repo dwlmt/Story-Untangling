@@ -55,7 +55,7 @@
         }
       }
     },
-    "sentence_seq2seq_encoder": {
+    "sentence_seq2vec_encoder": {
       "type": "gru",
       "input_size": 768,
       "hidden_size": 768,

@@ -23,7 +23,7 @@
       2,
       3
     ],
-    "story_chunking": 60,
+    "story_chunking": 50,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -57,7 +57,7 @@
         }
       }
     },
-    "sentence_seq2seq_encoder": {
+    "sentence_seq2vec_encoder": {
       "type": "gru",
       "input_size": 768,
       "hidden_size": 768,
@@ -91,8 +91,8 @@
     "num_epochs": 1,
     "patience": 5,
     "cuda_device": [
-      0,
-      1
+      2,
+      3
     ],
     //"validation_metric": "+neighbour_accuracy",
     "num_serialized_models_to_keep": 3,
