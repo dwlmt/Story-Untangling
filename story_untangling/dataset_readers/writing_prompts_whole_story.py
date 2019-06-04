@@ -59,6 +59,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         Min number of sentences a story must have to be included.
     max_story_sentences : int, (optional, default=1000000)
         Max number of sentences a story must have to be included.
+    min_sequence_length : int, (optional, default=2)
+        Sentences must be at least this length.
     truncate_sequence_length : int, (optional, default=100)
         Sentences longer than this will be truncated (cutting starting from the end).
         0 indicates length is unlimited. Value must be greater than or equal to 0.
@@ -80,7 +82,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  db_discriminator="def",
                  min_story_sentences: int = 5,
                  max_story_sentences: int = 500,
-                 truncate_sequence_length: int = 50,
+                 min_sequence_length: int = 2,
+                 max_sequence_length: int = 50,
                  max_avg_length_per_word = 8,
                  max_word_length = 25,
                  min_check_word_length=8,
@@ -100,11 +103,12 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._db_discriminator = db_discriminator
         self._min_story_sentences = min_story_sentences
         self._max_story_sentences = max_story_sentences
-        self._truncate_sequence_length = truncate_sequence_length
-        self._max_character_length = self._truncate_sequence_length * max_avg_length_per_word
+        self._max_sequence_length = max_sequence_length
+        self._min_sequence_length = min_sequence_length
+        self._max_character_length = self._max_sequence_length * max_avg_length_per_word
         self._max_word_length = max_word_length
         self._min_check_word_length = min_check_word_length
-        self._truncate_sequences = (truncate_sequence_length != 0)
+        self._truncate_sequences = (max_sequence_length != 0)
         self._story_chunking = story_chunking
         self._ner_model = ner_model
         self._coreference_model = coreference_model
@@ -178,7 +182,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 sentences = [s for s in db.query(
                     f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
                     f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
-                    f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true ORDER BY id')]
+                    f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true and sentence.sentence_len >= {self._min_sequence_length} ORDER BY id')]
 
                 if sentences is None or len(sentences) == 0:
                     print(f"Skip story {story_id} with no valid sentences")
@@ -327,8 +331,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 tokenized_text.insert(0, Token(START_SYMBOL))
                 tokenized_text.append(Token(END_SYMBOL))
 
-            if len(tokenized_text) > self._truncate_sequence_length and self._truncate_sequences:
-                tokenized_text = tokenized_text[:self._truncate_sequence_length]
+            if len(tokenized_text) > self._max_sequence_length and self._truncate_sequences:
+                tokenized_text = tokenized_text[:self._max_sequence_length]
 
             token_field = TextField(tokenized_text, indexer)
 
