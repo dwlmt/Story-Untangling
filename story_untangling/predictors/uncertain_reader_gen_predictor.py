@@ -239,15 +239,24 @@ class UncertainReaderGenPredictor(Predictor):
             text_tensor_dict = text_field.as_tensor(text_field.get_padding_lengths())
             text_to_gen_from = text_tensor_dict['openai_transformer']
             ctx_size = text_to_gen_from.size(0)
-            sentence_length = torch.sum(embedded_text_mask[position]).item()
+            sentence_length = int(torch.sum(embedded_text_mask[position]).item())
             text_to_gen_from = text_to_gen_from[0:sentence_length]
 
             if sentence_length == 0:
                 continue
 
+            print(instance["metadata"])
+
             story_id = instance["metadata"]["story_id"]
-            sentence_id = instance["metadata"]["sentence_ids"][position]
-            sentence_num = instance["metadata"]["sentence_nums"][position]
+            sentence_ids = instance["metadata"]["sentence_ids"]
+            sentence_num = instance["metadata"]["sentence_nums"]
+
+            if len(sentence_ids) == position:
+                continue
+
+
+            sentence_id = sentence_ids[position]
+            sentence_num = sentence_num[position]
 
             position_node = AnyNode(name=f"{position}", story_id=story_id,
                                     sentence_id=sentence_id,
@@ -266,7 +275,7 @@ class UncertainReaderGenPredictor(Predictor):
                 text_tensor_future_dict = text[position + i].as_tensor(text_field.get_padding_lengths())
                 text_to_gen_from_future = text_tensor_future_dict['openai_transformer']
 
-                sentence_length_future = torch.sum(embedded_text_mask[position + i]).item()
+                sentence_length_future = int(torch.sum(embedded_text_mask[position + i]).item())
                 text_to_gen_from_future = text_to_gen_from_future[0:sentence_length_future]
 
                 correct_future = AnyNode(gold=True,
@@ -326,6 +335,8 @@ class UncertainReaderGenPredictor(Predictor):
                 if self.sample_from_corpus_per_level:
                     metrics = self._calc_state_based_suspense(base_corpus, type="corpus")
                     position_node.__dict__ = {**position_node.__dict__, **metrics}
+
+            print(position_node)
 
         self._calc_summary_stats(root)
 
@@ -632,7 +643,7 @@ class UncertainReaderGenPredictor(Predictor):
         new_embedded_text_mask[:, 0: embedded_text_mask.shape[1]] = embedded_text_mask
         embedded_text_mask = new_embedded_text_mask.long()
         # Encode as a story.
-        encoded_story, story_sentence_mask = self._model.encode_story_vectors(
+        encoded_story = self._model.encode_story_vectors(
             embedded_text_tensor.to(self._device), embedded_text_mask.to(self._device))
         encoded_story = encoded_story[position]
         encoded_story = torch.squeeze(encoded_story, dim=0)

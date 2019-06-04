@@ -234,22 +234,20 @@ class UncertainReader(Model):
             embedded_text_tensor = self._text_field_embedder(text_mod).to(def_device)
             embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
 
-            masks_tensor = get_mask_from_sequence_lengths(torch.sum(text_mod[self._primary_token_namespace] > 0, dim=-1),
-                                                          text_mod[self._primary_token_namespace].shape[1]).float()
+            masks_tensor =  text_mod["mask"]
+
             masks_tensor = masks_tensor.to(def_device).view(batch_size, num_sentences, -1)
 
 
             batch_encoded_stories = []
             batch_encoded_sentences = []
 
-            story_sentence_masks = []
             for story_embedded_text, story_mask in zip(embedded_text_tensor.split(1), masks_tensor.split(1)):
                 story_embedded_text = torch.squeeze(story_embedded_text, dim=0)
                 story_mask = torch.squeeze(story_mask, dim=0)
 
-                encoded_story, story_sentence_mask = self.encode_story_vectors(story_embedded_text, story_mask)
+                encoded_story = self.encode_story_vectors(story_embedded_text, story_mask)
 
-                story_sentence_masks.append(story_sentence_mask)
                 batch_encoded_stories.append(encoded_story)
                 batch_encoded_sentences.append(story_embedded_text)
 
@@ -316,7 +314,7 @@ class UncertainReader(Model):
         story_sentence_mask = story_sentence_mask.unsqueeze(dim=0)
         encoded_story = self._story_seq2seq_encoder(encoded_sentence_vecs, story_sentence_mask)
         encoded_story = encoded_story.squeeze(dim=0)
-        return encoded_story, story_sentence_mask
+        return encoded_story
 
     def calculate_gen_loss(self, encoded_stories, encoded_sentences, masks_tensor, target_text, batch_size,
                            num_sentences):

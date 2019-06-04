@@ -331,9 +331,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
             token_field = TextField(tokenized_text, indexer)
 
-            if len(tokenized_text) == 0:
-                token_field = token_field.empty_field()
-
             return tokens, token_field
 
         def lookup_tokens(token_text):
