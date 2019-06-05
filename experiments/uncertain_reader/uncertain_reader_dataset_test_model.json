@@ -70,52 +70,24 @@
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
-    },/*
-    "story_feedforward": {
-      "input_dim": 768,
-      "num_layers": 2,
-      "hidden_dims": 768,
-      "activations": "elu",
-      "dropout": 0.0
-    },*/
-    /*
-        "target_feedforward": {
-          "input_dim": 768,
-          "num_layers": 2,
-          "hidden_dims": 768,
-          "activations": "elu",
-          "dropout": 0.0
-        },*/
-    //"bilinear_fusion": true,
-    /*"fusion_seq2seq_encoder": {
-      "type": "feedforward",
-      "feedforward": {
-        "input_dim": 1536,
-        "num_layers": 2,
-        "hidden_dims": 768,
-        "activations": "elu",
-        "dropout": 0.0
-      }
-    }*/
+    }
   },
   "iterator": {
     "type": "basic",
     "batch_size": 2,
-    //"instances_per_epoch": 100000,
-    "max_instances_in_memory": 100
+    "max_instances_in_memory": 256
   },
   "trainer": {
     "type" : "uncertain_trainer_split_lm",
-    "validation_metric": "+accuracy_combined",
-    "num_epochs": 100,
-    "patience": 2,
+    "num_epochs": 5,
+    "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      1, 2
+      0
     ],
     "grad_clipping": 5.0,
-    "model_save_interval": 1800.0,
-    "num_serialized_models_to_keep": 3,
+    "model_save_interval": 3600.0,
+    "num_serialized_models_to_keep": 2,
     "optimizer": {
       "type": "sgd",
       "lr": 0.01,

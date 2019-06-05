@@ -72,19 +72,19 @@
   "iterator": {
     "type": "basic",
     "batch_size": 2,
-    "instances_per_epoch": 50000,
-    "max_instances_in_memory": 100
+    "max_instances_in_memory": 256
   },
   "trainer": {
     "type" : "uncertain_trainer_split_lm",
-    "num_epochs": 50,
+    "num_epochs": 5,
+    "validation_metric": "+accuracy_combined",
     "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      0, 1
+      0
     ],
     "grad_clipping": 5.0,
-    "model_save_interval": 1800.0,
+    "model_save_interval": 3600.0,
     "num_serialized_models_to_keep": 2,
     "optimizer": {
       "type": "sgd",

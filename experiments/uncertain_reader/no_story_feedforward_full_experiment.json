@@ -98,18 +98,22 @@
       }
     }
   },
-  "iterator": {
+ "iterator": {
     "type": "basic",
-    "batch_size": 2
+    "batch_size": 2,
+    "max_instances_in_memory": 256
   },
   "trainer": {
-    "num_epochs": 1,
-    "patience": 5,
+    "type" : "apex",
+    "num_epochs": 5,
+    "patience": 1,
+    "shuffle": false,
     "cuda_device": [
-      3
+      0
     ],
-    //"validation_metric": "+neighbour_accuracy",
-    "num_serialized_models_to_keep": 3,
+    "grad_clipping": 5.0,
+    "model_save_interval": 3600.0,
+    "num_serialized_models_to_keep": 2,
     "optimizer": {
       "type": "sgd",
       "lr": 0.01,
