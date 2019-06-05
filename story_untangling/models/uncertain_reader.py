@@ -501,7 +501,4 @@ class UncertainReader(Model):
 
         metrics = {metric_name: metric.get_metric(reset) for metric_name, metric in self._metrics.items()}
 
-        if self.training:
-            metrics = {}
-
         return metrics
