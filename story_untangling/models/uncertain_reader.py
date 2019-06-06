@@ -73,7 +73,7 @@ class UncertainReader(Model):
                  distance_weights: Tuple[float] = (1.0, 0.5, 0.25, 0.125),
                  disc_length_regularizer: bool = False,
                  disc_regularizer_weight: float = 0.1,
-                 accuracy_top_k: Tuple[int] = (1, 5, 20),
+                 accuracy_top_k: Tuple[int] = (1, 10),
                  gen_loss: bool = True,
                  disc_loss: bool = True,
                  primary_token_namespace="openai_transformer",
@@ -266,16 +266,18 @@ class UncertainReader(Model):
 
             flip = random.choice([True, False])
 
-            if self._disc_loss  or (self._flip_loss and flip):
-                disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
-                                                                                 target_encoded_stories)
-                output_dict = {**output_dict, **disc_output_dict}
-                loss += (disc_loss * self._disc_loss_weight)
+            if self.training:
 
-            if self._gen_loss or (self._flip_loss and not flip):
-                gen_loss, output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor, masks_tensor,
-                                                                text_mod, batch_size, num_sentences)
-                loss += (gen_loss * self._gen_loss_weight)
+                if self._disc_loss  or (self._flip_loss and flip):
+                    disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
+                                                                                     target_encoded_stories)
+                    output_dict = {**output_dict, **disc_output_dict}
+                    loss += (disc_loss * self._disc_loss_weight)
+
+                if self._gen_loss or (self._flip_loss and not flip):
+                    gen_loss, output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor, masks_tensor,
+                                                                    text_mod, batch_size, num_sentences)
+                    loss += (gen_loss * self._gen_loss_weight)
 
             if self.full_output_embedding:
                 padded_embedded_text_tensor = torch.zeros((embedded_text_tensor.shape[0],embedded_text_tensor.shape[1],
