@@ -70,14 +70,18 @@ class UncertainReaderGenPredictor(Predictor):
         super().__init__(model, dataset_reader)
 
         self.levels_to_rollout = 2
-        self.generate_per_level = 50
+        self.generate_per_level = 20
         self.sample_from_corpus_per_level = 150
-        self.max_leaves_per_level = 10
+
         self.min_ratio_of_most_likely = 0.05
         self.prob_threshold = 0.01
+
+        self.max_leaves_to_keep_per_level = 5
+        self.probability_mass_to_keep = 0.50
+
         self.min_length = 3
-        self.shortness_penalty = 8
-        self.shortness_weighting = 0.5
+        # self.shortness_penalty = 8
+        # self.shortness_weighting = 0.5
 
         self._remove_sentence_output = False
 
@@ -85,7 +89,7 @@ class UncertainReaderGenPredictor(Predictor):
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
         self._sliding_windows = [3, 5, 7]
-        self._generation_sampling_temperature = 0.75
+        self._generation_sampling_temperature = 1.0
         self._discrimination_temperature = 1.0
 
         self.embedder = model._text_field_embedder._token_embedders["openai_transformer"]
@@ -128,6 +132,7 @@ class UncertainReaderGenPredictor(Predictor):
                 n.story_tensor = None
 
         root_as_dict = exporter.export(root)
+        print(root_as_dict)
         return sanitize(root_as_dict)
 
     def _calculate_disc_probabilities(self, root):
@@ -149,14 +154,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         child_story_tensors, log_probs, logits, parent_story_tensor, probs = self.calculate_embedding_probs_and_logits(child_list, root)
 
-        # Set the probability to prune unlikely nodes.
-        cutoff_prob = self.prob_threshold
-        probs_from_max_to_min = sorted(probs, reverse=True)
-        max_prob = probs_from_max_to_min[0]
-        if len(probs_from_max_to_min) > self.max_leaves_per_level:
-            cutoff_prob = max(cutoff_prob, probs_from_max_to_min[self.max_leaves_per_level - 1])
-        cutoff_prob = max(cutoff_prob, max_prob * self.min_ratio_of_most_likely)
-        print(f"Cutoff prob: {cutoff_prob}")
+        cutoff_prob = self.calc_probability_cutoff(probs)
 
         pruned_child_list = []
         for i, (c, l, p, lb) in enumerate(zip(child_list, logits, probs, log_probs)):
@@ -168,19 +166,21 @@ class UncertainReaderGenPredictor(Predictor):
 
             if c.gold:
                 pass
-            elif calc_prob < cutoff_prob or c.sentence_length:
-                print(f"Remove low probability continuation {c.type}: prob {calc_prob}, length {c.sentence_length} {c.sentence_text}")
+            elif calc_prob < cutoff_prob:
+                #print(f"Remove low probability continuation {c.type}: prob {calc_prob}, length {c.sentence_length} {c.sentence_text}")
                 c.parent = None
                 root.children = root.children[: i] + root.children[i + 1:]
             else:
-                print(f"Include {c.type}:, prob {c.prob}, {c.sentence_text}")
+                #print(f"Include {c.type}:, prob {c.prob}, {c.sentence_text}")
                 pruned_child_list.append(c)
+
+        #print(f"Num children kept: {len(pruned_child_list)}")
 
         if len(pruned_child_list) > 1:
             _ , log_probs, logits, _, probs = self.calculate_embedding_probs_and_logits(
                 pruned_child_list, root)
 
-            print(pruned_child_list, probs.shape, log_probs.shape)
+            #print(pruned_child_list, probs.shape, log_probs.shape)
             for i, (c, p, lb) in enumerate(zip(pruned_child_list, probs, log_probs)):
                 c.prob_pruned = p
                 c.log_prob_pruned = lb
@@ -190,6 +190,31 @@ class UncertainReaderGenPredictor(Predictor):
         self._calculate_distances(root, parent_story_tensor, child_story_tensors, gold_index)
 
         return root
+
+    def calc_probability_cutoff(self, probs):
+        # Set the probability to prune unlikely nodes.
+        cutoff_prob = self.prob_threshold
+        probs_from_max_to_min = sorted(probs, reverse=True)
+        max_prob = probs_from_max_to_min[0]
+        top_n_prob_cutoff = 0.0
+        if len(probs_from_max_to_min) > self.max_leaves_to_keep_per_level:
+            top_n_prob_cutoff = probs_from_max_to_min[self.max_leaves_to_keep_per_level - 1]
+            cutoff_prob = max(cutoff_prob, top_n_prob_cutoff)
+        probability_mass_cutoff = 0.0
+        culm = 0.0
+        for p in probs_from_max_to_min:
+
+            culm += p
+
+            if culm > self.probability_mass_to_keep:
+                break
+
+            probability_mass_cutoff = p
+        cutoff_prob = max(cutoff_prob, probability_mass_cutoff)
+        cutoff_prob = max(cutoff_prob, max_prob * self.min_ratio_of_most_likely)
+        #print(f"Cutoff prob: {cutoff_prob}, max prob {max_prob}, top_n_prob {top_n_prob_cutoff}, "
+        #      f"prob mass cutoff {probability_mass_cutoff}, list {probs_from_max_to_min}")
+        return cutoff_prob
 
     def calculate_embedding_probs_and_logits(self, child_list, root):
         parent_story_tensor = root.story_tensor
@@ -450,6 +475,9 @@ class UncertainReaderGenPredictor(Predictor):
 
         stats_dict = {}
         for k, v in stats_source_dict.items():
+            if v is None or len(v) == 0:
+                continue
+
             v_array = numpy.asarray(v)
             nobs, minmax, mean, variance, skewness, kurtosis = scipy.stats.describe(v_array)
 
