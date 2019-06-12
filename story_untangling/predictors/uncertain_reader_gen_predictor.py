@@ -69,7 +69,7 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        self.levels_to_rollout = 1
+        self.levels_to_rollout = 2
         self.generate_per_branch = 5
         self.sample_per_level_branch = 20
 
@@ -300,6 +300,8 @@ class UncertainReaderGenPredictor(Predictor):
             correct_futures = self.create_correct_futures(embedded_text_mask, encoded_stories, position, text,
                                                           text_field, story_id, sentence_ids, sentence_nums)
 
+            print(correct_futures)
+
             if len(correct_futures) > 0:
 
                 generated = AnyNode(name="generated", parent=position_node)
@@ -375,7 +377,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                         new_parents.extend(parent.children)
 
-                # print("New Parents Length", len(new_parents))
+                #print("New Parents Length", len(new_parents))
 
                 # Exclude Gold leaves from the next search.
                 new_parents = [p for p in new_parents if p.gold == False]
@@ -383,6 +385,7 @@ class UncertainReaderGenPredictor(Predictor):
                 new_parents = sorted(new_parents, key=lambda p: p.chain_prob, reverse=True)
 
                 if len(new_parents) > self.global_beam_size and self.global_beam_size > 0:
+
                     print([p.chain_log_prob for p in new_parents])
 
                     new_parents = new_parents[0:self.global_beam_size]
@@ -528,6 +531,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                 sentence_length = len(token_ids)
                 if not sentence_length < self.min_length:
+
                     created_node = AnyNode(gold=False, story_tensor=encoded_story.cpu().detach(), token_ids=token_ids,
                                            sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
                                                           token_ids if t in self.indexer.decoder],
