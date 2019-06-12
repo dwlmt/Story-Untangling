@@ -17,12 +17,10 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
-      0,
-      1,
       2,
       3
     ],
-    "story_chunking": 50,
+    "story_chunking": 20,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -111,7 +109,7 @@
     "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      0
+      2, 3
     ],
     "grad_clipping": 5.0,
     "model_save_interval": 3600.0,

@@ -83,13 +83,13 @@
     "max_instances_in_memory": 256
   },
   "trainer": {
-    "type": "apex",
+    //"type" : "apex",
     "num_epochs": 5,
     "validation_metric": "+accuracy_combined",
     "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      0
+      1
     ],
     "grad_clipping": 5.0,
     "model_save_interval": 3600.0,

@@ -81,7 +81,7 @@
     "max_instances_in_memory": 256
   },
   "trainer": {
-    "type": "apex",
+    //"type" : "apex",
     "num_epochs": 5,
     "validation_metric": "+accuracy_combined",
     "patience": 1,

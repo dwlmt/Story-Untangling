@@ -18,10 +18,9 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
-      0,
-      3
+      0, 1
     ],
-    "story_chunking": 25,
+    "story_chunking": 20,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
@@ -74,22 +73,16 @@
   "iterator": {
     "type": "basic",
     "batch_size": 2,
-    "instances_per_epoch": 10000,
-    "max_instances_in_memory": 100
-  },
-  "iterator": {
-    "type": "basic",
-    "batch_size": 2,
     "max_instances_in_memory": 256
   },
   "trainer": {
-    "type" : "uncertain_trainer_split_lm",
+    "type": "uncertain_trainer_split_lm",
     "num_epochs": 5,
      "validation_metric": "+accuracy_combined",
     "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      0
+      0, 1
     ],
     "grad_clipping": 5.0,
     "model_save_interval": 3600.0,
