@@ -69,6 +69,7 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
+
         self.levels_to_rollout = 2
         self.generate_per_branch = 5
         self.sample_per_level_branch = 20
