@@ -69,8 +69,7 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-
-        self.levels_to_rollout = 2
+        self.levels_to_rollout = 1
         self.generate_per_branch = 5
         self.sample_per_level_branch = 20
 
@@ -301,7 +300,7 @@ class UncertainReaderGenPredictor(Predictor):
             correct_futures = self.create_correct_futures(embedded_text_mask, encoded_stories, position, text,
                                                           text_field, story_id, sentence_ids, sentence_nums)
 
-            print(correct_futures)
+            # print(correct_futures)
 
             if len(correct_futures) > 0:
 
@@ -335,7 +334,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         if self.generate_per_branch > 0:
 
-            base = correct_futures.pop()
+            base = correct_futures.pop(0)
             base_correct = copy.deepcopy(base)
             base_correct.parent = type_node
             parents = [base_correct]
@@ -344,7 +343,7 @@ class UncertainReaderGenPredictor(Predictor):
                 if len(correct_futures) == 0:
                     continue
 
-                future = correct_futures.pop()
+                future = correct_futures.pop(0)
 
                 new_parents = []
 
@@ -400,11 +399,9 @@ class UncertainReaderGenPredictor(Predictor):
 
         if self.sample_per_level_branch > 0:
 
-            base = correct_futures.pop()
+            base = correct_futures.pop(0)
             base_correct = copy.deepcopy(base)
-
             base_correct.parent = type_node
-
             parents = [base_correct]
 
             for i in range(self.levels_to_rollout):
@@ -412,7 +409,7 @@ class UncertainReaderGenPredictor(Predictor):
                 if len(correct_futures) == 0:
                     continue
 
-                future = correct_futures.pop()
+                future = correct_futures.pop(0)
 
                 new_parents = []
 
@@ -451,7 +448,7 @@ class UncertainReaderGenPredictor(Predictor):
         correct_futures = []
         # Put the correct representations into the sentences at the given point.
         parent_story_tensor = None
-        for i in range(1, self.levels_to_rollout + 2):
+        for i in range(0, self.levels_to_rollout + 1):
 
             if position + i > len(text) - 1 or len(text[position + i]) == 0:
                 continue
@@ -498,49 +495,47 @@ class UncertainReaderGenPredictor(Predictor):
         instance = self.dataset_reader.sample_random_sentences(self.sample_per_level_branch, story_id=story_id,
                                                                    sentence_id=sentence_id)
 
-            field = instance["text"]
-            metadata = instance["metadata"]
+        field = instance["text"]
+        metadata = instance["metadata"]
 
-            field.index(self._model._vocab)
-            padding_lengths = field.get_padding_lengths()
-            tensor_dict = field.as_tensor(padding_lengths)
+        field.index(self._model._vocab)
+        padding_lengths = field.get_padding_lengths()
+        tensor_dict = field.as_tensor(padding_lengths)
 
-            indexed_tokens = tensor_dict["openai_transformer"].to(self._device)
-            non_empty_mask = torch.sum(indexed_tokens, dim=1) > 0
+        indexed_tokens = tensor_dict["openai_transformer"].to(self._device)
+        non_empty_mask = torch.sum(indexed_tokens, dim=1) > 0
 
-            indexed_tokens = indexed_tokens[non_empty_mask, :]
+        indexed_tokens = indexed_tokens[non_empty_mask, :]
 
-            encoded_text_merged = self.embedder(indexed_tokens.to(self._device))
+        encoded_text_merged = self.embedder(indexed_tokens.to(self._device))
 
         for i, (gen_sentence, story_id, sentence_id, sentence_num) in enumerate(zip(torch.split(encoded_text_merged, 1),
                                                                                     metadata["story_id"],
                                                                                     metadata["sentence_ids"],
                                                                                     metadata["sentence_nums"])):
 
+            embedded_text_mask, embedded_text_tensor, encoded_story = self.encode_story(
+                embedded_text_mask.to(self._device),
+                embedded_text_tensor.to(self._device),
+                gen_sentence.to(self._device),
+                position)
+            embedded_text_mask = embedded_text_mask.cpu()
+            embedded_text_tensor = embedded_text_tensor.cpu()
+            encoded_story = encoded_story.cpu()
+            encoded_text_merged = encoded_text_merged.cpu()
 
-                embedded_text_mask, embedded_text_tensor, encoded_story = self.encode_story(
-                    embedded_text_mask.to(self._device),
-                    embedded_text_tensor.to(self._device),
-                    gen_sentence.to(self._device),
-                    position)
-                embedded_text_mask = embedded_text_mask.cpu()
-                embedded_text_tensor = embedded_text_tensor.cpu()
-                encoded_story = encoded_story.cpu()
-                encoded_text_merged = encoded_text_merged.cpu()
+            token_ids = [t for t in indexed_tokens[i].tolist() if t != 0]
 
-                token_ids = [t for t in indexed_tokens[i].tolist() if t != 0]
+            sentence_length = len(token_ids)
+            if not sentence_length < self.min_length:
+                created_node = AnyNode(gold=False, story_tensor=encoded_story.cpu().detach(), token_ids=token_ids,
+                                       sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
+                                                      token_ids if t in self.indexer.decoder],
+                                       sentence_length=sentence_length, type="corpus",
+                                       story_id=story_id, sentence_id=sentence_id, sentence_num=sentence_num,
+                                       parent=parent)
 
-                sentence_length = len(token_ids)
-                if not sentence_length < self.min_length:
-
-                    created_node = AnyNode(gold=False, story_tensor=encoded_story.cpu().detach(), token_ids=token_ids,
-                                           sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                                          token_ids if t in self.indexer.decoder],
-                                           sentence_length=sentence_length, type="corpus",
-                                           story_id=story_id, sentence_id=sentence_id, sentence_num=sentence_num,
-                                           parent=parent)
-
-                    return created_node
+                return created_node
         return None
 
 
