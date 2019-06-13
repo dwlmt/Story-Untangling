@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 import more_itertools
 import numpy
+import pandas
 import scipy
 import torch
 from allennlp.common import JsonDict
@@ -43,7 +44,7 @@ def only_probability_nodes(node):
 
 
 def only_state_nodes(node):
-    if isinstance(node, AnyNode) and hasattr(node, "chain_prob") and hasattr(node, "suspense_distance_l2"):
+    if isinstance(node, AnyNode) and hasattr(node, "chain_prob") and hasattr(node, "parent_distance_l2"):
         return True
     else:
         return False
@@ -69,16 +70,23 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        self.levels_to_rollout = 1
-        self.generate_per_branch = 5
-        self.sample_per_level_branch = 20
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_mapping.csv"
 
-        self.max_leaves_to_keep_per_branch = 0
-        self.probability_mass_to_keep_per_branch = 0.50
+        story_id_df = pandas.read_csv(story_id_file)
+        self.story_ids_to_predict = set(story_id_df['story_id'])
+        self.only_annotation_stories = True
+
+        self.levels_to_rollout = 1
+        self.generate_per_branch = 100
+        self.sample_per_level_branch = 100
+
+        self.max_leaves_to_keep_per_branch = 100
+        self.probability_mass_to_keep_per_branch = 0.0
 
         self.global_beam_size = 10
 
         self.min_length = 3
+
 
         self._remove_sentence_output = False
 
@@ -108,6 +116,15 @@ class UncertainReaderGenPredictor(Predictor):
 
 
     def predict_instance(self, instance: Instance) -> JsonDict:
+
+        story_id = instance["metadata"]["story_id"]
+        if story_id not in self.story_ids_to_predict and self.only_annotation_stories:
+            print(f"Skipping non annotation story: {story_id}")
+            return None
+
+        print(f"Predicting story: {story_id}")
+        print(f'{instance["metadata"]["text"]}')
+
         outputs = self._model.forward_on_instance(instance)
 
         root = self._sample_tree(instance, outputs)
@@ -135,7 +152,6 @@ class UncertainReaderGenPredictor(Predictor):
     def _calculate_disc_probabilities(self, root):
         ''' Iterate over the tree and calculate the probabilities for each path using the discriminate loss function.
         '''
-        gold_index = 0
         child_list = []
 
         for child in PreOrderIter(root, only_tensor_nodes, maxlevel=2):
@@ -144,10 +160,6 @@ class UncertainReaderGenPredictor(Predictor):
 
         if len(child_list) == 0:
             return
-
-        for i, c in enumerate(child_list):
-            if c.gold == True:
-                gold_index = i
 
         child_story_tensors, log_probs, logits, parent_story_tensor, probs = self.calculate_embedding_probs_and_logits(child_list, root)
 
@@ -174,9 +186,9 @@ class UncertainReaderGenPredictor(Predictor):
                 #print(f"Include {c.type}:, prob {c.prob}, {c.sentence_text}")
                 pruned_child_list.append(c)
 
-        root.gold_index = gold_index
+        self._calculate_distances(root, parent_story_tensor, child_story_tensors)
 
-        self._calculate_distances(root, parent_story_tensor, child_story_tensors, gold_index)
+        root.children = child_list
 
         return root
 
@@ -233,29 +245,17 @@ class UncertainReaderGenPredictor(Predictor):
             child_story_tensors = self._model._target_feedforward(child_story_tensors)
         return child_story_tensors, parent_story_tensor
 
-    def _calculate_distances(self, root, parent_story_tensor, child_story_tensors, gold_index):
+    def _calculate_distances(self, root, parent_story_tensor, child_story_tensors):
         ''' Compute 1 level differences. May need to change if multiple skip steps are added.
         '''
 
-        gold_child_tensor = child_story_tensors[gold_index]
-
-        gold_child_tensor = gold_child_tensor.unsqueeze(dim=0).expand_as(child_story_tensors)
-
-        surprise_distances_l1 = self._l1(gold_child_tensor, child_story_tensors)
-        surprise_distances_l2 = self._l2(gold_child_tensor, child_story_tensors)
-
         parent_story_tensor = parent_story_tensor.expand_as(child_story_tensors)
-        suspense_distances_l1 = self._l1(parent_story_tensor, child_story_tensors)
-        suspense_distances_l2 = self._l2(parent_story_tensor, child_story_tensors)
+        parent_distances_l1 = self._l1(parent_story_tensor, child_story_tensors)
+        parent_distances_l2 = self._l2(parent_story_tensor, child_story_tensors)
 
         for i, c in enumerate(root.children):
-
-            if not c.gold:
-                c.surprise_distance_l1 = surprise_distances_l1[i]
-                c.surprise_distance_l2 = surprise_distances_l2[i]
-
-                c.suspense_distance_l1 = suspense_distances_l1[i]
-                c.suspense_distance_l2 = suspense_distances_l2[i]
+            c.parent_distance_l1 = parent_distances_l1[i]
+            c.parent_distance_l2 = parent_distances_l2[i]
 
     def _sample_tree(self, instance, outputs):
         ''' Create a hierarchy of possibilities by generating sentences in a tree structure.
@@ -335,15 +335,16 @@ class UncertainReaderGenPredictor(Predictor):
         if self.generate_per_branch > 0:
 
             base = correct_futures.pop(0)
-            base_correct = copy.deepcopy(base)
-            base_correct.parent = type_node
-            parents = [base_correct]
+            gold = copy.deepcopy(base)
+            gold.parent = type_node
+            base_correct = gold
+            parents = [gold]
+
             for i in range(self.levels_to_rollout):
 
                 if len(correct_futures) == 0:
                     continue
 
-                future = correct_futures.pop(0)
 
                 new_parents = []
 
@@ -351,7 +352,10 @@ class UncertainReaderGenPredictor(Predictor):
 
                     print("Generate from:", parent.sentence_text)
 
-                    children = list(parent.children)
+                    if len(parent.children) > 0:
+                        children = list(parent.children)
+                    else:
+                        children = []
 
                     for j in range(self.generate_per_branch):
 
@@ -364,33 +368,33 @@ class UncertainReaderGenPredictor(Predictor):
                         if created_node:
                             children.append(created_node)
 
-                            future.parent = created_node
-
-                    children.append(future)
+                    if parent.gold:
+                        future_gold = correct_futures.pop(0)
+                        future_gold.parent = gold
+                        gold = future_gold
+                        children.append(gold)
 
                     parent.children = children
 
                     # Greater than 1 as one child is the propagated gold.
-                    if len(parent.children) > 1:
-                        self._calculate_disc_probabilities(parent)
-                        self._calc_chain_probs(parent)
 
-                        new_parents.extend(parent.children)
+                    self._calculate_disc_probabilities(parent)
+                    self._calc_chain_probs(parent)
 
-                #print("New Parents Length", len(new_parents))
+                    for node in PreOrderIter(parent, only_probability_nodes):
+                        new_parents.append(node)
+                    # print(len(parent.children), len(new_parents))
 
-                # Exclude Gold leaves from the next search.
-                new_parents = [p for p in new_parents if p.gold == False]
+                new_parents = sorted(new_parents, key=lambda p: (p.gold, p.chain_prob), reverse=True)
 
-                new_parents = sorted(new_parents, key=lambda p: p.chain_prob, reverse=True)
+                # print([(p.chain_prob, p.sentence_text) for p in new_parents])
 
-                if len(new_parents) > self.global_beam_size and self.global_beam_size > 0:
-
-                    print([p.chain_log_prob for p in new_parents])
-
-                    new_parents = new_parents[0:self.global_beam_size]
+                if len(new_parents) > self.global_beam_size - 1 and self.global_beam_size > 0:
+                    new_parents = new_parents[0:self.global_beam_size - 1]
 
                 parents = new_parents
+
+                print("Retained: ", [(p.prob, p.gold, p.sentence_text) for p in parents])
 
             return base_correct
 
@@ -399,17 +403,17 @@ class UncertainReaderGenPredictor(Predictor):
 
         if self.sample_per_level_branch > 0:
 
+            #print(correct_futures)
             base = correct_futures.pop(0)
-            base_correct = copy.deepcopy(base)
-            base_correct.parent = type_node
-            parents = [base_correct]
+            gold = copy.deepcopy(base)
+            gold.parent = type_node
+            base_correct = gold
+            parents = [gold]
 
             for i in range(self.levels_to_rollout):
 
                 if len(correct_futures) == 0:
                     continue
-
-                future = correct_futures.pop(0)
 
                 new_parents = []
 
@@ -417,7 +421,11 @@ class UncertainReaderGenPredictor(Predictor):
 
                     print("Sample from:", parent.sentence_text)
 
-                    children = list(parent.children)
+                    if len(parent.children) > 0:
+                        children = list(parent.children)
+                    else:
+                        children = []
+                    parent.children = children
 
                     for j in range(self.sample_per_level_branch):
 
@@ -427,20 +435,34 @@ class UncertainReaderGenPredictor(Predictor):
                         if created_node:
                             children.append(created_node)
 
-                            future.parent = created_node
-
-                    children.append(future)
+                    if parent.gold:
+                        future_gold = correct_futures.pop(0)
+                        future_gold.parent = gold
+                        gold = future_gold
+                        children.append(gold)
 
                     parent.children = children
 
-                    # Greater than 1 as one child is the propagated gold.
-                    if len(parent.children) > 1:
+                    if len(parent.children) > 0:
                         self._calculate_disc_probabilities(parent)
                         self._calc_chain_probs(parent)
 
-                        new_parents.extend(parent.children)
+                    for node in PreOrderIter(parent, only_probability_nodes):
+                        new_parents.append(node)
+
+                    # print(len(parent.children), len(new_parents))
+
+                new_parents = sorted(new_parents, key=lambda p: (p.gold, p.chain_prob), reverse=True)
+
+                # print([(p.chain_prob, p.sentence_text) for p in new_parents])
+
+                if len(new_parents) > self.global_beam_size - 1 and self.global_beam_size > 0:
+                    new_parents = new_parents[0:self.global_beam_size - 1]
 
                 parents = new_parents
+
+                print("Retained: ", [(p.prob, p.gold, p.sentence_text) for p in parents])
+
             return base_correct
 
     def create_correct_futures(self, embedded_text_mask, encoded_stories, position, text, text_field, story_id,
@@ -448,7 +470,7 @@ class UncertainReaderGenPredictor(Predictor):
         correct_futures = []
         # Put the correct representations into the sentences at the given point.
         parent_story_tensor = None
-        for i in range(0, self.levels_to_rollout + 1):
+        for i in range(0, self.levels_to_rollout + 2):
 
             if position + i > len(text) - 1 or len(text[position + i]) == 0:
                 continue
@@ -477,9 +499,9 @@ class UncertainReaderGenPredictor(Predictor):
                     encoded_stories[position + i],
                     parent_story_tensor)
                 child_story_tensor_fwd = torch.unsqueeze(child_story_tensor_fwd, dim=0)
-                correct_future.suspense_distance_l1 = torch.squeeze(
+                correct_future.parent_distance_l1 = torch.squeeze(
                     self._l1(child_story_tensor_fwd, parent_story_tensor_fwd), dim=0)
-                correct_future.suspense_distance_l2 = torch.squeeze(
+                correct_future.parent_distance_l2 = torch.squeeze(
                     self._l2(child_story_tensor_fwd, parent_story_tensor_fwd), dim=0)
 
             correct_futures.append(correct_future)
@@ -628,7 +650,20 @@ class UncertainReaderGenPredictor(Predictor):
                 continue
 
             # Exclude gold for surprise as already calculated in the distances.
-            nodes_exclude_gold = [n for n in node_group if n.gold == False]
+            nodes_gold = [n for n in node_group if n.gold == True]
+
+            if len(nodes_gold) > 0:
+                gold = nodes_gold[0]
+
+                if hasattr(gold, "parent_l1_distance"):
+                    surprise_l1_stat = gold.parent_l1_distance
+                    surprise_l1_culm += surprise_l1_stat
+                    metrics_dict[f"{type}_surprise_l1_{i}"] = surprise_l1_stat
+
+                if hasattr(gold, "parent_l2_distance"):
+                    surprise_l2_stat = gold.parent_l2_distance
+                    surprise_l2_culm += surprise_l2_stat
+                    metrics_dict[f"{type}_surprise_l2_{i}"] = surprise_l2_stat
 
             steps_counter += 1
 
@@ -639,27 +674,17 @@ class UncertainReaderGenPredictor(Predictor):
             entropy = distribution.entropy().cpu().item()
             metrics_dict[f"{type}_suspense_entropy_{i}"] = entropy
 
-            suspense_l1 = torch.stack([n.suspense_distance_l1 for n in node_group]).to(self._device)
-            suspense_l1_stat = torch.squeeze(torch.sum((suspense_l1 * probs), dim=-1)).cpu().item()
+            parent_l1 = torch.stack([n.parent_distance_l1 for n in node_group]).to(self._device)
+
+            suspense_l1_stat = torch.squeeze(torch.sum((parent_l1 * probs), dim=-1)).cpu().item()
             suspense_l1_culm += suspense_l1_stat
             metrics_dict[f"{type}_suspense_l1_{i}"] = suspense_l1_stat
 
-            suspense_l2 = torch.stack([n.suspense_distance_l2 for n in node_group]).to(self._device)
-            suspense_l2_stat = torch.squeeze(torch.sum((suspense_l2 * probs), dim=-1)).cpu().item()
+            parent_l2 = torch.stack([n.parent_distance_l2 for n in node_group]).to(self._device)
+
+            suspense_l2_stat = torch.squeeze(torch.sum((parent_l2 * probs), dim=-1)).cpu().item()
             suspense_l2_culm += suspense_l2_stat
             metrics_dict[f"{type}_suspense_l2_{i}"] = suspense_l2_stat
-
-            surprise_l1_stat = torch.squeeze(
-                torch.sum((torch.stack([n.surprise_distance_l1 for n in nodes_exclude_gold]).to(self._device)),
-                          dim=-1)).cpu().item()
-            surprise_l1_culm += surprise_l1_stat
-            metrics_dict[f"{type}_surprise_l1_{i}"] = surprise_l1_stat
-
-            surprise_l2_stat = torch.squeeze(
-                torch.sum((torch.stack([n.surprise_distance_l2 for n in nodes_exclude_gold]).to(self._device)),
-                          dim=-1)).cpu().item()
-            surprise_l2_culm += surprise_l2_stat
-            metrics_dict[f"{type}_surprise_l2_{i}"] = surprise_l2_stat
 
         # Use the last value for the main suspense.
         metrics_dict[f"{type}_suspense_entropy"] = entropy
@@ -762,6 +787,7 @@ class UncertainReaderGenPredictor(Predictor):
         new_embedded_text_mask[:, 0: embedded_text_mask.shape[1]] = embedded_text_mask
         embedded_text_mask = new_embedded_text_mask.long()
         # Encode as a story.
+
         encoded_story = self._model.encode_story_vectors(
             embedded_text_tensor.to(self._device), embedded_text_mask.to(self._device))
         encoded_story = encoded_story[position]
