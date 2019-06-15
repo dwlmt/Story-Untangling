@@ -114,7 +114,7 @@ class UncertainReaderStoreVectorPredictor(Predictor):
 
             encoded_sentence = torch.squeeze(encoded_sentences, dim=0)[position].detach().cpu()
 
-            position_node = AnyNode(name=f"{position}", story_id=story_id,
+            position_node = AnyNode(position=f"{position}", story_id=story_id,
                                     sentence_id=sentence_id,
                                     sentence_num=sentence_num,
                                     encoded_story_tensor=encoded_story_tensor,
