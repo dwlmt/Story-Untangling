@@ -19,9 +19,19 @@ from torch.nn import Softmax, PairwiseDistance
 full_stop_token = 239
 exporter = DictExporter(dictcls=OrderedDict, attriter=sorted)
 
-def random_sample(logits: torch.Tensor) -> int:
+
+def random_sample(logits: torch.Tensor, top_k_words=None) -> int:
+    indices = None
+    if top_k_words is not None and top_k_words > 0:
+        logits, indices = torch.topk(logits, k=top_k_words)
+
+
     d = torch.distributions.Categorical(logits=logits)
     sampled = d.sample()
+
+    if indices is not None:
+        sampled = indices[sampled]
+
     return sampled.item()
 
 def choose_max(logits: torch.Tensor, ) -> int:
@@ -76,22 +86,24 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = True
 
-        self.levels_to_rollout = 3
-        self.generate_per_branch = 10
-        self.sample_per_level_branch = 10
+        self.levels_to_rollout = 2
+        self.generate_per_branch = 100
+        self.sample_per_level_branch = 100
 
         self.max_leaves_to_keep_per_branch = 100
         self.probability_mass_to_keep_per_branch = 0.0
 
         self.global_beam_size = 10
 
-        self.min_length = 3
+        self.sample_top_k_words = 20
 
+        self.min_length = 3
 
         self._remove_sentence_output = False
 
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
+
 
         self._sliding_windows = [3, 5, 7]
         self._generation_sampling_temperature = 1.0
@@ -145,6 +157,8 @@ class UncertainReaderGenPredictor(Predictor):
             if not self.keep_tensor_output:
                 n.story_tensor = None
                 n.sentence_tensor = None
+                n.embedded_text_tensor = None
+                n.embedded_text_mask = None
 
         root_as_dict = exporter.export(root)
         print(root_as_dict)
@@ -276,10 +290,9 @@ class UncertainReaderGenPredictor(Predictor):
                 break
 
             text_tensor_dict = text_field.as_tensor(text_field.get_padding_lengths())
-            text_to_gen_from = text_tensor_dict['openai_transformer']
-            ctx_size = text_to_gen_from.size(0)
+            index_tokens = text_tensor_dict['openai_transformer']
+            ctx_size = index_tokens.size(0)
             sentence_length = int(torch.sum(embedded_text_mask[position]).item())
-            text_to_gen_from = text_to_gen_from[0:sentence_length]
 
             if sentence_length == 0:
                 continue
@@ -310,7 +323,7 @@ class UncertainReaderGenPredictor(Predictor):
                 base_generated = self.generated_expansion(generated, copy.deepcopy(correct_futures), ctx_size,
                                                           embedded_text_mask,
                                                           embedded_text_tensor, encoded_story, position,
-                                                          sentence_length, text_to_gen_from)
+                                                          sentence_length)
 
                 corpus = AnyNode(name="corpus", parent=position_node)
                 base_corpus = self.sampling_expansion(corpus, copy.deepcopy(correct_futures), embedded_text_mask,
@@ -332,7 +345,7 @@ class UncertainReaderGenPredictor(Predictor):
         return root
 
     def generated_expansion(self, type_node, correct_futures, ctx_size, embedded_text_mask, embedded_text_tensor,
-                            encoded_story, position, sentence_length, text_to_gen_from):
+                            encoded_story, position, sentence_length):
 
         if self.generate_per_branch > 0:
 
@@ -368,12 +381,16 @@ class UncertainReaderGenPredictor(Predictor):
                                                               parent.embedded_text_tensor.clone().to(self._device),
                                                               parent.embedded_text_mask.clone().to(self._device),
                                                               encoded_story,
-                                                              text_to_gen_from,
+                                                              parent.token_ids,
                                                               sentence_length, ctx_size,
                                                               parent=parent)
 
                         if created_node:
                             children.append(created_node)
+
+                            print("Created Distance", self._l2(torch.unsqueeze(parent.story_tensor, dim=0),
+                                                               torch.unsqueeze(created_node.story_tensor, dim=0)),
+                                  parent.sentence_text, created_node.sentence_text)
 
                     if parent.gold:
                         future_gold = correct_futures.pop(0)
@@ -382,6 +399,10 @@ class UncertainReaderGenPredictor(Predictor):
 
                         gold.embedded_text_mask = parent.embedded_text_mask.cpu()
                         gold.embedded_text_tensor = parent.embedded_text_tensor.cpu()
+
+                        print("Gold Distance Tensor", self._l2(torch.unsqueeze(parent.story_tensor, dim=0),
+                                                               torch.unsqueeze(gold.story_tensor, dim=0)),
+                              parent.sentence_text, gold.sentence_text)
 
                         children.append(gold)
 
@@ -450,6 +471,10 @@ class UncertainReaderGenPredictor(Predictor):
                         if created_node:
                             children.append(created_node)
 
+                            print("Created Distance", self._l2(torch.unsqueeze(parent.story_tensor, dim=0),
+                                                               torch.unsqueeze(created_node.story_tensor, dim=0)),
+                                  parent.sentence_text, created_node.sentence_text)
+
                     if parent.gold:
                         future_gold = correct_futures.pop(0)
                         future_gold.parent = gold
@@ -457,6 +482,10 @@ class UncertainReaderGenPredictor(Predictor):
 
                         gold.embedded_text_mask = parent.embedded_text_mask.cpu()
                         gold.embedded_text_tensor = parent.embedded_text_tensor.cpu()
+
+                        print("Gold Distance Tensor", self._l2(torch.unsqueeze(parent.story_tensor, dim=0),
+                                                               torch.unsqueeze(gold.story_tensor, dim=0)),
+                              parent.sentence_text, gold.sentence_text)
 
                         children.append(gold)
 
@@ -738,7 +767,7 @@ class UncertainReaderGenPredictor(Predictor):
                 node.chain_log_prob += node.parent.chain_log_prob
 
     def generate_sentence(self, position, level, embedded_text_tensor, embedded_text_mask, encoded_story,
-                          text_to_gen_from, sentence_length, ctx_size, parent=None):
+                          token_ids_to_gen_from, sentence_length, ctx_size, parent=None):
 
         gen_sentence = []
 
@@ -748,7 +777,9 @@ class UncertainReaderGenPredictor(Predictor):
 
             if len(gen_sentence) > 0:
 
-                text_tensor_merged = torch.cat((text_to_gen_from, torch.tensor(gen_sentence).long()))
+                text_tensor_merged = torch.cat(
+                    (torch.tensor(token_ids_to_gen_from).long(), torch.tensor(gen_sentence).long()))
+                text_tensor_merged = text_tensor_merged.to(self._device)
 
                 sentence_length = text_tensor_merged.shape[-1]
 
@@ -756,7 +787,8 @@ class UncertainReaderGenPredictor(Predictor):
                     text_tensor_merged = (text_tensor_merged[1:ctx_size + 1])
                 else:
                     text_tensor_merged = torch.cat(
-                        (text_tensor_merged, torch.tensor([0] * (ctx_size - len(text_tensor_merged))).long()))
+                        (text_tensor_merged,
+                         torch.tensor([0] * (ctx_size - len(text_tensor_merged))).long().to(self._device)))
 
                 encoded_text_merged = self.embedder(
                     torch.unsqueeze(text_tensor_merged.to(self._device), dim=0).long())
@@ -845,7 +877,7 @@ class UncertainReaderGenPredictor(Predictor):
         logits = logits[min(sentence_length - 1, logits.shape[0] - 1), :]
 
         # Scale the logits by the temperature.
-        next_word_id = random_sample(logits / self._generation_sampling_temperature)
+        next_word_id = random_sample(logits / self._generation_sampling_temperature, self.sample_top_k_words)
 
         return next_word_id
 
