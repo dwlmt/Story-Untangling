@@ -22,7 +22,7 @@ from allennlp.training.momentum_schedulers import MomentumScheduler
 from allennlp.training.moving_average import MovingAverage
 from allennlp.training.optimizers import Optimizer
 from allennlp.training.trainer_base import TrainerBase
-from apex import amp
+#from apex import amp
 
 from story_untangling.modules.gpt_lm import MixtureLM, FusionLM
 
@@ -58,7 +58,7 @@ class SplitUncertainModelTrainer(Trainer):
                  should_log_learning_rate: bool = False,
                  log_batch_size_period: Optional[int] = None,
                  moving_average: Optional[MovingAverage] = None) -> None:
-        model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
+        #model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
         super().__init__(model, optimizer, iterator, train_dataset, validation_dataset, patience,
                          validation_metric, validation_iterator, shuffle, num_epochs, serialization_dir, num_serialized_models_to_keep,
                          keep_serialized_model_every_num_seconds, checkpointer, model_save_interval, cuda_device, grad_norm, grad_clipping,
@@ -74,21 +74,19 @@ class SplitUncertainModelTrainer(Trainer):
         if self._multiple_gpu:
 
             batch = batch_group[0]
+            print(len(batch_group))
             batch = nn_util.move_to_device(batch, self._cuda_devices[0])
 
-            self.model._lm_model = self.model._lm_model.to(self._cuda_devices[1])
             self.model._text_field_embedder = self.model._text_field_embedder.to((self._cuda_devices[1]))
             self.model._lm_model._decoder.to(self._cuda_devices[1])
-
             self.model._lm_model._decoder.weight.requires_grad = True
 
-
+            '''
+            self.model._lm_model._decoder.to(self._cuda_devices[1])
             if isinstance(self.model._lm_model, MixtureLM):
-                self.model._lm_model._lm_weighting.to(self._cuda_devices[0])
-                self.model._lm_model._feature_decoder.to(self._cuda_devices[0])
-
-            if isinstance(self.model._lm_model, FusionLM):
-                self.model._lm_model._encoder =  self.model._lm_model._encoder.to(self._cuda_devices[0])
+                self.model._lm_model._lm_weighting.to(self._cuda_devices[1])
+              
+            '''
 
             output_dict = self.model(**batch)
 
@@ -161,9 +159,9 @@ class SplitUncertainModelTrainer(Trainer):
             if torch.isnan(loss):
                 raise ValueError("nan loss encountered")
 
-            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
-            # loss.backward()
+            #with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+            #    scaled_loss.backward()
+            loss.backward()
 
             train_loss += loss.item()
 

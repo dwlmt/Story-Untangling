@@ -72,7 +72,6 @@ class UncertainReaderStoreVectorPredictor(Predictor):
                         n.__dict__[attr] = value.tolist()
 
         root_as_dict = exporter.export(root)
-        print(root_as_dict)
         return sanitize(root_as_dict)
 
     def sample_tree(self, instance, outputs):
@@ -94,7 +93,6 @@ class UncertainReaderStoreVectorPredictor(Predictor):
             if position == embedded_text_tensor.shape[0]:
                 break
 
-            text_tensor_dict = text_field.as_tensor(text_field.get_padding_lengths())
             sentence_length = int(torch.sum(embedded_text_mask[position]).item())
 
             if sentence_length == 0:
@@ -103,12 +101,14 @@ class UncertainReaderStoreVectorPredictor(Predictor):
             story_id = instance["metadata"]["story_id"]
             sentence_ids = instance["metadata"]["sentence_ids"]
             sentence_nums = instance["metadata"]["sentence_nums"]
+            text = instance["metadata"]["text"]
 
             if position >= len(sentence_ids):
                 continue
 
             sentence_id = sentence_ids[position]
             sentence_num = sentence_nums[position]
+            sentence_text = text[position]
 
             encoded_story_tensor = encoded_stories[position].detach().cpu()
 
@@ -117,8 +117,10 @@ class UncertainReaderStoreVectorPredictor(Predictor):
             position_node = AnyNode(position=f"{position}", story_id=story_id,
                                     sentence_id=sentence_id,
                                     sentence_num=sentence_num,
-                                    encoded_story_tensor=encoded_story_tensor,
-                                    encoded_sentence=encoded_sentence,
+                                    story_tensor=encoded_story_tensor,
+                                    sentence_tensor=encoded_sentence,
+                                    sentence_text=sentence_text,
+                                    sentence_length=sentence_length,
                                     parent=root)
 
         return root
