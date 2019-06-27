@@ -23,7 +23,7 @@ parser.add_argument('--similarity-metric', default=["euclidean"], nargs="+", typ
 parser.add_argument('--dim-reduction-components', default=[48, 2], type=int, nargs="+", help="The number of components to reduce to.")
 parser.add_argument('--min-cluster-size', default=5, type=int, help="Min size fo each cluster.")
 parser.add_argument('--kmeans-ncentroids', default=32, type=int, help="Number of K-means centroids.")
-parser.add_argument('--kmeans-iterations', default=20, type=int, help="Number of K-means iteration.")
+parser.add_argument('--kmeans-iterations', default=25, type=int, help="Number of K-means iteration.")
 parser.add_argument('--code-size', default=4, type=int, help="Byte size for the product quantization")
 parser.add_argument('--num-stories', default=100, type=int, help="Max number of stories to process")
 parser.add_argument("--no-hdbscan", default=False, action="store_true" , help="Don't run HDBSCAN")
@@ -139,7 +139,7 @@ def extract_json_stats(args):
                     source.append({"sentence_id": sentence_id, new_vector_field: reduced_dim})
                 dim_df = dask.bag.from_sequence(source).to_dataframe()
 
-            original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
+                original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
     if not args["no_kmeans"]:
         res = faiss.StandardGpuResources()
