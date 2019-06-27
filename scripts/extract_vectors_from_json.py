@@ -200,9 +200,6 @@ def extract_json_stats(args):
         for field in cluster_dim_fields:
             for sim_metric in args["similarity_metric"]:
 
-                if sim_metric not in field:
-                    continue
-
                 cluster_field = f"{field}_cluster"
                 print(f"HDBSCAN Clustering for : {cluster_field}")
 
