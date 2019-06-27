@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(
     description='Extract JSON vectors and perform dimensionality reduction.')
 parser.add_argument('--source-json', required=True, type=str, help="JSON file to process.")
 parser.add_argument('--output', required=True, type=str, help="Output, saved as a Parquet file")
-parser.add_argument('--umap-n-neighbours', default=15, type=int, help="The number of neighbours.")
+parser.add_argument('--umap-n-neighbours', default=25, type=int, help="The number of neighbours.")
 parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
 parser.add_argument('--similarity-metric', default=["euclidean"], nargs="+", type=str, help="The similarity measure to use.")
 parser.add_argument('--dim-reduction-components', default=[48, 2], type=int, nargs="+", help="The number of components to reduce to.")
