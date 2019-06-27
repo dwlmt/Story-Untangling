@@ -30,7 +30,7 @@ parser.add_argument("--no-hdbscan", default=False, action="store_true" , help="D
 parser.add_argument("--no-kmeans", default=False, action="store_true" , help="Don't run K-Means and the product code.")
 parser.add_argument("--no-umap", default=False, action="store_true" , help="Don't run UMAP dim reduction.")
 parser.add_argument("--no-pca", default=False, action="store_true" , help="Don't run PCA dim reduction.")
-parser.add_argument("--save-csv", default=False, action="store_true" , help="Save to CSV files as well as Parquet.")
+parser.add_argument("--dont-save-csv", default=True, action="store_false" , help="Save to CSV files as well as Parquet.")
 parser.add_argument('--gpus', default=4, type=int, help="GPUs")
 
 
@@ -87,6 +87,8 @@ def extract_json_stats(args):
     original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
     original_df = original_df.to_dataframe()
 
+    csv_columns = []
+
 
     cluster_dim_fields = []
     for vector_field in vector_fields:
@@ -106,6 +108,8 @@ def extract_json_stats(args):
 
                     if dim > 3:
                         cluster_dim_fields.append(new_vector_field)
+                    else:
+                        csv_columns.append(new_vector_field)
 
                     source = []
                     for sentence_id, reduced_dim in zip (original_df["sentence_id"].compute().values.tolist(),numpy.split(vector_data, 1)[0]):
@@ -132,6 +136,8 @@ def extract_json_stats(args):
 
                 if dim > 3:
                     cluster_dim_fields.append(new_vector_field)
+                else:
+                    csv_columns.append(new_vector_field)
 
                 source = []
                 for sentence_id, reduced_dim in zip(original_df["sentence_id"].compute().values.tolist(),
@@ -175,6 +181,11 @@ def extract_json_stats(args):
             D, I = centroid_index.search(vector_data, 1) #kmeans.index.search(vector_data, 1)
 
             source = []
+
+            csv_columns.append(f"{cluster_field}_kmeans_distance")
+            csv_columns.append(f"{cluster_field}_kmeans_cluster")
+            csv_columns.append(f"{cluster_field}_product_code")
+
             for sentence_id, distance, cluster, code in zip(original_df["sentence_id"].compute().values.tolist(), D, I,
                                                             codes):
                 source.append({"sentence_id": sentence_id, f"{cluster_field}_kmeans_distance": distance[0],
@@ -203,6 +214,11 @@ def extract_json_stats(args):
                 clusterer.fit(vector_data)
 
                 source = []
+
+                csv_columns.append(f"{cluster_field}_label")
+                csv_columns.append(f"{cluster_field}_probability")
+                csv_columns.append(f"{cluster_field}_outlier_score")
+
                 for sentence_id, label, prob, outlier in zip(original_df["sentence_id"].compute().values.tolist(),clusterer.labels_,
                                                              clusterer.probabilities_, clusterer.outlier_scores_):
 
@@ -216,10 +232,11 @@ def extract_json_stats(args):
                 original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
     original_df.to_parquet(f'{args["output"]}', compression='snappy')
-    if args["save_csv"]:
-        original_df = original_df.compute(scheduler='processes')
-        print(original_df)
-        original_df.to_csv(f'{args["output"]}.csv')
+    if not args["dont_save_csv"]:
+        csv_df = original_df[metadata_fields + csv_columns]
+        csv_df = csv_df.compute(scheduler='processes')
+        print(csv_df)
+        csv_df.to_csv(f'{args["output"]}.csv')
 
 def extract_rows(args, metadata_fields, vector_fields, max_num_stories):
     index_counter = 0
