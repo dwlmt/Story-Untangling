@@ -30,7 +30,7 @@ parser.add_argument("--no-hdbscan", default=False, action="store_true" , help="D
 parser.add_argument("--no-kmeans", default=False, action="store_true" , help="Don't run K-Means and the product code.")
 parser.add_argument("--no-umap", default=False, action="store_true" , help="Don't run UMAP dim reduction.")
 parser.add_argument("--no-pca", default=False, action="store_true" , help="Don't run PCA dim reduction.")
-parser.add_argument("--dont-save-csv", default=True, action="store_false" , help="Save to CSV files as well as Parquet.")
+parser.add_argument("--dont-save-csv", default=False, action="store_true" , help="Don't save summary fields to csv.")
 parser.add_argument('--gpus', default=4, type=int, help="GPUs")
 
 
