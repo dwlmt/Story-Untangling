@@ -84,30 +84,31 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
 
-        self.levels_to_rollout = 2
-        self.generate_per_branch = 20
+        self.levels_to_rollout = 1
+        self.generate_per_branch = 50
         self.sample_per_level_branch = 0
 
-        self.max_leaves_to_keep_per_branch = 100
+        self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
 
         self.global_beam_size = 10
 
-        self.sample_top_k_words = 25
+        self.sample_top_k_words = 50
 
         self.min_sentence_length = 3
         self.max_generated_sentence_length  = 150
-        self.context_sentence_to_generate_from = 6
+        self.context_sentence_to_generate_from = 8
 
-        self._remove_sentence_output = False
+        self._remove_sentence_output = True
 
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
 
-        self._sliding_windows = [3, 5, 7]
+        self._sliding_windows = [1, 3, 5, 7]
         self._generation_sampling_temperature = 1.0
         self._discrimination_temperature = 1.0
+        self._cosine = True
 
         self.embedder = model._text_field_embedder._token_embedders["openai_transformer"]
         self.embedder._top_layer_only = True
@@ -239,13 +240,21 @@ class UncertainReaderGenPredictor(Predictor):
 
     def calculate_embedding_probs_and_logits(self, child_list, root):
         parent_story_tensor = root.story_tensor
-        parent_story_tensor = torch.unsqueeze(parent_story_tensor, dim=0)
+        parent_story_tensor = torch.unsqueeze(parent_story_tensor, dim=0).to(self._device)
         story_tensors_list = [s.story_tensor for s in child_list]
-        child_story_tensors = torch.stack(story_tensors_list)
+        child_story_tensors = torch.stack(story_tensors_list).to(self._device)
+
+
+        if not self._cosine:
+            parent_story_tensor_fwd = parent_story_tensor
+            child_story_tensors_fwd = child_story_tensors
+        else:
+            parent_story_tensor_fwd = torch.norm(parent_story_tensor, p=2, dim=-1, keepdim=True)
+            child_story_tensors_fwd  = torch.norm(child_story_tensors, p=2, dim=-1, keepdim=True)
 
         child_story_tensors, parent_story_tensor = self._run_feedforward(child_story_tensors, parent_story_tensor)
-        logits = self._model.calculate_logits(parent_story_tensor.to(self._device),
-                                              child_story_tensors.to(self._device))
+        logits = self._model.calculate_logits(parent_story_tensor_fwd,
+                                              child_story_tensors_fwd)
 
         probs = self._softmax(logits / self._discrimination_temperature)
 
