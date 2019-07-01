@@ -81,13 +81,6 @@ class SplitUncertainModelTrainer(Trainer):
             self.model._lm_model._decoder.to(self._cuda_devices[1])
             self.model._lm_model._decoder.weight.requires_grad = True
 
-            '''
-            self.model._lm_model._decoder.to(self._cuda_devices[1])
-            if isinstance(self.model._lm_model, MixtureLM):
-                self.model._lm_model._lm_weighting.to(self._cuda_devices[1])
-              
-            '''
-
             output_dict = self.model(**batch)
 
         else:
@@ -292,7 +285,8 @@ class SplitUncertainModelTrainer(Trainer):
                     serialization_dir: str,
                     recover: bool = False):
 
-        from allennlp.training.trainer import TrainerPieces
+        from allennlp.training.trainer import Trainer
+        from allennlp.training.trainer_pieces import TrainerPieces
 
         pieces = TrainerPieces.from_params(params, serialization_dir, recover)  # pylint: disable=no-member
         return SplitUncertainModelTrainer.this_from_params(model=pieces.model,
