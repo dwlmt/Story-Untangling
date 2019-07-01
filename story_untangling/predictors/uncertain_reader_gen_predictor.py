@@ -85,7 +85,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.only_annotation_stories = False
 
         self.levels_to_rollout = 1
-        self.generate_per_branch = 50
+        self.generate_per_branch = 25
         self.sample_per_level_branch = 0
 
         self.max_leaves_to_keep_per_branch = 0
@@ -177,7 +177,6 @@ class UncertainReaderGenPredictor(Predictor):
 
         if len(child_list) == 0:
             return
-
 
         child_story_tensors, log_probs, logits, parent_story_tensor, probs = self.calculate_embedding_probs_and_logits(child_list, root)
 
@@ -406,7 +405,7 @@ class UncertainReaderGenPredictor(Predictor):
                                                                torch.unsqueeze(created_node.story_tensor, dim=0)),
                                   parent.sentence_text, created_node.sentence_text)
 
-                    if parent.gold:
+                    if parent.gold and len(children) > 0:
                         future_gold = correct_futures.pop(0)
                         future_gold.parent = gold
                         gold = future_gold
@@ -428,10 +427,10 @@ class UncertainReaderGenPredictor(Predictor):
                     self._calculate_disc_probabilities(parent)
                     self._calc_chain_probs(parent)
 
-                    new_parents.extend(list(parent.children))
+                new_parents.extend(list(parent.children))
 
-                new_parents = sorted(new_parents, key=lambda p: (p.gold, p.chain_prob), reverse=True)
-
+                if len(new_parents) > 1:
+                    new_parents = sorted(new_parents, key=lambda p: (p.gold, p.chain_prob), reverse=True)
 
                 if len(new_parents) > self.global_beam_size - 1 and self.global_beam_size > 0:
                     new_parents = new_parents[0:self.global_beam_size - 1]
@@ -490,7 +489,7 @@ class UncertainReaderGenPredictor(Predictor):
                                                                torch.unsqueeze(created_node.story_tensor, dim=0)),
                                   parent.sentence_text, created_node.sentence_text)
 
-                    if parent.gold:
+                    if parent.gold and len(children) > 0:
                         future_gold = correct_futures.pop(0)
                         future_gold.parent = gold
                         gold = future_gold
@@ -506,14 +505,13 @@ class UncertainReaderGenPredictor(Predictor):
 
                     parent.children = children
 
-                    if len(parent.children) > 0:
-                        self._calculate_disc_probabilities(parent)
-                        self._calc_chain_probs(parent)
+                    self._calculate_disc_probabilities(parent)
+                    self._calc_chain_probs(parent)
 
                     new_parents.extend(list(parent.children))
 
-
-                new_parents = sorted(new_parents, key=lambda p: (p.gold, p.chain_prob), reverse=True)
+                if len(new_parents) > 1:
+                    new_parents = sorted(new_parents, key=lambda p: (p.gold, p.chain_prob), reverse=True)
 
                 if len(new_parents) > self.global_beam_size - 1 and self.global_beam_size > 0:
                     new_parents = new_parents[0:self.global_beam_size - 1]
@@ -644,15 +642,19 @@ class UncertainReaderGenPredictor(Predictor):
                                                          f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
                                                          f"{type}_suspense_entropy": []}}
 
+
+        story_id = -1
         for n in PreOrderIter(root, only_position_nodes):
 
             for k, v in stats_source_dict.items():
                 if k in n.__dict__:
                     stat = n.__dict__[k]
+                    story_id = n.story_id
                     stats_source_dict[k].append(stat)
 
         stats_dict = {}
-        for k, v in stats_source_dict.items():
+        for (k, v) in stats_source_dict.items():
+
             if v is None or len(v) == 0:
                 continue
 
@@ -662,10 +664,12 @@ class UncertainReaderGenPredictor(Predictor):
             stats_dict["num"] = nobs
             stats_dict["min"] = minmax[0]
             stats_dict["max"] = minmax[1]
+            stats_dict["mean"] = mean
             stats_dict["variance"] = variance
             stats_dict["std"] = variance ** (.5)
             stats_dict["skew"] = skewness
             stats_dict["kurtosis"] = kurtosis
+            stats_dict["story_id"] = story_id
 
             for p in [25, 50, 75]:
                 stats_dict[f"{p}_perc"] = numpy.percentile(v_array, p)
@@ -673,7 +677,6 @@ class UncertainReaderGenPredictor(Predictor):
             AnyNode(parent=stats_node, name=f"{k}", **stats_dict)
 
             window_variable_node = Node(name=f"{k}", parent=window_stats_node)
-
 
             for n in self._sliding_windows:
                 window_node = Node(name=f"{n}", parent=window_variable_node)
@@ -692,7 +695,7 @@ class UncertainReaderGenPredictor(Predictor):
                     max = numpy.amax(v_array)
                     min = numpy.amax(v_array)
                     AnyNode(parent=window_node, position=i, mean=mean, median=median, variance=variance, std=std,
-                            max=max, min=min)
+                            max=max, min=min, story_id=story_id)
 
     def _calc_state_based_suspense(self, root, type="generated"):
         # Use to keep results
