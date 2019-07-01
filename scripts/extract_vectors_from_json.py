@@ -33,14 +33,13 @@ parser.add_argument("--no-pca", default=False, action="store_true" , help="Don't
 parser.add_argument("--dont-save-csv", default=False, action="store_true" , help="Don't save summary fields to csv.")
 parser.add_argument('--gpus', default=4, type=int, help="GPUs")
 
+args = parser.parse_args()
 
 def ensure_dir(file_path):
     directory = os.path.dirname(file_path)
     if not os.path.exists(directory):
         print(f"Create directory: {directory}")
         os.makedirs(directory)
-
-args = parser.parse_args()
 
 def train_kmeans(x, k, niter, ngpu):
     "Runs kmeans on one or several GPUs"
@@ -233,7 +232,7 @@ def extract_json_stats(args):
         csv_df = original_df[metadata_fields + csv_columns]
         csv_df = csv_df.compute(scheduler='processes')
         print(csv_df)
-        csv_df.to_csv(f'{args["output"]}.csv')
+        csv_df.to_csv(f'{args["output"]}.csv.xz')
 
 def extract_rows(args, metadata_fields, vector_fields, max_num_stories):
     index_counter = 0
