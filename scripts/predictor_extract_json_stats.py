@@ -35,7 +35,6 @@ def extract_json_stats(args):
     with jsonlines.open(args['source_json']) as reader:
         for i, obj in tqdm(enumerate(reader)):
 
-            print(obj.keys())
             children = obj["children"]
             for child in children:
 

@@ -85,7 +85,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.only_annotation_stories = False
 
         self.levels_to_rollout = 1
-        self.generate_per_branch = 25
+        self.generate_per_branch = 5
         self.sample_per_level_branch = 0
 
         self.max_leaves_to_keep_per_branch = 0
@@ -308,16 +308,19 @@ class UncertainReaderGenPredictor(Predictor):
             story_id = instance["metadata"]["story_id"]
             sentence_ids = instance["metadata"]["sentence_ids"]
             sentence_nums = instance["metadata"]["sentence_nums"]
+            story_text = instance["metadata"]["text"]
 
             if position >= len(sentence_ids):
                 continue
 
             sentence_id = sentence_ids[position]
             sentence_num = sentence_nums[position]
+            sentence_text = story_text[position]
 
             position_node = AnyNode(name=f"{position}", story_id=story_id,
                                     sentence_id=sentence_id,
                                     sentence_num=sentence_num,
+                                    sentence_text=sentence_text,
                                     parent=per_sentence)
 
             correct_futures = self.create_correct_futures(embedded_text_mask, encoded_story, position, text,
