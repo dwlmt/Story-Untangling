@@ -85,8 +85,8 @@ class UncertainReaderGenPredictor(Predictor):
         self.only_annotation_stories = False
 
         self.levels_to_rollout = 1
-        self.generate_per_branch = 5
-        self.sample_per_level_branch = 0
+        self.generate_per_branch = 25
+        self.sample_per_level_branch = 25
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
@@ -104,7 +104,6 @@ class UncertainReaderGenPredictor(Predictor):
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
-
         self._sliding_windows = [1, 3, 5, 7]
         self._generation_sampling_temperature = 1.0
         self._discrimination_temperature = 1.0
@@ -114,7 +113,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.embedder._top_layer_only = True
 
         self.dataset_reader = dataset_reader
-        self.dataset_reader.story_chunking = 150  # Allow bigger batching for sampling.
+        self.dataset_reader._story_chunking = 150  # Allow bigger batching for sampling.
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
@@ -727,15 +726,18 @@ class UncertainReaderGenPredictor(Predictor):
             if len(nodes_gold) > 0:
                 gold = nodes_gold[0]
 
-                if hasattr(gold, "parent_l1_distance"):
-                    surprise_l1_stat = gold.parent_l1_distance
+
+                if hasattr(gold, "parent_distance_l1"):
+                    surprise_l1_stat = gold.parent_distance_l1.cpu().item()
+                    print("L1 surprise distance", surprise_l1_stat)
                     surprise_l1_culm += surprise_l1_stat
                     metrics_dict[f"{type}_surprise_l1_{i}"] = surprise_l1_stat
 
-                if hasattr(gold, "parent_l2_distance"):
-                    surprise_l2_stat = gold.parent_l2_distance
+                if hasattr(gold, "parent_distance_l2"):
+                    surprise_l2_stat = gold.parent_distance_l2.cpu().item()
                     surprise_l2_culm += surprise_l2_stat
                     metrics_dict[f"{type}_surprise_l2_{i}"] = surprise_l2_stat
+                    print("L2 surprise distance", surprise_l2_stat)
 
             steps_counter += 1
 
@@ -764,8 +766,8 @@ class UncertainReaderGenPredictor(Predictor):
         metrics_dict[f"{type}_suspense_l1"] = suspense_l1_culm
         metrics_dict[f"{type}_suspense_l2"] = suspense_l2_culm
 
-        metrics_dict[f"{type}_surprise_l1"] = suspense_l1_culm
-        metrics_dict[f"{type}_surprise_l2"] = suspense_l2_culm
+        metrics_dict[f"{type}_surprise_l1"] = surprise_l1_culm
+        metrics_dict[f"{type}_surprise_l2"] = surprise_l2_culm
 
         metrics_dict["steps"] = steps_counter
         return metrics_dict
