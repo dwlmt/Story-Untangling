@@ -18,6 +18,7 @@ import numpy as np
 import plotly.io as pio
 import numpy as np
 import pandas as pd
+import colorlover as cl
 
 py.init_notebook_mode(connected=True)
 
@@ -30,7 +31,8 @@ parser.add_argument('--position-stats', required=True, type=str, help="CSV of th
 parser.add_argument('--window-stats', required=True, type=str, help="CSV of the window stats.")
 parser.add_argument('--vector-stats', required=True, type=str, help="CSV containing the vector output.")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument('--max-plot-points', default=20000, type=int, help="Max number of scatter points.")
+parser.add_argument('--max-plot-points', default=50000, type=int, help="Max number of scatter points.")
+parser.add_argument("--window-plots", default=False, action="store_true" , help="Plot sliding windows as well as the raw position data.")
 
 args = parser.parse_args()
 
@@ -60,11 +62,10 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
 
 def analyse_vector_stats(args):
 
-    #create_cluster_examples(args)
-
+    create_cluster_examples(args)
     create_cluster_scatters(args)
 
-    #create_story_clusters(args)
+    create_story_plots(args)
 
 
 def create_cluster_examples(args):
@@ -108,6 +109,7 @@ def create_cluster_examples(args):
 
 
 def create_cluster_scatters(args):
+
     vector_df = pd.read_csv(args["vector_stats"])
     ensure_dir(f"{args['output_dir']}/cluster_scatters/")
 
@@ -148,7 +150,20 @@ def create_cluster_scatters(args):
 
                     data = []
 
+                    colors = cl.scales['5']['div']['Spectral']
+
+                    unique_column_values = field_df[cat_field].unique()
+                    num_colors =  len(unique_column_values)
+                    num_colors = max(num_colors, max([int(v) for v in unique_column_values]))
+                    color_scale = cl.interp(colors,min(num_colors + 1,256))
+
                     for name, group in field_df.groupby([cat_field]):
+
+                        if int(name) == -1:
+                            series_color = 'lightslategrey'
+                        else:
+                            series_color = color_scale[int(name) % 255]
+
                         trace = go.Scattergl(
                             x=group['x'],
                             y=group['y'],
@@ -156,8 +171,8 @@ def create_cluster_scatters(args):
                             mode='markers',
                             name=name,
                             marker=dict(
-                                #color='#FFBAD2',
-                                line=dict(width=1)
+                                line=dict(width=1),
+                                color=[series_color] * len(group['x'])
                             )
                         )
                         data.append(trace)
@@ -165,9 +180,98 @@ def create_cluster_scatters(args):
 
                     plotly.offline.plot(data, filename=f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.html", auto_open=False)
 
-def create_story_clusters(args):
-    vector_df = pd.read_csv(args["vector_stats"])
-    ensure_dir(f"{args['output_dir']}/story_clusters/")
+def create_story_plots(args):
+    ensure_dir(f"{args['output_dir']}/prediction_plots/")
+
+    position_df = pd.read_csv(args["position_stats"])
+
+    prediction_columns = ['generated_surprise_l1', 'generated_surprise_l2',
+    'generated_suspense_entropy','generated_suspense_l1', 'generated_suspense_l2',
+    'corpus_suspense_l1', 'corpus_surprise_l2', 'corpus_suspense_entropy',
+    'corpus_suspense_l1', 'corpus_suspense_l2']
+
+    window_df = pd.read_csv(args["window_stats"])
+    window_sizes = window_df["window_size"].unique()
+    window_sizes = [w for w in window_sizes if w > 1]
+    measure_names = window_df["window_name"].unique()
+
+    for name, group in position_df.groupby("story_id"):
+
+        group_df = group.sort_values(by=['sentence_num'])
+
+        story_win_df = window_df.loc[window_df['story_id'] == name]
+
+        print(group_df[prediction_columns])
+
+        for y_axis_group in ['l1','l2','entropy']:
+
+            data = []
+
+            seen_surprise = False
+            for i, pred in enumerate(prediction_columns):
+
+                if y_axis_group not in pred:
+                    continue
+
+                if pred not in group_df.columns:
+                    continue
+
+                # Don't plot both corpus and generation surprise as they are the same.
+                if "surprise" in pred:
+
+                    if seen_surprise:
+                        continue
+                    seen_surprise = True
+
+
+                series_df = group_df[['sentence_text','sentence_num',pred]]
+
+                trace = go.Scatter(
+                    x=series_df['sentence_num'],
+                    y=series_df[pred],
+                    text=series_df["sentence_text"],
+                    mode='lines+markers',
+                    name=f'{pred}',
+                )
+                data.append(trace)
+
+                if args['window_plots']:
+                    if pred in measure_names:
+                        for window in window_sizes:
+
+                            win_df = story_win_df.loc[story_win_df['window_size'] == window]
+                            win_df = win_df.loc[win_df['window_name'] == pred]
+                            win_df = win_df.sort_values(by="position")
+
+                            trace = go.Scatter(
+                                x=win_df['position'],
+                                y=win_df['mean'],
+                                mode='lines+markers',
+                                name=f'{pred} - win {window}',
+                                line=dict(
+                                    dash='dot')
+                            )
+                            data.append(trace)
+
+            layout = go.Layout(
+                title=f'Story {name} Prediction Plot',
+                hovermode='closest',
+                xaxis=dict(
+                    title='Position',
+                ),
+                yaxis=dict(
+                    title=f'{y_axis_group}',
+                ),
+                showlegend=True
+            )
+
+
+            fig = go.Figure(data=data, layout=layout)
+
+            plotly.offline.plot(fig, filename=f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html",
+                                auto_open=False)
+
+
 
 
 
