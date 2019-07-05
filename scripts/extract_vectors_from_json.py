@@ -230,7 +230,7 @@ def extract_json_stats(args):
     original_df.to_parquet(f'{args["output"]}', compression='snappy')
     if not args["dont_save_csv"]:
         csv_df = original_df[metadata_fields + csv_columns]
-        csv_df = csv_df.compute(scheduler='processes')
+        csv_df = csv_df.compute()
         print(csv_df)
         csv_df.to_csv(f'{args["output"]}.csv.xz')
 
