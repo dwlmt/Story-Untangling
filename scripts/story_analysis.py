@@ -31,8 +31,11 @@ parser.add_argument('--position-stats', required=True, type=str, help="CSV of th
 parser.add_argument('--window-stats', required=True, type=str, help="CSV of the window stats.")
 parser.add_argument('--vector-stats', required=True, type=str, help="CSV containing the vector output.")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument('--max-plot-points', default=50000, type=int, help="Max number of scatter points.")
+parser.add_argument('--max-plot-points', default=25000, type=int, help="Max number of scatter points.")
+parser.add_argument('--cluster-example-num', default=100, type=int, help="Max number of examples to select for each cluster category.")
 parser.add_argument("--window-plots", default=False, action="store_true" , help="Plot sliding windows as well as the raw position data.")
+parser.add_argument("--no-html-plots", default=False, action="store_true" , help="Don't save plots to HTML")
+parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
 
 args = parser.parse_args()
 
@@ -103,7 +106,7 @@ def create_cluster_examples(args):
                                                columns=product_columns)
             field_df[product_columns] = split_product_codes
 
-        group = field_df.groupby(field).apply(lambda x: x.sample(min(len(x), 50))).reset_index(drop=True)
+        group = field_df.groupby(field).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
 
         group.to_csv(f"{args['output_dir']}/cluster_examples/{field}.csv")
 
@@ -177,8 +180,15 @@ def create_cluster_scatters(args):
                         )
                         data.append(trace)
 
+                    layout = dict()
 
-                    plotly.offline.plot(data, filename=f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.html", auto_open=False)
+                    fig = dict(data=data, layout=layout)
+
+                    if not args["no_html_plots"]:
+                        plotly.offline.plot(fig, filename=f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.html", auto_open=False)
+
+                    if not args["no_pdf_plots"]:
+                        pio.write_image(fig, f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.pdf")
 
 def create_story_plots(args):
     ensure_dir(f"{args['output_dir']}/prediction_plots/")
@@ -194,6 +204,8 @@ def create_story_plots(args):
     window_sizes = window_df["window_size"].unique()
     window_sizes = [w for w in window_sizes if w > 1]
     measure_names = window_df["window_name"].unique()
+
+    vector_df = pd.read_csv(args["vector_stats"])
 
     for name, group in position_df.groupby("story_id"):
 
@@ -224,12 +236,20 @@ def create_story_plots(args):
                     seen_surprise = True
 
 
-                series_df = group_df[['sentence_text','sentence_num',pred]]
+                series_df = group_df[['sentence_text','sentence_num','sentence_id',pred]]
+
+                text = [f"<b>{t}</b>" for t in series_df["sentence_text"]]
+
+
+                vector_row_df = vector_df.merge(series_df, left_on='sentence_id', right_on='sentence_id')
+                for field in sentence_cluster_fields + story_cluster_fields:
+                    if field in vector_row_df.columns:
+                        text = [t + f"<br>{field}: {f}" for (t, f) in zip(text, vector_row_df[field])]
 
                 trace = go.Scatter(
                     x=series_df['sentence_num'],
                     y=series_df[pred],
-                    text=series_df["sentence_text"],
+                    text=text,
                     mode='lines+markers',
                     name=f'{pred}',
                 )
@@ -268,8 +288,11 @@ def create_story_plots(args):
 
             fig = go.Figure(data=data, layout=layout)
 
-            plotly.offline.plot(fig, filename=f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html",
-                                auto_open=False)
+            if not args["no_html_plots"]:
+                plotly.offline.plot(fig, filename=f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html",
+                                    auto_open=False)
+            if not args["no_pdf_plots"]:
+                pio.write_image(fig, f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.pdf")
 
 
 
