@@ -147,14 +147,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         tensors = self.block_memory()
         self.unblock_memory(tensors)
 
-        loop = asyncio.get_event_loop()
-        dataset_db = loop.run_until_complete(
-            create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
-                              file_path=file_path, use_existing_database=self._use_existing_cached_db,
-                              ner_model=self._ner_model, coreference_model=self._coreference_model,
-                              cuda_device=self._cuda_device))
-
-        self._dataset_db = dataset_db
+        dataset_db = self.create_cached_dataset(file_path)
 
         with dataset.connect(dataset_db, engine_kwargs={"pool_recycle": 3600}) as db:
 
@@ -179,10 +172,20 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 story_id = story["id"]
 
                 # Id will be the same as the sentence num as they are inserted as a batch in sequence.
-                sentences = [s for s in db.query(
-                    f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
-                    f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
-                    f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true and sentence.sentence_len >= {self._min_sequence_length} ORDER BY id')]
+
+                if "sentence_sentiment" in db:
+
+                    sentences = [s for s in db.query(
+                        f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
+                        f' INNER JOIN sentence_sentiment on sentence.id = sentence_sentiment.sentence_id'
+                        f' WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
+                        f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true and sentence.sentence_len >= {self._min_sequence_length} ORDER BY id')]
+                else:
+
+                    sentences = [s for s in db.query(
+                        f'SELECT * FROM sentence INNER JOIN sentence_lang on sentence.id = sentence_lang.sentence_id '
+                        f'WHERE sentence.story_id = {story_id} and sentence_lang.lang = "en" '
+                        f'and sentence_lang.nonsense = false and sentence_lang.ascii_chars=true and sentence.sentence_len >= {self._min_sequence_length} ORDER BY id')]
 
                 if sentences is None or len(sentences) == 0:
                     print(f"Skip story {story_id} with no valid sentences")
@@ -199,6 +202,17 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         disgarded_tokens = self._tried_tokens.difference(self._allowed_tokens)
         print(f"Disgarded tokens, num {len(disgarded_tokens)}: {disgarded_tokens}")
+
+    def create_cached_dataset(self, file_path=None):
+
+        loop = asyncio.get_event_loop()
+        dataset_db = loop.run_until_complete(
+            create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
+                              file_path=file_path, use_existing_database=self._use_existing_cached_db,
+                              ner_model=self._ner_model, coreference_model=self._coreference_model,
+                              cuda_device=self._cuda_device))
+        self._dataset_db = dataset_db
+        return dataset_db
 
     def unblock_memory(self, tensors):
         if tensors is None or len(tensors) == 0:
@@ -286,6 +300,10 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         story_text_original = []
         story_text_fields = []
         sentence_lengths = []
+
+        vader_sentiment = []
+        textblob_polarity = []
+        textblob_subjectivity = []
 
         def tokenize(sentence, tokenizer, indexer):
             if isinstance(sentence, str):
@@ -385,6 +403,13 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             story_text_original.append(sentence_text)
             story_text_fields.append(sentence_text_field)
 
+
+            if "vader_sentiment" in sentence:
+                vader_sentiment.append(sentence["vader_sentiment"])
+            if "textblob_polarity" in sentence:
+                textblob_polarity.append(sentence["textblob_polarity"])
+                textblob_subjectivity.append(sentence["textblob_subjectivity"])
+
         if len(story_text_fields) < self._story_chunking:
             text_field = TextField([], self._token_indexers).empty_field()
             story_text_fields.extend([text_field] * (self._story_chunking - len(story_text_fields)))
@@ -396,11 +421,20 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             story_id = story["id"]
             sentence_num = story["sentence_num"]
 
+
         metadata = {"story_id": story_id, "sentence_ids": [s["id"] for s in sentences],
                     "sentence_nums": [s["sentence_num"] for s in sentences],
                     "number_of_sentences": sentence_num}
         metadata["text"] = story_text_original
         metadata["sentence_lengths"] = sentence_lengths
+
+        if len(vader_sentiment) > 0:
+            metadata["vader_sentiment"] = vader_sentiment
+
+        if len(textblob_polarity) > 0:
+            metadata["textblob_polarity"] = textblob_polarity
+            metadata["textblob_subjectivity"] = textblob_subjectivity
+
 
         if batch_num is not None:
             metadata["batch_num"] = batch_num

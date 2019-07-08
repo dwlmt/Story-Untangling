@@ -13,8 +13,12 @@ from allennlp.models import Model
 from allennlp.predictors import Predictor
 from anytree import AnyNode, Node, PreOrderIter, LevelOrderGroupIter
 from anytree.exporter import DictExporter
+from nltk.sentiment import SentimentIntensityAnalyzer
+from textblob import TextBlob
 from torch.distributions import Categorical
 from torch.nn import Softmax, PairwiseDistance
+
+from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
 
 full_stop_token = 239
 exporter = DictExporter(dictcls=OrderedDict, attriter=sorted)
@@ -80,11 +84,13 @@ class UncertainReaderGenPredictor(Predictor):
 
         story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_mapping.csv"
 
+        #dataset_reader._dataset_path = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/base/"
+
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
 
-        self.levels_to_rollout = 1
+        self.levels_to_rollout = 2
         self.generate_per_branch = 25
         self.sample_per_level_branch = 25
 
@@ -99,12 +105,16 @@ class UncertainReaderGenPredictor(Predictor):
         self.max_generated_sentence_length  = 150
         self.context_sentence_to_generate_from = 8
 
+        self.sentiment_weighting = 1.0
+        self.sentiment_positive = 1.0
+        self.sentiment_negative = 2.0
+
         self._remove_sentence_output = True
 
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
-        self._sliding_windows = [1, 3, 5, 7]
+        self._sliding_windows = [3, 5]
         self._generation_sampling_temperature = 1.0
         self._discrimination_temperature = 1.0
         self._cosine = True
@@ -113,7 +123,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.embedder._top_layer_only = True
 
         self.dataset_reader = dataset_reader
-        self.dataset_reader._story_chunking = 150  # Allow bigger batching for sampling.
+        self.dataset_reader._story_chunking = 100  # Allow bigger batching for sampling.
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
@@ -127,7 +137,10 @@ class UncertainReaderGenPredictor(Predictor):
         self._l2 = PairwiseDistance(p=2.0)
 
 
+
     def predict_instance(self, instance: Instance) -> JsonDict:
+
+        print("Predict instance")
 
         story_id = instance["metadata"]["story_id"]
         if story_id not in self.story_ids_to_predict and self.only_annotation_stories:
@@ -164,6 +177,28 @@ class UncertainReaderGenPredictor(Predictor):
         root_as_dict = exporter.export(root)
         print(root_as_dict)
         return sanitize(root_as_dict)
+
+    def normalize_sentiment(self, textblob_polarity, vader_sentiment):
+        merged_sentiment = []
+        for x, y in zip(vader_sentiment, textblob_polarity):
+
+
+            if x > 0.0:
+                x *= self.sentiment_positive
+            else:
+                x *= self.sentiment_negative
+
+            if y > 0.0:
+                y *= self.sentiment_positive
+            else:
+                y *= self.sentiment_negative
+
+            x = abs(x)
+            y = abs(y)
+
+            merged_sentiment.append(max(x, y) * self.sentiment_weighting + 1.0)
+
+        return merged_sentiment
 
     def _calculate_disc_probabilities(self, root):
         ''' Iterate over the tree and calculate the probabilities for each path using the discriminate loss function.
@@ -233,7 +268,6 @@ class UncertainReaderGenPredictor(Predictor):
 
             cutoff_prob = min(cutoff_prob, probability_mass_cutoff)
 
-
         return cutoff_prob
 
     def calculate_embedding_probs_and_logits(self, child_list, root):
@@ -285,6 +319,21 @@ class UncertainReaderGenPredictor(Predictor):
     def _sample_tree(self, instance, outputs):
         ''' Create a hierarchy of possibilities by generating sentences in a tree structure.
         '''
+
+        metadata = instance["metadata"]
+        merged_sentiment = None
+        if "vader_sentiment" in metadata:
+            vader_sentiment = metadata["vader_sentiment"]
+            textblob_polarity = metadata["textblob_polarity"]
+
+            merged_sentiment = self.normalize_sentiment(textblob_polarity, vader_sentiment)
+        else:
+            sentiment_output = [self._calc_simple_sentiment(t) for t in metadata["text"]]
+            merged_sentiment = [x[0] for x in sentiment_output]
+            print(merged_sentiment)
+            vader_sentiment = [x[1] for x in sentiment_output]
+            textblob_polarity = [x[2] for x in sentiment_output]
+
         embedded_text_tensor = outputs["embedded_text_tensor"]
         embedded_text_tensor = torch.from_numpy(embedded_text_tensor).cpu()
         embedded_text_mask = torch.from_numpy(outputs["masks"]).cpu().long()
@@ -316,15 +365,21 @@ class UncertainReaderGenPredictor(Predictor):
             sentence_num = sentence_nums[position]
             sentence_text = story_text[position]
 
+            sentiment = merged_sentiment[position]
+            vader_sent = vader_sentiment[position]
+            textblob_sent = textblob_polarity[position]
+
             position_node = AnyNode(name=f"{position}", story_id=story_id,
                                     sentence_id=sentence_id,
                                     sentence_num=sentence_num,
                                     sentence_text=sentence_text,
+                                    sentiment=sentiment,
+                                    vader_sentiment=vader_sent,
+                                    textblob_sentiment=textblob_sent,
                                     parent=per_sentence)
 
             correct_futures = self.create_correct_futures(embedded_text_mask, encoded_story, position, text,
-                                                          text_field, story_id, sentence_ids, sentence_nums)
-
+                                                          text_field, story_id, sentence_ids, sentence_nums, merged_sentiment)
 
 
             if len(correct_futures) > 0:
@@ -525,7 +580,7 @@ class UncertainReaderGenPredictor(Predictor):
             return base_correct
 
     def create_correct_futures(self, embedded_text_mask, encoded_stories, position, text, text_field, story_id,
-                               sentence_ids, sentence_nums):
+                               sentence_ids, sentence_nums, sentiment):
         correct_futures = []
         # Put the correct representations into the sentences at the given point.
         parent_story_tensor = None
@@ -551,6 +606,7 @@ class UncertainReaderGenPredictor(Predictor):
                                      sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
                                                     text_as_list if
                                                     t in self.indexer.decoder],
+                                     sentiment=sentiment[position + i],
                                      sentence_length=len(text_as_list))
 
             if parent_story_tensor is not None:
@@ -610,21 +666,52 @@ class UncertainReaderGenPredictor(Predictor):
 
             sentence_length = len(token_ids)
             if not sentence_length < self.min_sentence_length:
+
+                sentence_text = [self.indexer.decoder[t].replace("</w>", "") for t in
+                                                      token_ids if t in self.indexer.decoder]
+
+                sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
+
                 created_node = AnyNode(gold=False, story_tensor=encoded_story.cpu().detach(),
                                        sentence_tensor=encoded_sentence.cpu().detach(),
                                        token_ids=token_ids,
                                        level=level,
                                        embedded_text_tensor=embedded_text_tensor.cpu().detach(),
                                        embedded_text_mask=embedded_text_mask.cpu().detach(),
-                                       sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                                      token_ids if t in self.indexer.decoder],
+                                       sentence_text=sentence_text,
                                        sentence_length=sentence_length, type="corpus",
                                        story_id=story_id, sentence_id=sentence_id, sentence_num=sentence_num,
+                                       sentiment=sentiment,
+                                       vader_sentiment=vader,
+                                       textblob_sentiment=textblob,
                                        parent=parent)
 
                 return created_node
         return None
 
+    def _calc_simple_sentiment(self, sentence_text):
+
+        if not isinstance(sentence_text, str):
+            sentence_text = " ".join(sentence_text)
+        analyzer = SentimentIntensityAnalyzer()
+        x = analyzer.polarity_scores("sentence_text")['compound']
+
+        text_blob = TextBlob(sentence_text)
+        y = text_blob.sentiment.polarity
+
+        if x > 0.0:
+            x *= self.sentiment_positive
+        else:
+            x *= self.sentiment_negative
+
+        if y > 0.0:
+            y *= self.sentiment_positive
+        else:
+            y *= self.sentiment_negative
+
+        sentiment = max(abs(x), abs(y)) * self.sentiment_weighting + 1.0
+        print(sentence_text, sentiment)
+        return sentiment, x, y
 
     def _calc_summary_stats(self, root):
 
@@ -636,12 +723,18 @@ class UncertainReaderGenPredictor(Predictor):
             type = "generated"
             stats_source_dict = {**stats_source_dict, **{f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
                                                          f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
+                                                         f"{type}_suspense_l1_state": [], f"{type}_suspense_l2_state": [],
+                                                         f"{type}_surprise_l1_state": [], f"{type}_surprise_l2_state": [],
                                                          f"{type}_suspense_entropy": []}}
 
         if self.sample_per_level_branch > 0:
             type = "corpus"
             stats_source_dict = {**stats_source_dict, **{f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
                                                          f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
+                                                         f"{type}_suspense_l1_state": [],
+                                                         f"{type}_suspense_l2_state": [],
+                                                         f"{type}_surprise_l1_state": [],
+                                                         f"{type}_surprise_l2_state": [],
                                                          f"{type}_suspense_entropy": []}}
 
 
@@ -678,7 +771,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             AnyNode(parent=stats_node, name=f"{k}", **stats_dict)
 
-            window_variable_node = Node(name=f"{k}", parent=window_stats_node)
+            window_variable_node = Node(name=f"{k}", parent=window_stats_node, type="window")
 
             for n in self._sliding_windows:
                 window_node = Node(name=f"{n}", parent=window_variable_node)
@@ -689,15 +782,24 @@ class UncertainReaderGenPredictor(Predictor):
                     if len(window) == 0:
                         continue
 
-                    v_array = numpy.asarray(window)
-                    mean = numpy.mean(v_array)
-                    median = numpy.median(v_array)
-                    variance = numpy.var(v_array)
+                    win_v_array = numpy.asarray(window)
+                    mean = numpy.mean(win_v_array)
+                    median = numpy.median(win_v_array)
+                    variance = numpy.var(win_v_array)
                     std = variance ** (.5)
-                    max = numpy.amax(v_array)
-                    min = numpy.amax(v_array)
+                    max = numpy.amax(win_v_array)
+                    min = numpy.amax(win_v_array)
                     AnyNode(parent=window_node, position=i, mean=mean, median=median, variance=variance, std=std,
                             max=max, min=min, story_id=story_id)
+
+            window_node = Node(name=f"{n}", parent=window_variable_node, type="exponential")
+
+            exponential = SimpleExpSmoothing(v_array + 1e-10).fit()
+            for i, value in enumerate(exponential.fittedvalues):
+                AnyNode(parent=window_node, position=i, mean=value)
+
+            print(window_node)
+
 
     def _calc_state_based_suspense(self, root, type="generated"):
         # Use to keep results
@@ -707,6 +809,11 @@ class UncertainReaderGenPredictor(Predictor):
         suspense_l2_culm = 0.0
         surprise_l1_culm = 0.0
         surprise_l2_culm = 0.0
+
+        suspense_l1_culm_state = 0.0
+        suspense_l2_culm_state = 0.0
+        surprise_l1_culm_state = 0.0
+        surprise_l2_culm_state = 0.0
 
         entropy = 0.0
 
@@ -723,25 +830,41 @@ class UncertainReaderGenPredictor(Predictor):
             # Exclude gold for surprise as already calculated in the distances.
             nodes_gold = [n for n in node_group if n.gold == True]
 
+            gold_sentiment = 1.0
+
             if len(nodes_gold) > 0:
                 gold = nodes_gold[0]
 
+                if hasattr(gold, "sentiment"):
+                    gold_sentiment = gold.sentiment
 
                 if hasattr(gold, "parent_distance_l1"):
                     surprise_l1_stat = gold.parent_distance_l1.cpu().item()
-                    print("L1 surprise distance", surprise_l1_stat)
+
                     surprise_l1_culm += surprise_l1_stat
                     metrics_dict[f"{type}_surprise_l1_{i}"] = surprise_l1_stat
 
+                    surprise_state = surprise_l1_stat * gold_sentiment
+                    surprise_l1_culm_state += surprise_state
+                    metrics_dict[f"{type}_surprise_l1_state_{i}"] = surprise_l1_stat
+
                 if hasattr(gold, "parent_distance_l2"):
+
                     surprise_l2_stat = gold.parent_distance_l2.cpu().item()
                     surprise_l2_culm += surprise_l2_stat
                     metrics_dict[f"{type}_surprise_l2_{i}"] = surprise_l2_stat
-                    print("L2 surprise distance", surprise_l2_stat)
+
+                    surprise_state = surprise_l2_stat * gold_sentiment
+                    surprise_l2_culm_state += surprise_state
+                    metrics_dict[f"{type}_surprise_l2_state_{i}"] = surprise_l2_stat
 
             steps_counter += 1
 
             probs = torch.stack([n.chain_prob for n in node_group]).to(self._device)
+
+            sentiments_list = [n.sentiment for n in node_group if hasattr(n,'sentiment')]
+            print(probs, sentiments_list)
+            sentiments = torch.tensor(sentiments_list).to(self._device)
 
             distribution = Categorical(probs)
 
@@ -749,16 +872,24 @@ class UncertainReaderGenPredictor(Predictor):
             metrics_dict[f"{type}_suspense_entropy_{i}"] = entropy
 
             parent_l1 = torch.stack([n.parent_distance_l1 for n in node_group]).to(self._device)
-
-            suspense_l1_stat = torch.squeeze(torch.sum((parent_l1 * probs), dim=-1)).cpu().item()
-            suspense_l1_culm += suspense_l1_stat
-            metrics_dict[f"{type}_suspense_l1_{i}"] = suspense_l1_stat
-
             parent_l2 = torch.stack([n.parent_distance_l2 for n in node_group]).to(self._device)
 
-            suspense_l2_stat = torch.squeeze(torch.sum((parent_l2 * probs), dim=-1)).cpu().item()
-            suspense_l2_culm += suspense_l2_stat
+            l1_probs = parent_l1 * probs
+            l2_probs = parent_l2 * probs
+            l1_probs_state = parent_l1 * sentiments * probs
+            l2_probs_state = parent_l2 * sentiments * probs
+
+            suspense_l1_culm, suspense_l1_stat = self._culm_stat(l1_probs, suspense_l1_culm)
+            metrics_dict[f"{type}_suspense_l1_{i}"] = suspense_l1_stat
+
+            suspense_l2_culm, suspense_l2_stat = self._culm_stat(l2_probs, suspense_l2_culm)
             metrics_dict[f"{type}_suspense_l2_{i}"] = suspense_l2_stat
+
+            suspense_l1_culm_state, suspense_l1_stat_state = self._culm_stat(l1_probs_state, suspense_l1_culm_state)
+            metrics_dict[f"{type}_suspense_l1_state_{i}"] = suspense_l1_stat_state
+
+            suspense_l2_culm_state, suspense_l2_stat_state = self._culm_stat(l2_probs_state, suspense_l2_culm_state)
+            metrics_dict[f"{type}_suspense_l2_state_{i}"] = suspense_l2_stat_state
 
         # Use the last value for the main suspense.
         metrics_dict[f"{type}_suspense_entropy"] = entropy
@@ -769,8 +900,21 @@ class UncertainReaderGenPredictor(Predictor):
         metrics_dict[f"{type}_surprise_l1"] = surprise_l1_culm
         metrics_dict[f"{type}_surprise_l2"] = surprise_l2_culm
 
+        metrics_dict[f"{type}_suspense_l1_state"] = suspense_l1_culm_state
+        metrics_dict[f"{type}_suspense_l2_state"] = suspense_l2_culm_state
+
+        metrics_dict[f"{type}_surprise_l1_state"] = surprise_l1_culm_state
+        metrics_dict[f"{type}_surprise_l2_state"] = surprise_l2_culm_state
+
         metrics_dict["steps"] = steps_counter
+
+        print(metrics_dict)
         return metrics_dict
+
+    def _culm_stat(self, probs, suspense_l1_culm):
+        suspense_l1_stat = torch.squeeze(torch.sum((probs), dim=-1)).cpu().item()
+        suspense_l1_culm += suspense_l1_stat
+        return suspense_l1_culm, suspense_l1_stat
 
     def _calc_chain_probs(self, root):
         ''' Recursively calculate chain probabilities down the network.
@@ -870,6 +1014,10 @@ class UncertainReaderGenPredictor(Predictor):
 
             indexed_tokens[position + level] = torch.tensor(gen_sentence_padded).long().to(self._device)
 
+            sentence_text = [self.indexer.decoder[t].replace("</w>", "") for t in gen_sentence if t in self.indexer.decoder]
+
+            sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
+
             created_node = AnyNode(gold=False,
                                    story_tensor=encoded_story.cpu().detach(),
                                    sentence_tensor=encoded_sentence.cpu().detach(),
@@ -878,9 +1026,11 @@ class UncertainReaderGenPredictor(Predictor):
                                    indexed_tokens=indexed_tokens.cpu().detach(),
                                    token_ids=gen_sentence,
                                    level=level,
-                                   sentence_text=[self.indexer.decoder[t].replace("</w>", "") for t in
-                                                  gen_sentence if t in self.indexer.decoder],
+                                   sentence_text=sentence_text,
                                    sentence_length=sentence_length, type="generated",
+                                   sentiment=sentiment,
+                                   vader_sentiment=vader,
+                                   textblob_sentiment=textblob,
                                    parent=parent)
             return created_node
 
