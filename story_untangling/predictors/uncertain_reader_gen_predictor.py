@@ -14,6 +14,8 @@ from allennlp.predictors import Predictor
 from anytree import AnyNode, Node, PreOrderIter, LevelOrderGroupIter
 from anytree.exporter import DictExporter
 from nltk.sentiment import SentimentIntensityAnalyzer
+from statsmodels.tsa.arima_model import ARIMA
+from statsmodels.tsa.holtwinters import Holt
 from textblob import TextBlob
 from torch.distributions import Categorical
 from torch.nn import Softmax, PairwiseDistance
@@ -90,7 +92,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
 
-        self.levels_to_rollout = 2
+        self.levels_to_rollout = 1
         self.generate_per_branch = 25
         self.sample_per_level_branch = 25
 
@@ -773,6 +775,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             window_variable_node = Node(name=f"{k}", parent=window_stats_node, type="window")
 
+            '''
             for n in self._sliding_windows:
                 window_node = Node(name=f"{n}", parent=window_variable_node)
                 windows = more_itertools.windowed(v, n)
@@ -791,14 +794,35 @@ class UncertainReaderGenPredictor(Predictor):
                     min = numpy.amax(win_v_array)
                     AnyNode(parent=window_node, position=i, mean=mean, median=median, variance=variance, std=std,
                             max=max, min=min, story_id=story_id)
+            '''
 
-            window_node = Node(name=f"{n}", parent=window_variable_node, type="exponential")
+            for o, mn in [((0,1,1),f"exp"), ((0,2,2),f"holt"),((0,0,1),f"avg"),((0,0,1),f"avg_2"),((1,0,0),f"reg"),
+                          ((2,0,0),f"reg_2"),((1,1,2),f"arima")]:
+                try:
+                    pred = ARIMA(v_array, order=o).fit()
+                    predictions = pred.predict(start=0, end=len(v_array))
+                    print(predictions)
+                    window_node = Node(name=f"{mn}", parent=window_variable_node)
+                    for i, value in enumerate(predictions):
+                        AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+                except:
+                    pass
 
-            exponential = SimpleExpSmoothing(v_array + 1e-10).fit()
+
+            '''
+            print(v_array)
+            window_node = Node(name="exp", parent=window_variable_node)
+            exponential = SimpleExpSmoothing(v_array).fit()
             for i, value in enumerate(exponential.fittedvalues):
-                AnyNode(parent=window_node, position=i, mean=value)
+                AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
 
-            print(window_node)
+            window_node = Node(name="holt", parent=window_variable_node)
+            holt = Holt(v_array + 1e-10).fit()
+
+            for i, value in enumerate(holt.fittedvalues):
+                print("Holt",i, value)
+                AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+            '''
 
 
     def _calc_state_based_suspense(self, root, type="generated"):
@@ -1012,7 +1036,7 @@ class UncertainReaderGenPredictor(Predictor):
                 torch.squeeze(gen_sentence_padded, dim=0), position + level)
             sentence_length = len(gen_sentence)
 
-            indexed_tokens[position + level] = torch.tensor(gen_sentence_padded).long().to(self._device)
+            indexed_tokens[position + level] = torch.tensor(gen_sentence_padded).detach().clone().long().to(self._device)
 
             sentence_text = [self.indexer.decoder[t].replace("</w>", "") for t in gen_sentence if t in self.indexer.decoder]
 
