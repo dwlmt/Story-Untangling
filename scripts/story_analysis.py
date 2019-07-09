@@ -2,27 +2,27 @@
 
 '''
 import argparse
-import ast
 import os
-import re
 
-import pandas as pd
-
-import cufflinks as cf
-import plotly.graph_objs as go
-import plotly.offline as py
-import plotly.figure_factory as ff
-import plotly
-import numpy as np
-
-import plotly.io as pio
-import numpy as np
-import pandas as pd
 import colorlover as cl
+import pandas as pd
+import plotly
+import plotly.graph_objs as go
+import plotly.io as pio
+import plotly.offline as py
 
 py.init_notebook_mode(connected=True)
 
 plotly.io.orca.config.save
+
+# These are the default plotly colours.
+colors = ['rgb(31, 119, 180)', 'rgb(255, 127, 14)',
+                     'rgb(44, 160, 44)', 'rgb(214, 39, 40)',
+                     'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
+                     'rgb(227, 119, 194)', 'rgb(127, 127, 127)',
+                     'rgb(188, 189, 34)', 'rgb(23, 190, 207)']
+
+shapes = ["circle", "square", "diamond","cross", "x","triangle-up", "triangle-down", "triangle-left", "triangle-right","pentagon","hexagon","octagon",'hexagram',"bowtie","hourglass"]
 
 parser = argparse.ArgumentParser(
     description='Extract JSON vectors and perform dimensionality reduction.')
@@ -31,9 +31,11 @@ parser.add_argument('--position-stats', required=True, type=str, help="CSV of th
 parser.add_argument('--window-stats', required=True, type=str, help="CSV of the window stats.")
 parser.add_argument('--vector-stats', required=True, type=str, help="CSV containing the vector output.")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument('--max-plot-points', default=25000, type=int, help="Max number of scatter points.")
+parser.add_argument('--smoothing', required=False, type=str, nargs='*', default=['exp','holt','avg','avg_2','reg','reg_2','arima'], help="CSV containing the vector output.")
+parser.add_argument('--max-plot-points', default=50000, type=int, help="Max number of scatter points.")
 parser.add_argument('--cluster-example-num', default=100, type=int, help="Max number of examples to select for each cluster category.")
-parser.add_argument("--window-plots", default=False, action="store_true" , help="Plot sliding windows as well as the raw position data.")
+parser.add_argument("--smoothing-plots", default=False, action="store_true" , help="Plot sliding windows and smoothong as well as the raw position data.")
+parser.add_argument("--exponential-plots", default=False, action="store_true" , help="Plot exponential fit.")
 parser.add_argument("--no-html-plots", default=False, action="store_true" , help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
 
@@ -62,13 +64,13 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
                         'story_tensor_euclidean_umap_48_cluster_label',
                         'story_tensor_pca_48_cluster_label']
 
-
 def analyse_vector_stats(args):
 
-    create_cluster_examples(args)
-    create_cluster_scatters(args)
+    #create_sentiment_plots(args)
+    #create_story_plots(args)
 
-    create_story_plots(args)
+    #create_cluster_examples(args)
+    create_cluster_scatters(args)
 
 
 def create_cluster_examples(args):
@@ -77,7 +79,6 @@ def create_cluster_examples(args):
     ensure_dir(f"{args['output_dir']}/cluster_examples/")
     for field in sentence_cluster_fields + story_cluster_fields:
         print(f"Create cluster examples for: {field}")
-
 
         fields_to_extract = [field]
         if "kmeans" in field:
@@ -175,7 +176,8 @@ def create_cluster_scatters(args):
                             name=name,
                             marker=dict(
                                 line=dict(width=1),
-                                color=[series_color] * len(group['x'])
+                                color=[series_color] * len(group['x']),
+                                symbol=shapes[int(name) % len(shapes)]
                             )
                         )
                         data.append(trace)
@@ -190,19 +192,83 @@ def create_cluster_scatters(args):
                     if not args["no_pdf_plots"]:
                         pio.write_image(fig, f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.pdf")
 
+def create_sentiment_plots(args):
+
+    ensure_dir(f"{args['output_dir']}/sentiment_plots/")
+
+    position_df = pd.read_csv(args["position_stats"])
+
+    for name, group in position_df.groupby("story_id"):
+
+        group_df = group.sort_values(by=['sentence_num'])
+
+        data = []
+
+        color_idx = 0
+        for i, pred in enumerate(['textblob_sentiment','vader_sentiment','sentiment']):
+
+            # Don't plot both corpus and generation surprise as they are the same.
+            if "surprise" in pred:
+                if not "generated" in pred:
+                    continue
+
+            text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
+
+            trace = go.Scatter(
+                x=group_df['sentence_num'],
+                y=group_df[pred],
+                text=text,
+                mode='lines+markers',
+                line=dict(
+                    color=colors[color_idx]
+                ),
+                name=f'{pred}'.replace('sentiment','sentiment_weighting'),
+            )
+            data.append(trace)
+
+            color_idx += 1
+
+
+        layout = go.Layout(
+            title=f'Story {name} Sentiment Plot',
+            hovermode='closest',
+            xaxis=dict(
+                title='Position',
+            ),
+            yaxis=dict(
+                title='Sentiment',
+            ),
+            showlegend=True
+        )
+
+        fig = go.Figure(data=data, layout=layout)
+
+        if not args["no_html_plots"]:
+            plotly.offline.plot(fig, filename=f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.html",
+                                auto_open=False)
+        if not args["no_pdf_plots"]:
+            pio.write_image(fig, f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.pdf")
+
+
 def create_story_plots(args):
+
     ensure_dir(f"{args['output_dir']}/prediction_plots/")
 
     position_df = pd.read_csv(args["position_stats"])
 
-    prediction_columns = ['generated_surprise_l1', 'generated_surprise_l2',
-    'generated_suspense_entropy','generated_suspense_l1', 'generated_suspense_l2',
-    'corpus_suspense_l1', 'corpus_surprise_l2', 'corpus_suspense_entropy',
-    'corpus_suspense_l1', 'corpus_suspense_l2']
+    prediction_columns = ['generated_surprise_l1', 'generated_surprise_l2'
+        , 'generated_suspense_l1', 'generated_suspense_l2',
+                          'generated_suspense_entropy'
+                          'corpus_surprise_l1', 'corpus_surprise_l2',
+                          'corpus_suspense_l1', 'corpus_suspense_l2',
+                          'corpus_suspense_entropy',
+                          'generated_surprise_l1_state', 'generated_surprise_l2_state',
+                          'generated_suspense_l1_state', 'generated_suspense_l2_state',
+                          'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
+                          'corpus_suspense_l1_state', 'corpus_suspense_l2_state']
 
     window_df = pd.read_csv(args["window_stats"])
     window_sizes = window_df["window_size"].unique()
-    window_sizes = [w for w in window_sizes if w > 1]
     measure_names = window_df["window_name"].unique()
 
     vector_df = pd.read_csv(args["vector_stats"])
@@ -213,13 +279,11 @@ def create_story_plots(args):
 
         story_win_df = window_df.loc[window_df['story_id'] == name]
 
-        print(group_df[prediction_columns])
-
         for y_axis_group in ['l1','l2','entropy']:
 
             data = []
 
-            seen_surprise = False
+            color_idx = 0
             for i, pred in enumerate(prediction_columns):
 
                 if y_axis_group not in pred:
@@ -230,48 +294,57 @@ def create_story_plots(args):
 
                 # Don't plot both corpus and generation surprise as they are the same.
                 if "surprise" in pred:
+                   if not "generated" in pred:
+                       continue
 
-                    if seen_surprise:
-                        continue
-                    seen_surprise = True
+                text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
 
-
-                series_df = group_df[['sentence_text','sentence_num','sentence_id',pred]]
-
-                text = [f"<b>{t}</b>" for t in series_df["sentence_text"]]
-
-
-                vector_row_df = vector_df.merge(series_df, left_on='sentence_id', right_on='sentence_id')
-                for field in sentence_cluster_fields + story_cluster_fields:
+                vector_row_df = vector_df.merge(group_df, left_on='sentence_id', right_on='sentence_id')
+                for field in sentence_cluster_fields + story_cluster_fields + ['sentiment', 'vader_sentiment', 'textblob_sentiment']:
                     if field in vector_row_df.columns:
                         text = [t + f"<br>{field}: {f}" for (t, f) in zip(text, vector_row_df[field])]
 
                 trace = go.Scatter(
-                    x=series_df['sentence_num'],
-                    y=series_df[pred],
+                    x=group_df['sentence_num'],
+                    y=group_df[pred],
                     text=text,
                     mode='lines+markers',
+                    line = dict(
+                        color=colors[color_idx]
+                    ),
                     name=f'{pred}',
                 )
                 data.append(trace)
 
-                if args['window_plots']:
+                if args['smoothing_plots']:
                     if pred in measure_names:
-                        for window in window_sizes:
+                        for j, window in enumerate(window_sizes):
 
-                            win_df = story_win_df.loc[story_win_df['window_size'] == window]
+                            if window not in args['smoothing']:
+                                continue
+
+                            win_df = story_win_df[['window_size','window_name','position','mean']]
+
+                            win_df = win_df.loc[win_df['window_size'] == window]
+
                             win_df = win_df.loc[win_df['window_name'] == pred]
                             win_df = win_df.sort_values(by="position")
+
 
                             trace = go.Scatter(
                                 x=win_df['position'],
                                 y=win_df['mean'],
                                 mode='lines+markers',
-                                name=f'{pred} - win {window}',
+                                name=f'{pred} - {window.replace("exponential","exp")}',
                                 line=dict(
-                                    dash='dot')
+                                    dash='dot',color=colors[color_idx]),
+                                marker = dict(
+                                    symbol=shapes[j])
                             )
                             data.append(trace)
+
+                color_idx += 1
+
 
             layout = go.Layout(
                 title=f'Story {name} Prediction Plot',
@@ -285,7 +358,6 @@ def create_story_plots(args):
                 showlegend=True
             )
 
-
             fig = go.Figure(data=data, layout=layout)
 
             if not args["no_html_plots"]:
@@ -295,7 +367,7 @@ def create_story_plots(args):
                 pio.write_image(fig, f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.pdf")
 
 
-
+    print(position_df.columns)
 
 
 def create_analysis_output(args):
