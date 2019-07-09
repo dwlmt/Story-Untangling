@@ -90,7 +90,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
 
-        self.levels_to_rollout = 1
+        self.levels_to_rollout = 2
         self.generate_per_branch = 25
         self.sample_per_level_branch = 25
 
@@ -448,6 +448,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                         generated_sentence = self.generate_sentence(position, indexed_tokens, encoded_story)
 
+                        print("parent",parent)
                         created_node = self.encode_sentence_node(generated_sentence, position, i,
                                                                               parent.embedded_text_tensor.clone().to(
                                                                                   self._device),
@@ -933,7 +934,8 @@ class UncertainReaderGenPredictor(Predictor):
                 node.chain_prob *= node.parent.chain_prob
                 node.chain_log_prob += node.parent.chain_log_prob
 
-            self.del_tensors_on_node(node)
+            if node.parent is not None and not hasattr(node.parent, "sentence_id"):
+                self.del_tensors_on_node(node)
 
 
     def generate_sentence(self, position, indexed_tokens, encoded_story):
