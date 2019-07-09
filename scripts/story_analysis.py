@@ -66,10 +66,10 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
 
 def analyse_vector_stats(args):
 
-    #create_sentiment_plots(args)
-    #create_story_plots(args)
+    create_sentiment_plots(args)
+    create_story_plots(args)
 
-    #create_cluster_examples(args)
+    create_cluster_examples(args)
     create_cluster_scatters(args)
 
 
@@ -222,7 +222,7 @@ def create_sentiment_plots(args):
                 line=dict(
                     color=colors[color_idx]
                 ),
-                name=f'{pred}'.replace('sentiment','sentiment_weighting'),
+                name=f'{pred}'.replace('sentiment','sent'),
             )
             data.append(trace)
 
@@ -233,12 +233,14 @@ def create_sentiment_plots(args):
             title=f'Story {name} Sentiment Plot',
             hovermode='closest',
             xaxis=dict(
-                title='Position',
+                #title='Position',
             ),
             yaxis=dict(
                 title='Sentiment',
             ),
-            showlegend=True
+            showlegend=True,
+            legend=dict(
+                orientation="h")
         )
 
         fig = go.Figure(data=data, layout=layout)
@@ -286,6 +288,8 @@ def create_story_plots(args):
             color_idx = 0
             for i, pred in enumerate(prediction_columns):
 
+                pred_name = pred.replace('suspense','susp').replace('surprise','surp').replace('corpus','cor').replace('generated','gen').replace('state','st')
+
                 if y_axis_group not in pred:
                     continue
 
@@ -312,7 +316,7 @@ def create_story_plots(args):
                     line = dict(
                         color=colors[color_idx]
                     ),
-                    name=f'{pred}',
+                    name=f'{pred_name}',
                 )
                 data.append(trace)
 
@@ -335,7 +339,7 @@ def create_story_plots(args):
                                 x=win_df['position'],
                                 y=win_df['mean'],
                                 mode='lines+markers',
-                                name=f'{pred} - {window.replace("exponential","exp")}',
+                                name=f'{pred_name} - {window.replace("exponential","exp")}',
                                 line=dict(
                                     dash='dot',color=colors[color_idx]),
                                 marker = dict(
@@ -350,12 +354,14 @@ def create_story_plots(args):
                 title=f'Story {name} Prediction Plot',
                 hovermode='closest',
                 xaxis=dict(
-                    title='Position',
+                    #title='Position',
                 ),
                 yaxis=dict(
                     title=f'{y_axis_group}',
                 ),
-                showlegend=True
+                showlegend=True,
+                legend=dict(
+                    orientation="h")
             )
 
             fig = go.Figure(data=data, layout=layout)
