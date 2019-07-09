@@ -35,7 +35,6 @@ parser.add_argument('--smoothing', required=False, type=str, nargs='*', default=
 parser.add_argument('--max-plot-points', default=50000, type=int, help="Max number of scatter points.")
 parser.add_argument('--cluster-example-num', default=100, type=int, help="Max number of examples to select for each cluster category.")
 parser.add_argument("--smoothing-plots", default=False, action="store_true" , help="Plot sliding windows and smoothong as well as the raw position data.")
-parser.add_argument("--exponential-plots", default=False, action="store_true" , help="Plot exponential fit.")
 parser.add_argument("--no-html-plots", default=False, action="store_true" , help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
 
@@ -64,13 +63,24 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
                         'story_tensor_euclidean_umap_48_cluster_label',
                         'story_tensor_pca_48_cluster_label']
 
+
+
 def analyse_vector_stats(args):
 
-    create_sentiment_plots(args)
-    create_story_plots(args)
+    #create_sentiment_plots(args)
+    #create_story_plots(args)
 
-    create_cluster_examples(args)
+    #create_cluster_examples(args)
     create_cluster_scatters(args)
+
+
+    create_correlations(args)
+
+
+def create_correlations(args):
+    ''' Create correlation maps between continuous variables.
+    '''
+    pass
 
 
 def create_cluster_examples(args):
@@ -101,11 +111,12 @@ def create_cluster_examples(args):
         if "product_code" in field:
             product_columns = [f'{field}_1', f'{field}_2', f'{field}_3', f'{field}_4']
 
-            field_list = field_df[field].apply(lambda x: x.replace('[','').replace(' ]','').replace(']','').split()).tolist()
+            field_list = ['sentence_id'] + field_df[field].apply(lambda x: [int(x) for x in x.replace('[','').replace(' ]','').replace(']','').split()]).tolist()
 
             split_product_codes = pd.DataFrame(field_list,
                                                columns=product_columns)
             field_df[product_columns] = split_product_codes
+
 
         group = field_df.groupby(field).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
 
@@ -119,6 +130,24 @@ def create_cluster_scatters(args):
 
     vector_df = vector_df.sample(n=args['max_plot_points'])
 
+    product_fields = []
+    for proj_field in story_cluster_fields + sentence_cluster_fields:
+        if "product_code" in proj_field:
+            product_columns = [f'{proj_field}_1', f'{proj_field}_2', f'{proj_field}_3', f'{proj_field}_4']
+
+            field_list = vector_df[proj_field].apply(
+                lambda x: x.replace('[', '').replace(' ]', '').replace(']', '').split()).tolist()
+
+            field_list = [[sent_id] + l for l, sent_id in zip(field_list, vector_df['sentence_id'])]
+
+            split_product_codes = pd.DataFrame(field_list,
+                                               columns=["sentence_id"] + product_columns)
+
+
+            vector_df = vector_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
+
+            product_fields += product_columns
+
     for field in projection_fields:
         print(f"Create cluster examples for: {field}")
 
@@ -128,6 +157,7 @@ def create_cluster_scatters(args):
 
         fields_to_extract += sentence_cluster_fields
         fields_to_extract += story_cluster_fields
+        fields_to_extract += product_fields
 
         fields_to_extract += ["sentence_text", "story_id", 'sentence_num']
 
@@ -142,10 +172,9 @@ def create_cluster_scatters(args):
 
         field_df['label'] = field_df.apply (lambda row: f"{row['story_id']} : {row['sentence_num']} - {row['sentence_text']}", axis=1)
 
-        for cat_field in story_cluster_fields + sentence_cluster_fields:
+        for cat_field in product_fields + story_cluster_fields + sentence_cluster_fields:
 
-            # Don't cluster for each sub product code
-            if "product_code" in cat_field:
+            if cat_field.endswith("product_code"):
                 continue
 
             if ("pca" in field and "pca" in cat_field) or ("umap" in field and "umap" in cat_field):
@@ -157,16 +186,17 @@ def create_cluster_scatters(args):
                     colors = cl.scales['5']['div']['Spectral']
 
                     unique_column_values = field_df[cat_field].unique()
-                    num_colors =  len(unique_column_values)
+                    num_colors = len(unique_column_values)
                     num_colors = max(num_colors, max([int(v) for v in unique_column_values]))
-                    color_scale = cl.interp(colors,min(num_colors + 1,256))
+                    num_colors = min(num_colors + 1, 256)
+                    color_scale = cl.interp(colors, num_colors)
 
                     for name, group in field_df.groupby([cat_field]):
 
                         if int(name) == -1:
                             series_color = 'lightslategrey'
                         else:
-                            series_color = color_scale[int(name) % 255]
+                            series_color = color_scale[int(name) % num_colors]
 
                         trace = go.Scattergl(
                             x=group['x'],
