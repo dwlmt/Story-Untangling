@@ -86,8 +86,6 @@ class UncertainReaderGenPredictor(Predictor):
 
         story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_mapping.csv"
 
-        #dataset_reader._dataset_path = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/base/"
-
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
@@ -125,7 +123,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.embedder._top_layer_only = True
 
         self.dataset_reader = dataset_reader
-        self.dataset_reader._story_chunking = 100  # Allow bigger batching for sampling.
+        self.dataset_reader._story_chunking = 150  # Allow bigger batching for sampling.
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
@@ -137,7 +135,6 @@ class UncertainReaderGenPredictor(Predictor):
 
         self._l1 = PairwiseDistance(p=1.0)
         self._l2 = PairwiseDistance(p=2.0)
-
 
 
     def predict_instance(self, instance: Instance) -> JsonDict:
@@ -169,16 +166,18 @@ class UncertainReaderGenPredictor(Predictor):
                     else:
                         n.__dict__[attr] = value.tolist()
 
-            if not self.keep_tensor_output:
-                n.story_tensor = None
-                n.sentence_tensor = None
-                n.embedded_text_tensor = None
-                n.embedded_text_mask = None
-                n.indexed_tokens = None
+            self.del_tensors_on_node(n)
 
         root_as_dict = exporter.export(root)
-        print(root_as_dict)
         return sanitize(root_as_dict)
+
+    def del_tensors_on_node(self, n):
+        if not self.keep_tensor_output:
+            n.story_tensor = None
+            n.sentence_tensor = None
+            n.embedded_text_tensor = None
+            n.embedded_text_mask = None
+            n.indexed_tokens = None
 
     def normalize_sentiment(self, textblob_polarity, vader_sentiment):
         merged_sentiment = []
@@ -486,6 +485,7 @@ class UncertainReaderGenPredictor(Predictor):
                     self._calculate_disc_probabilities(parent)
                     self._calc_chain_probs(parent)
 
+
                 new_parents.extend(list(parent.children))
 
                 if len(new_parents) > 1:
@@ -696,7 +696,7 @@ class UncertainReaderGenPredictor(Predictor):
         if not isinstance(sentence_text, str):
             sentence_text = " ".join(sentence_text)
         analyzer = SentimentIntensityAnalyzer()
-        x = analyzer.polarity_scores("sentence_text")['compound']
+        x = analyzer.polarity_scores(sentence_text)['compound']
 
         text_blob = TextBlob(sentence_text)
         y = text_blob.sentiment.polarity
@@ -775,28 +775,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             window_variable_node = Node(name=f"{k}", parent=window_stats_node, type="window")
 
-            '''
-            for n in self._sliding_windows:
-                window_node = Node(name=f"{n}", parent=window_variable_node)
-                windows = more_itertools.windowed(v, n)
-                for i, window in enumerate(windows):
-                    window = [w for w in window if w is not None]
-
-                    if len(window) == 0:
-                        continue
-
-                    win_v_array = numpy.asarray(window)
-                    mean = numpy.mean(win_v_array)
-                    median = numpy.median(win_v_array)
-                    variance = numpy.var(win_v_array)
-                    std = variance ** (.5)
-                    max = numpy.amax(win_v_array)
-                    min = numpy.amax(win_v_array)
-                    AnyNode(parent=window_node, position=i, mean=mean, median=median, variance=variance, std=std,
-                            max=max, min=min, story_id=story_id)
-            '''
-
-            for o, mn in [((0,1,1),f"exp"), ((0,2,2),f"holt"),((0,0,1),f"avg"),((0,0,1),f"avg_2"),((1,0,0),f"reg"),
+            for o, mn in [((0,0,1),f"avg"),((0,0,1),f"avg_2"),((1,0,0),f"reg"),
                           ((2,0,0),f"reg_2"),((1,1,2),f"arima")]:
                 try:
                     pred = ARIMA(v_array, order=o).fit()
@@ -809,8 +788,6 @@ class UncertainReaderGenPredictor(Predictor):
                     pass
 
 
-            '''
-            print(v_array)
             window_node = Node(name="exp", parent=window_variable_node)
             exponential = SimpleExpSmoothing(v_array).fit()
             for i, value in enumerate(exponential.fittedvalues):
@@ -822,7 +799,6 @@ class UncertainReaderGenPredictor(Predictor):
             for i, value in enumerate(holt.fittedvalues):
                 print("Holt",i, value)
                 AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
-            '''
 
 
     def _calc_state_based_suspense(self, root, type="generated"):
@@ -956,6 +932,8 @@ class UncertainReaderGenPredictor(Predictor):
 
                 node.chain_prob *= node.parent.chain_prob
                 node.chain_log_prob += node.parent.chain_log_prob
+
+            self.del_tensors_on_node(node)
 
 
     def generate_sentence(self, position, indexed_tokens, encoded_story):
