@@ -164,28 +164,29 @@ def create_cluster_scatters(args):
                                            columns=coord_columns)
         field_df[coord_columns] = split_xy
 
-        field_df['label'] = field_df.apply (lambda row: f"{row['story_id']} : {row['sentence_num']} - {row['sentence_text']}", axis=1)
+        for cluster_field in product_fields + story_cluster_fields + sentence_cluster_fields:
 
-        for cat_field in product_fields + story_cluster_fields + sentence_cluster_fields:
-
-            if cat_field.endswith("product_code"):
+            if cluster_field.endswith("product_code"):
                 continue
 
-            if ("pca" in field and "pca" in cat_field) or ("umap" in field and "umap" in cat_field):
+            if ("pca" in field and "pca" in cluster_field) or ("umap" in field and "umap" in cluster_field):
 
-                if ("story" in field and "story" in cat_field) or ("sentence" in field and "sentence" in cat_field):
+                if ("story" in field and "story" in cluster_field) or ("sentence" in field and "sentence" in cluster_field):
+
+                    field_df['label'] = field_df.apply(
+                        lambda row: f"<b>{row['sentence_text']}</b> <br>cluster: {row[cluster_field]} <br>story_id: {row['story_id']} <br>sentence_num: {row['sentence_num']}", axis=1)
 
                     data = []
 
                     colors = cl.scales['5']['div']['Spectral']
 
-                    unique_column_values = field_df[cat_field].unique()
+                    unique_column_values = field_df[cluster_field].unique()
                     num_colors = len(unique_column_values)
                     num_colors = max(num_colors, max([int(v) for v in unique_column_values]))
                     num_colors = min(num_colors + 1, 256)
                     color_scale = cl.interp(colors, num_colors)
 
-                    for name, group in field_df.groupby([cat_field]):
+                    for name, group in field_df.groupby([cluster_field]):
 
                         if int(name) == -1:
                             series_color = 'lightslategrey'
@@ -211,10 +212,10 @@ def create_cluster_scatters(args):
                     fig = dict(data=data, layout=layout)
 
                     if not args["no_html_plots"]:
-                        plotly.offline.plot(fig, filename=f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.html", auto_open=False)
+                        plotly.offline.plot(fig, filename=f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.html", auto_open=False)
 
                     if not args["no_pdf_plots"]:
-                        pio.write_image(fig, f"{args['output_dir']}/cluster_scatters/{field}_{cat_field}_scatter.pdf")
+                        pio.write_image(fig, f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.pdf")
 
 def create_sentiment_plots(args):
 
