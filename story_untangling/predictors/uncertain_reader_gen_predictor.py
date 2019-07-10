@@ -870,7 +870,7 @@ class UncertainReaderGenPredictor(Predictor):
             probs = torch.stack([n.chain_prob for n in node_group]).to(self._device)
 
             sentiments_list = [n.sentiment for n in node_group if hasattr(n,'sentiment')]
-            print(probs, sentiments_list)
+
             sentiments = torch.tensor(sentiments_list).to(self._device)
 
             distribution = Categorical(probs)
@@ -915,7 +915,6 @@ class UncertainReaderGenPredictor(Predictor):
 
         metrics_dict["steps"] = steps_counter
 
-        print(metrics_dict)
         return metrics_dict
 
     def _culm_stat(self, probs, suspense_l1_culm):
