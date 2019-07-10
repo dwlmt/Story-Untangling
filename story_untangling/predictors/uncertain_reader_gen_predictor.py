@@ -90,9 +90,9 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
 
-        self.levels_to_rollout = 2
-        self.generate_per_branch = 25
-        self.sample_per_level_branch = 25
+        self.levels_to_rollout = 1
+        self.generate_per_branch = 50
+        self.sample_per_level_branch = 50
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
@@ -781,7 +781,6 @@ class UncertainReaderGenPredictor(Predictor):
                 try:
                     pred = ARIMA(v_array, order=o).fit()
                     predictions = pred.predict(start=0, end=len(v_array))
-                    print(predictions)
                     window_node = Node(name=f"{mn}", parent=window_variable_node)
                     for i, value in enumerate(predictions):
                         AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
@@ -791,14 +790,16 @@ class UncertainReaderGenPredictor(Predictor):
 
             window_node = Node(name="exp", parent=window_variable_node)
             exponential = SimpleExpSmoothing(v_array).fit()
-            for i, value in enumerate(exponential.fittedvalues):
+            predictions = exponential.predict(start=0, end=len(v_array))
+            for i, value in enumerate(predictions):
                 AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
 
             window_node = Node(name="holt", parent=window_variable_node)
             holt = Holt(v_array + 1e-10).fit()
+            predictions = holt.predict(start=0, end=len(v_array))
 
-            for i, value in enumerate(holt.fittedvalues):
-                print("Holt",i, value)
+            for i, value in enumerate(predictions):
+
                 AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
 
 
