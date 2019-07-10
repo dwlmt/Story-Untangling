@@ -776,8 +776,8 @@ class UncertainReaderGenPredictor(Predictor):
 
             window_variable_node = Node(name=f"{k}", parent=window_stats_node, type="window")
 
-            for o, mn in [((0,0,1),f"avg"),((0,0,1),f"avg_2"),((1,0,0),f"reg"),
-                          ((2,0,0),f"reg_2"),((1,1,2),f"arima")]:
+            for o, mn in [((0,0,1),f"avg"),((0,0,2),f"avg_2"),((1,0,0),f"reg"),
+                          ((2,0,0),f"reg_2"),((1,1,2),f"arima"),((2,1,1),f"arima_reg")]:
                 try:
                     pred = ARIMA(v_array, order=o).fit()
                     predictions = pred.predict(start=0, end=len(v_array))
@@ -787,20 +787,25 @@ class UncertainReaderGenPredictor(Predictor):
                 except:
                     pass
 
+            try:
+                window_node = Node(name="exp", parent=window_variable_node)
+                exponential = SimpleExpSmoothing(v_array).fit()
+                predictions = exponential.predict(start=0, end=len(v_array))
+                for i, value in enumerate(predictions):
+                    AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+            except:
+                pass
 
-            window_node = Node(name="exp", parent=window_variable_node)
-            exponential = SimpleExpSmoothing(v_array).fit()
-            predictions = exponential.predict(start=0, end=len(v_array))
-            for i, value in enumerate(predictions):
-                AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+            try:
+                window_node = Node(name="holt", parent=window_variable_node)
+                holt = Holt(v_array).fit()
+                predictions = holt.predict(start=0, end=len(v_array))
 
-            window_node = Node(name="holt", parent=window_variable_node)
-            holt = Holt(v_array + 1e-10).fit()
-            predictions = holt.predict(start=0, end=len(v_array))
+                for i, value in enumerate(predictions):
 
-            for i, value in enumerate(predictions):
-
-                AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+                    AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+            except:
+                pass
 
 
     def _calc_state_based_suspense(self, root, type="generated"):
