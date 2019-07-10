@@ -67,20 +67,12 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
 
 def analyse_vector_stats(args):
 
-    #create_sentiment_plots(args)
-    #create_story_plots(args)
+    create_sentiment_plots(args)
+    create_story_plots(args)
 
-    #create_cluster_examples(args)
+    create_cluster_examples(args)
     create_cluster_scatters(args)
 
-
-    create_correlations(args)
-
-
-def create_correlations(args):
-    ''' Create correlation maps between continuous variables.
-    '''
-    pass
 
 
 def create_cluster_examples(args):
@@ -111,11 +103,13 @@ def create_cluster_examples(args):
         if "product_code" in field:
             product_columns = [f'{field}_1', f'{field}_2', f'{field}_3', f'{field}_4']
 
-            field_list = ['sentence_id'] + field_df[field].apply(lambda x: [int(x) for x in x.replace('[','').replace(' ]','').replace(']','').split()]).tolist()
+            field_list = field_df[field].apply(lambda x: [int(x) for x in x.replace('[','').replace(' ]','').replace(']','').split()]).tolist()
+            field_list = [[sent_id] + l for l, sent_id in zip(field_list, vector_df['sentence_id'])]
 
             split_product_codes = pd.DataFrame(field_list,
-                                               columns=product_columns)
-            field_df[product_columns] = split_product_codes
+                                               columns=["sentence_id"] + product_columns)
+
+            vector_df = vector_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
 
 
         group = field_df.groupby(field).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
