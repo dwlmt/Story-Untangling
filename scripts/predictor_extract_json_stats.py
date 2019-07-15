@@ -50,7 +50,6 @@ def extract_json_stats(args):
                         batch_stats.append(grandchild)
                 elif type == "window_stats":
 
-
                     for window_variable in child["children"]:
                         window_size = window_variable["name"]
 

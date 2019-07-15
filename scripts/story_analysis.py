@@ -37,6 +37,8 @@ parser.add_argument('--cluster-example-num', default=100, type=int, help="Max nu
 parser.add_argument("--smoothing-plots", default=False, action="store_true" , help="Plot sliding windows and smoothong as well as the raw position data.")
 parser.add_argument("--no-html-plots", default=False, action="store_true" , help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
+parser.add_argument("--no-cluster-output", default=False, action="store_true" , help="Don't calculate the cluster output.")
+parser.add_argument("--no-story-output", default=False, action="store_true" , help="Don't calculate the story plots.")
 
 args = parser.parse_args()
 
@@ -67,11 +69,14 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
 
 def analyse_vector_stats(args):
 
-    create_sentiment_plots(args)
-    create_story_plots(args)
+    if not args["no_story_output"]:
 
-    create_cluster_examples(args)
-    create_cluster_scatters(args)
+        create_sentiment_plots(args)
+        create_story_plots(args)
+
+    if not args["no_cluster_output"]:
+        create_cluster_examples(args)
+        create_cluster_scatters(args)
 
 
 
@@ -80,9 +85,15 @@ def create_cluster_examples(args):
     vector_df = pd.read_csv(args["vector_stats"])
     ensure_dir(f"{args['output_dir']}/cluster_examples/")
     for field in sentence_cluster_fields + story_cluster_fields:
+
+        fields_to_save = []
+
         print(f"Create cluster examples for: {field}")
 
         fields_to_extract = [field]
+
+        fields_to_extract += ['story_id','sentence_num','sentence_id']
+
         if "kmeans" in field:
             print(field)
             distance_field = field.replace("kmeans_cluster","kmeans_distance")
@@ -109,12 +120,16 @@ def create_cluster_examples(args):
             split_product_codes = pd.DataFrame(field_list,
                                                columns=["sentence_id"] + product_columns)
 
-            vector_df = vector_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
+            field_df = field_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
+
+            fields_to_save += product_columns
+        else:
+            fields_to_save.append(field)
 
 
-        group = field_df.groupby(field).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
-
-        group.to_csv(f"{args['output_dir']}/cluster_examples/{field}.csv")
+        for field_to_save in fields_to_save:
+            group = field_df.groupby(field_to_save).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
+            group.to_csv(f"{args['output_dir']}/cluster_examples/{field_to_save}.csv")
 
 
 def create_cluster_scatters(args):
