@@ -91,8 +91,8 @@ class UncertainReaderGenPredictor(Predictor):
         self.only_annotation_stories = False
 
         self.levels_to_rollout = 1
-        self.generate_per_branch = 50
-        self.sample_per_level_branch = 50
+        self.generate_per_branch = 25
+        self.sample_per_level_branch = 25
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
@@ -331,7 +331,7 @@ class UncertainReaderGenPredictor(Predictor):
         else:
             sentiment_output = [self._calc_simple_sentiment(t) for t in metadata["text"]]
             merged_sentiment = [x[0] for x in sentiment_output]
-            print(merged_sentiment)
+
             vader_sentiment = [x[1] for x in sentiment_output]
             textblob_polarity = [x[2] for x in sentiment_output]
 
@@ -713,7 +713,7 @@ class UncertainReaderGenPredictor(Predictor):
             y *= self.sentiment_negative
 
         sentiment = max(abs(x), abs(y)) * self.sentiment_weighting + 1.0
-        print(sentence_text, sentiment)
+
         return sentiment, x, y
 
     def _calc_summary_stats(self, root):
