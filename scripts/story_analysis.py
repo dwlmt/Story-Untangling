@@ -79,8 +79,9 @@ def analyse_vector_stats(args):
         create_cluster_scatters(args)
 
 
-
 def create_cluster_examples(args):
+
+    metadata_fields = ["story_id", 'sentence_num','sentence_id',"sentence_text",]
 
     vector_df = pd.read_csv(args["vector_stats"])
     ensure_dir(f"{args['output_dir']}/cluster_examples/")
@@ -90,9 +91,7 @@ def create_cluster_examples(args):
 
         print(f"Create cluster examples for: {field}")
 
-        fields_to_extract = [field]
-
-        fields_to_extract += ['story_id','sentence_num','sentence_id']
+        fields_to_extract = []
 
         if "kmeans" in field:
             print(field)
@@ -106,21 +105,20 @@ def create_cluster_examples(args):
             outlier_field = field.replace("_label", "_outlier_score")
             fields_to_extract.append(outlier_field)
 
-        fields_to_extract += ["sentence_text", "story_id"]
+        fields_to_extract += metadata_fields
 
-        field_df = vector_df[fields_to_extract]
 
         product_columns = None
         if "product_code" in field:
             product_columns = [f'{field}_1', f'{field}_2', f'{field}_3', f'{field}_4']
 
-            field_list = field_df[field].apply(lambda x: [int(x) for x in x.replace('[','').replace(' ]','').replace(']','').split()]).tolist()
+            field_list = vector_df[field].apply(lambda x: [int(x) for x in x.replace('[','').replace(' ]','').replace(']','').split()]).tolist()
             field_list = [[sent_id] + l for l, sent_id in zip(field_list, vector_df['sentence_id'])]
 
             split_product_codes = pd.DataFrame(field_list,
                                                columns=["sentence_id"] + product_columns)
 
-            field_df = field_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
+            vector_df = vector_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
 
             fields_to_save += product_columns
         else:
@@ -128,6 +126,10 @@ def create_cluster_examples(args):
 
 
         for field_to_save in fields_to_save:
+            fields_to_extract.append(field_to_save)
+
+            field_df = vector_df[fields_to_extract]
+
             group = field_df.groupby(field_to_save).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
             group.to_csv(f"{args['output_dir']}/cluster_examples/{field_to_save}.csv")
 
