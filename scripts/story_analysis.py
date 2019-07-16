@@ -198,9 +198,9 @@ def create_cluster_scatters(args):
                     colors = cl.scales['5']['div']['Spectral']
 
                     unique_column_values = field_df[cluster_field].unique()
-                    num_colors = len(unique_column_values)
+                    num_colors = len([u for u in unique_column_values if u != -1])
                     num_colors = max(num_colors, max([int(v) for v in unique_column_values]))
-                    num_colors = min(num_colors + 1, 256)
+                    num_colors = min(num_colors, 255)
                     color_scale = cl.interp(colors, num_colors)
 
                     for name, group in field_df.groupby([cluster_field]):
