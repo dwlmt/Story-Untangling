@@ -55,6 +55,9 @@ def extract_json_stats(args):
 
                         for window_slot in window_variable["children"]:
 
+                            if "children" not in window_slot:
+                                continue
+
                             window_stats.extend([{**w, **{"window_name": window_size, "window_size": window_slot["name"]}} for w in window_slot["children"]])
 
     print(f"Position {len(position_stats)}, Batch Stats: {len(batch_stats)}, Window Stats: {len(window_stats)}")
