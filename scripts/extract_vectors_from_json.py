@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(
     description='Extract JSON vectors and perform dimensionality reduction.')
 parser.add_argument('--source-json', required=True, type=str, help="JSON file to process.")
 parser.add_argument('--output', required=True, type=str, help="Output, saved as a Parquet file")
-parser.add_argument('--umap-n-neighbours', default=25, type=int, help="The number of neighbours.")
+parser.add_argument('--umap-n-neighbours', default=100, type=int, help="The number of neighbours.")
 parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
 parser.add_argument('--similarity-metric', default=["euclidean"], nargs="+", type=str, help="The similarity measure to use.")
 parser.add_argument('--dim-reduction-components', default=[48, 2], type=int, nargs="+", help="The number of components to reduce to.")
@@ -85,6 +85,42 @@ def extract_json_stats(args):
 
     original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
     original_df = original_df.to_dataframe()
+
+    print(original_df)
+
+    story_ids = original_df['story_id'].unique().compute().tolist()
+
+    transition_data = []
+    for story_id in story_ids:
+
+        story_df = original_df.loc[original_df['story_id'] == story_id].compute()
+        story_df = story_df.sort_values(by=['sentence_num'])
+
+        row_num = story_df.shape[0]
+
+        for i in range(1, row_num):
+            earlier = story_df.iloc[i-1]
+
+            later = story_df.iloc[i]
+
+            merged_text = '{From}: ' + earlier['sentence_text'] + ' {To}:' + later['sentence_text']
+            sentence_id = earlier['sentence_id']
+
+            diff_dict = {"sentence_id": sentence_id, "transition_text" : merged_text}
+
+            for vector_field in vector_fields:
+
+                vector_diff = earlier[vector_field] - later[vector_field]
+
+                diff_dict[f"{vector_field}_diff"] = vector_diff
+
+            transition_data.append(diff_dict)
+
+    vector_fields += ["sentence_tensor_diff", "story_tensor_diff"]
+
+    diff_df = dask.bag.from_sequence(transition_data).to_dataframe()
+
+    original_df = original_df.merge(diff_df, left_on="sentence_id", right_on="sentence_id")
 
     csv_columns = []
 
