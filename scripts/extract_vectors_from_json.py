@@ -86,6 +86,8 @@ def extract_json_stats(args):
     original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
     original_df = original_df.to_dataframe()
 
+    original_df.set_index("sentence_id", shuffle='disk')
+
     print(original_df)
 
     story_ids = original_df['story_id'].unique().compute().tolist()
@@ -119,6 +121,7 @@ def extract_json_stats(args):
     vector_fields += ["sentence_tensor_diff", "story_tensor_diff"]
 
     diff_df = dask.bag.from_sequence(transition_data).to_dataframe()
+    diff_df.set_index("sentence_id", shuffle='disk')
 
     original_df = original_df.merge(diff_df, left_on="sentence_id", right_on="sentence_id")
 
@@ -151,6 +154,7 @@ def extract_json_stats(args):
                         source.append({"sentence_id": sentence_id, new_vector_field : reduced_dim})
 
                     dim_df = dask.bag.from_sequence(source).to_dataframe()
+                    dim_df.set_index("sentence_id", shuffle='disk')
 
                     original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
@@ -179,6 +183,7 @@ def extract_json_stats(args):
                                                     numpy.split(vector_data, 1)[0]):
                     source.append({"sentence_id": sentence_id, new_vector_field: reduced_dim})
                 dim_df = dask.bag.from_sequence(source).to_dataframe()
+                dim_df.set_index("sentence_id", shuffle='disk')
 
                 original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
@@ -260,6 +265,7 @@ def extract_json_stats(args):
                     print(source[-1])
 
                 dim_df = dask.bag.from_sequence(source).to_dataframe()
+                dim_df.set_index("sentence_id", shuffle='disk')
 
                 original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
