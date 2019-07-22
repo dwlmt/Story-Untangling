@@ -386,12 +386,11 @@ def create_story_plots(args):
 
                 text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
 
-                print(text)
 
                 vector_row_df = vector_df.merge(group_df, left_on='sentence_id', right_on='sentence_id')
                 for field in sentence_cluster_fields + story_cluster_fields + ['sentiment', 'vader_sentiment', 'textblob_sentiment']:
                     if field in vector_row_df.columns and len(vector_row_df[field]) > 0:
-                        print(vector_row_df[field])
+
                         text = [t + f"<br>{field}: {f}" for (t, f) in zip(text, vector_row_df[field])]
 
 
