@@ -48,24 +48,40 @@ def ensure_dir(file_path):
         print(f"Create directory: {directory}")
         os.makedirs(directory)
 
-projection_fields = ['sentence_tensor_euclidean_umap_2', 'sentence_tensor_pca_2',
-                        'story_tensor_euclidean_umap_2', 'story_tensor_pca_2']
+projection_fields = ['sentence_tensor_euclidean_umap_2', 'sentence_tensor_pca_2',  'sentence_tensor_cosine_umap_2',
+                        'story_tensor_euclidean_umap_2', 'story_tensor_pca_2',   'story_tensor_cosine_umap_2']
 
 sentence_cluster_fields = ['sentence_tensor_euclidean_umap_48_cluster_kmeans_cluster',
                                'sentence_tensor_euclidean_umap_48_cluster_product_code',
+                               'sentence_tensor_euclidean_umap_48_cluster_label',
+                               'sentence_tensor_cosine_umap_48_cluster_kmeans_cluster',
+                               'sentence_tensor_cosine_umap_48_cluster_product_code',
+                               'sentence_tensor_cosine_umap_48_cluster_label',
                                'sentence_tensor_pca_48_cluster_kmeans_cluster',
                                'sentence_tensor_pca_48_cluster_product_code',
-                               'sentence_tensor_euclidean_umap_48_cluster_label',
                                'sentence_tensor_pca_48_cluster_label']
 
 story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
                         'story_tensor_euclidean_umap_48_cluster_product_code',
+                        'story_tensor_euclidean_umap_48_cluster_label',
+                        'story_tensor_cosine_umap_48_cluster_kmeans_cluster',
+                        'story_tensor_cosine_umap_48_cluster_product_code',
+                        'story_tensor_cosine_umap_48_cluster_label',
+                        'story_tensor_pca_48_cluster_label',
                         'story_tensor_pca_48_cluster_kmeans_cluster',
                         'story_tensor_pca_48_cluster_product_code',
-                        'story_tensor_euclidean_umap_48_cluster_label',
-                        'story_tensor_pca_48_cluster_label']
+                        ]
 
+# Add the diff (delta) sentence to sentence fields to fields to be processed.
+for fields in [projection_fields, sentence_cluster_fields, story_cluster_fields]:
+    join_fields = []
+    for field in fields:
+        if "story_tensor" in field:
+            join_fields.append(field.replace("story_tensor","story_tensor_diff"))
+        if "sentence_tensor" in field:
+            join_fields.append(field.replace("sentence_tensor", "sentence_tensor_diff"))
 
+    fields.extend(join_fields)
 
 def analyse_vector_stats(args):
 
@@ -78,12 +94,14 @@ def analyse_vector_stats(args):
         create_cluster_examples(args)
         create_cluster_scatters(args)
 
-
 def create_cluster_examples(args):
 
-    metadata_fields = ["story_id", 'sentence_num','sentence_id',"sentence_text",]
+    metadata_fields = ["story_id", 'sentence_num','sentence_id',"sentence_text","transition_text"]
 
     vector_df = pd.read_csv(args["vector_stats"])
+
+    print(vector_df.columns)
+
     ensure_dir(f"{args['output_dir']}/cluster_examples/")
     for field in sentence_cluster_fields + story_cluster_fields:
 
@@ -99,7 +117,7 @@ def create_cluster_examples(args):
             fields_to_extract.append(distance_field)
 
         if "label" in field:
-            prob_field = field.replace("_label", "_probability")
+            prob_field = field.replace("_label", "_euclidean_probability")
             fields_to_extract.append(prob_field)
 
             outlier_field = field.replace("_label", "_outlier_score")
@@ -130,7 +148,8 @@ def create_cluster_examples(args):
 
             field_df = vector_df[fields_to_extract]
 
-            group = field_df.groupby(field_to_save).apply(lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
+
+            group = field_df.groupby(field_to_save).apply(lambda x: x.sample( min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
             group.to_csv(f"{args['output_dir']}/cluster_examples/{field_to_save}.csv")
 
 
@@ -139,7 +158,7 @@ def create_cluster_scatters(args):
     vector_df = pd.read_csv(args["vector_stats"])
     ensure_dir(f"{args['output_dir']}/cluster_scatters/")
 
-    vector_df = vector_df.sample(n=args['max_plot_points'])
+    vector_df = vector_df.sample(n=min(args['max_plot_points'],len(vector_df)))
 
     product_fields = []
     for proj_field in story_cluster_fields + sentence_cluster_fields:
@@ -169,8 +188,10 @@ def create_cluster_scatters(args):
         fields_to_extract += sentence_cluster_fields
         fields_to_extract += story_cluster_fields
         fields_to_extract += product_fields
+        fields_to_extract += ["sentence_text"]
+        fields_to_extract += ["transition_text"]
 
-        fields_to_extract += ["sentence_text", "story_id", 'sentence_num']
+        fields_to_extract += ["story_id", 'sentence_num']
 
         field_df = vector_df[fields_to_extract]
 
@@ -186,12 +207,26 @@ def create_cluster_scatters(args):
             if cluster_field.endswith("product_code"):
                 continue
 
+            if "pca" in field and not "pca" in cluster_field:
+                continue
+            if "cosine" in field and not "cosine" in cluster_field:
+                continue
+            if "euclidean" in field and not "euclidean" in cluster_field:
+                continue
+
             if ("pca" in field and "pca" in cluster_field) or ("umap" in field and "umap" in cluster_field):
 
                 if ("story" in field and "story" in cluster_field) or ("sentence" in field and "sentence" in cluster_field):
 
+                    if not "diff" in cluster_field:
+                        text_field = 'sentence_text'
+                    else:
+                        text_field = 'transition_text'
+
+                    print(field_df)
+
                     field_df['label'] = field_df.apply(
-                        lambda row: f"<b>{row['sentence_text']}</b> <br>cluster: {row[cluster_field]} <br>story_id: {row['story_id']} <br>sentence_num: {row['sentence_num']}", axis=1)
+                        lambda row: f"<b>{row[text_field]}</b> <br>cluster: {row[cluster_field]} <br>story_id: {row['story_id']} <br>sentence_num: {row['sentence_num']}", axis=1)
 
                     data = []
 
@@ -200,8 +235,12 @@ def create_cluster_scatters(args):
                     unique_column_values = field_df[cluster_field].unique()
                     num_colors = len([u for u in unique_column_values if u != -1])
                     num_colors = max(num_colors, max([int(v) for v in unique_column_values]))
-                    num_colors = min(num_colors, 255)
-                    color_scale = cl.interp(colors, num_colors)
+                    num_colors = min(num_colors, 64)
+
+                    if num_colors > 5:
+                        color_scale = cl.interp(colors, num_colors)
+                    else:
+                        color_scale = colors
 
                     for name, group in field_df.groupby([cluster_field]):
 
@@ -253,6 +292,7 @@ def create_sentiment_plots(args):
             if "surprise" in pred:
                 if not "generated" in pred:
                     continue
+
 
             text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
 
@@ -343,12 +383,17 @@ def create_story_plots(args):
                    if not "generated" in pred:
                        continue
 
+
                 text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
+
+                print(text)
 
                 vector_row_df = vector_df.merge(group_df, left_on='sentence_id', right_on='sentence_id')
                 for field in sentence_cluster_fields + story_cluster_fields + ['sentiment', 'vader_sentiment', 'textblob_sentiment']:
-                    if field in vector_row_df.columns:
+                    if field in vector_row_df.columns and len(vector_row_df[field]) > 0:
+                        print(vector_row_df[field])
                         text = [t + f"<br>{field}: {f}" for (t, f) in zip(text, vector_row_df[field])]
+
 
                 trace = go.Scatter(
                     x=group_df['sentence_num'],
