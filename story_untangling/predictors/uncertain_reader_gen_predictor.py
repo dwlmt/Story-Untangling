@@ -22,7 +22,7 @@ from torch.nn import Softmax, PairwiseDistance
 
 from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
 
-full_stop_token = 239
+end_sentence_tokens = [239]
 exporter = DictExporter(dictcls=OrderedDict, attriter=sorted)
 
 def random_sample(logits: torch.Tensor, top_k_words=None) -> int:
@@ -84,13 +84,13 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_mapping.csv"
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_test_dev_set.csv"
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
-        self.only_annotation_stories = False
+        self.only_annotation_stories = True
 
-        self.levels_to_rollout = 2
+        self.levels_to_rollout = 1
         self.generate_per_branch = 50
         self.sample_per_level_branch = 50
 
@@ -114,7 +114,6 @@ class UncertainReaderGenPredictor(Predictor):
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
-        self._sliding_windows = [3, 5]
         self._generation_sampling_temperature = 1.0
         self._discrimination_temperature = 1.0
         self._cosine = True
@@ -502,6 +501,9 @@ class UncertainReaderGenPredictor(Predictor):
 
                 print("Retained: ", [(p.chain_prob, p.prob, p.gold, p.sentence_text) for p in parents])
 
+            for node in PreOrderIter(base_correct, only_probability_nodes):
+                self.del_tensors_on_node(node)
+
             return base_correct
 
     def sampling_expansion(self, type_node, correct_futures, embedded_text_mask, embedded_text_tensor,
@@ -582,6 +584,9 @@ class UncertainReaderGenPredictor(Predictor):
                 parents = new_parents
 
                 print("Retained: ", [(p.chain_prob, p.prob, p.gold, p.sentence_text) for p in parents])
+
+            for node in PreOrderIter(base_correct, only_probability_nodes):
+                self.del_tensors_on_node(node)
 
             return base_correct
 
@@ -993,7 +998,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             gen_sentence.append(next_word_id)
 
-            if next_word_id == full_stop_token:
+            if next_word_id in end_sentence_tokens:
                 break
 
         return gen_sentence
