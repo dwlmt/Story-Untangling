@@ -27,11 +27,10 @@
   "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
   "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
   "test_data_path": "afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
-  "evaluate_on_test": true,
   "model": {
     "type": "uncertain_reader",
-    "disc_loss": false,
-    "gen_loss": false,
+    "disc_loss": true,
+    "gen_loss": true,
     "flip_loss": false,
     "distance_weights": [
       1.0
