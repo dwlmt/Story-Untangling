@@ -150,7 +150,9 @@ def create_cluster_examples(args):
 
 
             group = field_df.groupby(field_to_save).apply(lambda x: x.sample( min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
-            group.to_csv(f"{args['output_dir']}/cluster_examples/{field_to_save}.csv")
+            file_path = f"{args['output_dir']}/cluster_examples/{field_to_save}.csv"
+            print(f"Save examples: {file_path}")
+            group.to_csv(file_path)
 
 
 def create_cluster_scatters(args):
@@ -268,10 +270,14 @@ def create_cluster_scatters(args):
                     fig = dict(data=data, layout=layout)
 
                     if not args["no_html_plots"]:
-                        plotly.offline.plot(fig, filename=f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.html", auto_open=False)
+                        file_path = f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.html"
+                        print(f"Save plot: {file_path}")
+                        plotly.offline.plot(fig, filename=file_path, auto_open=False)
 
                     if not args["no_pdf_plots"]:
-                        pio.write_image(fig, f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.pdf")
+                        file_path = f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.pdf"
+                        print(f"Save plot pdf: {file_path}")
+                        pio.write_image(fig, file_path)
 
 def create_sentiment_plots(args):
 
@@ -328,10 +334,14 @@ def create_sentiment_plots(args):
         fig = go.Figure(data=data, layout=layout)
 
         if not args["no_html_plots"]:
-            plotly.offline.plot(fig, filename=f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.html",
+            file_path = f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.html"
+            print(f"Save plot: {file_path}")
+            plotly.offline.plot(fig, filename=file_path,
                                 auto_open=False)
         if not args["no_pdf_plots"]:
-            pio.write_image(fig, f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.pdf")
+            file_path = f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.pdf"
+            print(f"Save plot pdf: {file_path}")
+            pio.write_image(fig, file_path)
 
 
 def create_story_plots(args):
@@ -453,10 +463,14 @@ def create_story_plots(args):
             fig = go.Figure(data=data, layout=layout)
 
             if not args["no_html_plots"]:
-                plotly.offline.plot(fig, filename=f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html",
+                file_path = f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html"
+                print(f"Save plot {file_path}")
+                plotly.offline.plot(fig, filename=file_path,
                                     auto_open=False)
             if not args["no_pdf_plots"]:
-                pio.write_image(fig, f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.pdf")
+                file_path =  f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.pdf"
+                print(f"Save plot pdf: {file_path}")
+                pio.write_image(fig,file_path)
 
 
     print(position_df.columns)

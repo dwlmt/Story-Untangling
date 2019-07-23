@@ -79,7 +79,7 @@ def create_analysis_output(args):
                         proj_arr = normalize(proj_arr, norm='l2')
 
                     clusterer = HDBSCAN(algorithm='best', metric=metric, gen_min_span_tree=True, approx_min_span_tree=False,
-                                        core_dist_n_jobs=16, min_cluster_size=2)
+                                        core_dist_n_jobs=16, min_cluster_size=3)
 
 
                     clusterer.fit(proj_arr)
@@ -96,7 +96,9 @@ def create_analysis_output(args):
                     reference_df["cluster"] = clusterer.labels_
                     reference_df["probability"] = clusterer.probabilities_
 
-                    reference_df.to_csv(f'{args["output_dir"]}/mst_plots/{story_id}_{proj_field}_{sim_metric}_ref.csv')
+                    csv_path = f'{args["output_dir"]}/mst_plots/{story_id}_{proj_field}_{sim_metric}_ref.csv'
+                    print(f"Save csv: {csv_path}")
+                    reference_df.to_csv(csv_path)
 
                     ax = clusterer.minimum_spanning_tree_.plot()
 
@@ -112,6 +114,8 @@ def create_analysis_output(args):
                     fig = ax.get_figure()
 
                     file_path = f'{args["output_dir"]}/mst_plots/{story_id}_{proj_field}_{sim_metric}.pdf'
+
+                    print(f"Save figure: {file_path}")
 
                     fig.savefig(file_path)
                     fig.clear()
