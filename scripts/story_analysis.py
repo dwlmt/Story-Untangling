@@ -125,7 +125,6 @@ def create_cluster_examples(args):
 
         fields_to_extract += metadata_fields
 
-
         product_columns = None
         if "product_code" in field:
             product_columns = [f'{field}_1', f'{field}_2', f'{field}_3', f'{field}_4']
@@ -153,7 +152,6 @@ def create_cluster_examples(args):
             file_path = f"{args['output_dir']}/cluster_examples/{field_to_save}.csv"
             print(f"Save examples: {file_path}")
             group.to_csv(file_path)
-
 
 def create_cluster_scatters(args):
 
@@ -352,10 +350,10 @@ def create_story_plots(args):
 
     prediction_columns = ['generated_surprise_l1', 'generated_surprise_l2'
         , 'generated_suspense_l1', 'generated_suspense_l2',
-                          'generated_suspense_entropy'
+                          'generated_suspense_entropy',
+                          'corpus_suspense_entropy',
                           'corpus_surprise_l1', 'corpus_surprise_l2',
                           'corpus_suspense_l1', 'corpus_suspense_l2',
-                          'corpus_suspense_entropy',
                           'generated_surprise_l1_state', 'generated_surprise_l2_state',
                           'generated_suspense_l1_state', 'generated_suspense_l2_state',
                           'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
@@ -393,16 +391,13 @@ def create_story_plots(args):
                    if not "generated" in pred:
                        continue
 
-
                 text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
-
 
                 vector_row_df = vector_df.merge(group_df, left_on='sentence_id', right_on='sentence_id')
                 for field in sentence_cluster_fields + story_cluster_fields + ['sentiment', 'vader_sentiment', 'textblob_sentiment']:
                     if field in vector_row_df.columns and len(vector_row_df[field]) > 0:
 
                         text = [t + f"<br>{field}: {f}" for (t, f) in zip(text, vector_row_df[field])]
-
 
                 trace = go.Scatter(
                     x=group_df['sentence_num'],
