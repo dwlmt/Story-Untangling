@@ -84,6 +84,7 @@ def extract_json_stats(args):
     metadata_fields = ["story_id", "sentence_id", "sentence_num", "sentence_length", "sentence_text"]
 
     ensure_dir(args["output"])
+    ensure_dir(f'{args["output"]}/parquet/')
 
     original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
     original_df = original_df.to_dataframe()
@@ -126,6 +127,9 @@ def extract_json_stats(args):
     diff_df.set_index("sentence_id", shuffle='disk')
 
     original_df = original_df.merge(diff_df, left_on="sentence_id", right_on="sentence_id")
+
+    print("Save preprocessed vectors")
+    original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
 
     cluster_dim_fields = []
     for vector_field in vector_fields:
@@ -185,6 +189,48 @@ def extract_json_stats(args):
 
                 original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
+    print("Save Dimensionality Reduction")
+    original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
+
+    if not args["no_hdbscan"]:
+        for field in cluster_dim_fields:
+            for sim_metric in args["similarity_metric"]:
+
+                if  sim_metric in field or ("pca" in field and sim_metric == "euclidean") :
+
+                    cluster_field = f"{field}_cluster"
+                    print(f"HDBSCAN Clustering for : {cluster_field}")
+
+                    # Cosine is failing because it doesn't work with the large KD Trees so use angular distance instead.
+                    metric = sim_metric
+
+                    if sim_metric == "cosine":
+                        metric = "euclidean"
+                        vector_data = normalize(vector_data, norm='l2')
+
+                    clusterer = hdbscan.HDBSCAN(algorithm='best', metric=metric,
+                                                min_cluster_size=args["min_cluster_size"],
+                                                core_dist_n_jobs=multiprocessing.cpu_count() - 1)
+
+                    vector_data = dask.array.from_array(numpy.array(original_df[field].compute().values.tolist()), chunks=(1000, 1000))
+
+                    clusterer.fit(vector_data)
+
+                    source = []
+
+                    for sentence_id, label, prob, outlier in zip(original_df["sentence_id"].compute().values.tolist(),clusterer.labels_,
+                                                                 clusterer.probabilities_, clusterer.outlier_scores_):
+
+                        source.append({"sentence_id": sentence_id, f"{cluster_field}_label": label,
+                                       f"{cluster_field}_probability": prob, f"{cluster_field}_outlier_score": outlier})
+
+                        print(source[-1])
+
+                    dim_df = dask.bag.from_sequence(source).to_dataframe()
+                    dim_df.set_index("sentence_id", shuffle='disk')
+
+                    original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
+
     if not args["no_kmeans"]:
         res = faiss.StandardGpuResources()
 
@@ -211,7 +257,7 @@ def extract_json_stats(args):
 
             centroids = train_kmeans(vector_data, ncentroids, niter, args["gpus"])
 
-            pandas.DataFrame(centroids).to_csv(f'{args["output"]}_{field}_centroids.csv')
+            pandas.DataFrame(centroids).to_csv(f'{args["output"]}/_{field}_centroids.csv')
 
             centroid_index = faiss.GpuIndexFlatL2(res, d)
             centroid_index.add(centroids)
@@ -219,7 +265,6 @@ def extract_json_stats(args):
             D, I = centroid_index.search(vector_data, 1)
 
             source = []
-
 
             for sentence_id, distance, cluster, code in zip(original_df["sentence_id"].compute().values.tolist(), D, I,
                                                             codes):
@@ -231,53 +276,15 @@ def extract_json_stats(args):
 
             original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
-    if not args["no_hdbscan"]:
-        for field in cluster_dim_fields:
-            for sim_metric in args["similarity_metric"]:
+        del res
 
-                if  sim_metric in field or ("pca" in field and sim_metric == "euclidean") :
-
-                    cluster_field = f"{field}_cluster"
-                    print(f"HDBSCAN Clustering for : {cluster_field}")
-
-                    # Cosine is failing because it doesn't work with the large KD Trees so use angular distance instead.
-                    metric = sim_metric
-
-                    if sim_metric == "cosine":
-                        metric = "euclidean"
-                        vector_data = normalize(vector_data, norm='l2')
-
-
-                    clusterer = hdbscan.HDBSCAN(algorithm='best', metric=metric,
-                                                min_cluster_size=args["min_cluster_size"],
-                                                core_dist_n_jobs=multiprocessing.cpu_count() - 1)
-
-
-                    vector_data = dask.array.from_array(numpy.array(original_df[field].compute().values.tolist()), chunks=(1000, 1000))
-
-                    clusterer.fit(vector_data)
-
-                    source = []
-
-                    for sentence_id, label, prob, outlier in zip(original_df["sentence_id"].compute().values.tolist(),clusterer.labels_,
-                                                                 clusterer.probabilities_, clusterer.outlier_scores_):
-
-                        source.append({"sentence_id": sentence_id, f"{cluster_field}_label": label,
-                                       f"{cluster_field}_probability": prob, f"{cluster_field}_outlier_score": outlier})
-
-                        print(source[-1])
-
-                    dim_df = dask.bag.from_sequence(source).to_dataframe()
-                    dim_df.set_index("sentence_id", shuffle='disk')
-
-                    original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
-
-    original_df.to_parquet(f'{args["output"]}', compression='snappy')
+    print("Save clusters")
+    original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
     if not args["dont_save_csv"]:
         csv_df = original_df[list(set(original_df.columns).difference(set(cluster_dim_fields)))]
         csv_df = csv_df.compute()
         print(csv_df)
-        csv_df.to_csv(f'{args["output"]}.csv.xz')
+        csv_df.to_csv(f'{args["output"]}/vectors.csv.xz')
 
 def extract_rows(args, metadata_fields, vector_fields, max_num_stories):
     index_counter = 0
