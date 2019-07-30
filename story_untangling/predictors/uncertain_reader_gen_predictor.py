@@ -5,6 +5,7 @@ import more_itertools
 import numpy
 import pandas
 import scipy
+import spacy
 import torch
 from allennlp.common import JsonDict
 from allennlp.common.util import sanitize
@@ -21,6 +22,8 @@ from torch.distributions import Categorical
 from torch.nn import Softmax, PairwiseDistance
 
 from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
+
+sp = spacy.load('en_core_web_md')
 
 end_sentence_tokens = [239]
 exporter = DictExporter(dictcls=OrderedDict, attriter=sorted)
@@ -84,7 +87,7 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_test_dev_set.csv"
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_set.csv"
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
@@ -143,7 +146,7 @@ class UncertainReaderGenPredictor(Predictor):
         story_id = instance["metadata"]["story_id"]
         if story_id not in self.story_ids_to_predict and self.only_annotation_stories:
             print(f"Skipping non annotation story: {story_id}")
-            return None
+            return {}
 
         print(f"Predicting story: {story_id}")
         print(f'{instance["metadata"]["text"]}')
@@ -277,6 +280,22 @@ class UncertainReaderGenPredictor(Predictor):
         story_tensors_list = [s.story_tensor for s in child_list]
         child_story_tensors = torch.stack(story_tensors_list).to(self._device)
 
+        # calculate the word overlap distances.
+
+        def jaccard_similarity(sentence, sentence_2):
+            intersection = set(sentence).intersection(set(sentence_2))
+            union = set(sentence).union(set(sentence_2))
+            print(intersection, union)
+            return len(intersection) / len(union)
+
+        spacy_sentence = sp(" ".join(root.sentence_text))
+        sentence_tokens = [t.lemma_ for t in spacy_sentence]
+        for c in child_list:
+            child_sentence =  sp(" ".join(c.sentence_text))
+            child_tokens = [t.lemma_ for t in child_sentence]
+            c.word_jaccard_sim = jaccard_similarity(sentence_tokens, child_tokens)
+            c.spacy_embedding_sim = spacy_sentence.similarity(child_sentence)
+            #print("Similarity:", c.word_jaccard_sim, c.spacy_embedding_sim)
 
         if not self._cosine:
             parent_story_tensor_fwd = parent_story_tensor
@@ -732,21 +751,27 @@ class UncertainReaderGenPredictor(Predictor):
         stats_source_dict = {}
         if self.generate_per_branch > 0:
             type = "generated"
-            stats_source_dict = {**stats_source_dict, **{f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
+            stats_source_dict = {**stats_source_dict, **{f"{type}_surprise_word_overlap": [],
+                                                         f"{type}_surprise_simple_embedding": [],
+                                                         f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
                                                          f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
                                                          f"{type}_suspense_l1_state": [], f"{type}_suspense_l2_state": [],
                                                          f"{type}_surprise_l1_state": [], f"{type}_surprise_l2_state": [],
-                                                         f"{type}_suspense_entropy": []}}
+                                                         f"{type}_suspense_entropy": [],
+                                                         f"{type}_surprise_entropy": []}}
 
         if self.sample_per_level_branch > 0:
             type = "corpus"
-            stats_source_dict = {**stats_source_dict, **{f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
+            stats_source_dict = {**stats_source_dict, **{f"{type}_surprise_word_overlap": [],
+                                                         f"{type}_surprise_simple_embedding": [],
+                                                         f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
                                                          f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
                                                          f"{type}_suspense_l1_state": [],
                                                          f"{type}_suspense_l2_state": [],
                                                          f"{type}_surprise_l1_state": [],
                                                          f"{type}_surprise_l2_state": [],
-                                                         f"{type}_suspense_entropy": []}}
+                                                         f"{type}_suspense_entropy": [],
+                                                         f"{type}_surprise_entropy": []}}
 
 
         story_id = -1
@@ -820,6 +845,9 @@ class UncertainReaderGenPredictor(Predictor):
         # Use to keep results
         metrics_dict = {}
 
+        surprise_word_overlap_culm = 0.0
+        surprise_simple_embedding_culm = 0.0
+
         suspense_l1_culm = 0.0
         suspense_l2_culm = 0.0
         surprise_l1_culm = 0.0
@@ -830,17 +858,17 @@ class UncertainReaderGenPredictor(Predictor):
         surprise_l1_culm_state = 0.0
         surprise_l2_culm_state = 0.0
 
-        entropy = 0.0
+        suspense_entropy = 0.0
 
         steps_counter = 0
 
+        surprise_entropy = None
         # Iterate and add chain probabilities through the tree structure.
         for i, node_group in enumerate(LevelOrderGroupIter(root, only_state_nodes), start=0):
 
             # Don't calculate on the base root.
             if len(node_group) <= 2:
                 continue
-
 
             # Exclude gold for surprise as already calculated in the distances.
             nodes_gold = [n for n in node_group if n.gold == True]
@@ -850,10 +878,23 @@ class UncertainReaderGenPredictor(Predictor):
             if len(nodes_gold) > 0:
                 gold = nodes_gold[0]
 
+                surprise_word_overlap = 1.0 - gold.word_jaccard_sim
+                surprise_word_overlap_culm += surprise_word_overlap
+                surprise_simple_embedding = 1.0 - gold.spacy_embedding_sim
+                surprise_simple_embedding_culm += surprise_simple_embedding
+
+                metrics_dict[f"{type}_surprise_word_overlap_{i}"] = surprise_word_overlap
+                metrics_dict[f"{type}_surprise_simple_embedding_{i}"] = surprise_simple_embedding
+
+                gold_log_prob = gold.chain_log_prob.item()
+                surprise_entropy = -gold_log_prob
+                metrics_dict[f"{type}_surprise_entropy_{i}"] = surprise_entropy
+
                 if hasattr(gold, "sentiment"):
                     gold_sentiment = gold.sentiment
 
                 if hasattr(gold, "parent_distance_l1"):
+
                     surprise_l1_stat = gold.parent_distance_l1.cpu().item()
 
                     surprise_l1_culm += surprise_l1_stat
@@ -883,8 +924,8 @@ class UncertainReaderGenPredictor(Predictor):
 
             distribution = Categorical(probs)
 
-            entropy = distribution.entropy().cpu().item()
-            metrics_dict[f"{type}_suspense_entropy_{i}"] = entropy
+            suspense_entropy = distribution.entropy().cpu().item()
+            metrics_dict[f"{type}_suspense_entropy_{i}"] = suspense_entropy
 
             parent_l1 = torch.stack([n.parent_distance_l1 for n in node_group]).to(self._device)
             parent_l2 = torch.stack([n.parent_distance_l2 for n in node_group]).to(self._device)
@@ -907,7 +948,13 @@ class UncertainReaderGenPredictor(Predictor):
             metrics_dict[f"{type}_suspense_l2_state_{i}"] = suspense_l2_stat_state
 
         # Use the last value for the main suspense.
-        metrics_dict[f"{type}_suspense_entropy"] = entropy
+        metrics_dict[f"{type}_suspense_entropy"] = suspense_entropy
+        if surprise_entropy:
+            metrics_dict[f"{type}_surprise_entropy"] = surprise_entropy
+
+        #print("Calculated", surprise_word_overlap_culm, surprise_simple_embedding_culm)
+        metrics_dict[f"{type}_surprise_word_overlap"] = surprise_word_overlap_culm
+        metrics_dict[f"{type}_surprise_simple_embedding"] = surprise_simple_embedding_culm
 
         metrics_dict[f"{type}_suspense_l1"] = suspense_l1_culm
         metrics_dict[f"{type}_suspense_l2"] = suspense_l2_culm
