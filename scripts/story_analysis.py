@@ -9,11 +9,6 @@ import pandas as pd
 import plotly
 import plotly.graph_objs as go
 import plotly.io as pio
-import plotly.offline as py
-
-py.init_notebook_mode(connected=True)
-
-plotly.io.orca.config.save
 
 # These are the default plotly colours.
 colors = ['rgb(31, 119, 180)', 'rgb(255, 127, 14)',
@@ -117,7 +112,7 @@ def create_cluster_examples(args):
             fields_to_extract.append(distance_field)
 
         if "label" in field:
-            prob_field = field.replace("_label", "_euclidean_probability")
+            prob_field = field.replace("_label", "_probability")
             fields_to_extract.append(prob_field)
 
             outlier_field = field.replace("_label", "_outlier_score")
@@ -146,7 +141,6 @@ def create_cluster_examples(args):
             fields_to_extract.append(field_to_save)
 
             field_df = vector_df[fields_to_extract]
-
 
             group = field_df.groupby(field_to_save).apply(lambda x: x.sample( min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
             file_path = f"{args['output_dir']}/cluster_examples/{field_to_save}.csv"
@@ -270,7 +264,7 @@ def create_cluster_scatters(args):
                     if not args["no_html_plots"]:
                         file_path = f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.html"
                         print(f"Save plot: {file_path}")
-                        plotly.offline.plot(fig, filename=file_path, auto_open=False)
+                        pio.write_html(fig, file_path)
 
                     if not args["no_pdf_plots"]:
                         file_path = f"{args['output_dir']}/cluster_scatters/{field}_{cluster_field}_scatter.pdf"
@@ -334,13 +328,11 @@ def create_sentiment_plots(args):
         if not args["no_html_plots"]:
             file_path = f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.html"
             print(f"Save plot: {file_path}")
-            plotly.offline.plot(fig, filename=file_path,
-                                auto_open=False)
+            pio.write_html(fig, file_path)
         if not args["no_pdf_plots"]:
             file_path = f"{args['output_dir']}/sentiment_plots/story_{name}_sentiment_plot.pdf"
             print(f"Save plot pdf: {file_path}")
             pio.write_image(fig, file_path)
-
 
 def create_story_plots(args):
 
@@ -352,6 +344,8 @@ def create_story_plots(args):
         , 'generated_suspense_l1', 'generated_suspense_l2',
                           'generated_suspense_entropy',
                           'corpus_suspense_entropy',
+                          'generated_surprise_entropy',
+                          'corpus_surprise_entropy',
                           'corpus_surprise_l1', 'corpus_surprise_l2',
                           'corpus_suspense_l1', 'corpus_suspense_l2',
                           'generated_surprise_l1_state', 'generated_surprise_l2_state',
@@ -388,8 +382,8 @@ def create_story_plots(args):
 
                 # Don't plot both corpus and generation surprise as they are the same.
                 if "surprise" in pred:
-                   if not "generated" in pred:
-                       continue
+                  if not "generated" in pred and "entropy" not in pred:
+                     continue
 
                 text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
 
@@ -460,8 +454,7 @@ def create_story_plots(args):
             if not args["no_html_plots"]:
                 file_path = f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html"
                 print(f"Save plot {file_path}")
-                plotly.offline.plot(fig, filename=file_path,
-                                    auto_open=False)
+                pio.write_html(fig, file_path)
             if not args["no_pdf_plots"]:
                 file_path =  f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.pdf"
                 print(f"Save plot pdf: {file_path}")

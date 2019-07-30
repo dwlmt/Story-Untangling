@@ -23,8 +23,6 @@ parser = argparse.ArgumentParser(
     description='story level clustering and annotations.')
 parser.add_argument('--vectors', required=True, type=str, help="Parquet store with the vectors")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
-parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument("--projection-fields", required=False, type=str, nargs="+", default=['sentence_tensor_euclidean_umap_48',
                                                                          'sentence_tensor_diff_euclidean_umap_48',
                                                                          'story_tensor_diff_euclidean_umap_48',
