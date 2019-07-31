@@ -36,7 +36,7 @@ annotation_stats_columns = ['Answer.doxaResonance',
        'Answer.readerSurprise', 'Answer.readerSuspense',
        'Answer.storyInterest', 'Answer.storySentiment',
 ]
-annotation_story_id_column = 'Answer.storyId'
+annotation_story_id_column = 'Input.story_id'
 
 def story_stats_correlation(args):
     print(args)
@@ -54,7 +54,10 @@ def story_stats_correlation(args):
     print(annotation_df.columns)
 
     pred_df = pandas.read_csv(args["batch_stats"])
-    print(pred_df.columns)
+
+
+    story_ids = pred_df["story_id"].to_list()
+    story_ids.sort()
 
     position_df = pandas.read_csv(args["position_stats"])
     print(position_df.columns)
@@ -450,10 +453,19 @@ def prediction_correlation(args,  pred_df):
     #print(measure_correlation)
 
 def prediction_annotation_correlation(args, annotation_df, pred_df):
-    story_ids = pred_df['story_id'].unique()
+
     pred_measures = pred_df['name'].unique()
-    print(pred_measures)
+
     agg_annotation_df = aggregate_annotations_df(annotation_df)
+
+    story_ids = annotation_df[annotation_story_id_column].unique()
+    story_ids = [int(s) for s in story_ids]
+    story_ids.sort()
+    print(story_ids)
+
+    #annotation_df = annotation_df.loc[annotation_df[annotation_story_id_column] == 5825]
+    #print(annotation_df[[annotation_story_id_column,"Input.text"]])
+
     table_list = []
     for m in ["mean", "std"]:
 
@@ -481,13 +493,16 @@ def prediction_annotation_correlation(args, annotation_df, pred_df):
                     pred_dict['story_id'] = story_id
 
                     story_row = pred_df.loc[pred_df["story_id"] == story_id]
-                    pred_row = story_row.loc[story_row["name"] == pm]
-                    x = float(pred_row.iloc[0][m])
-                    pred_dict["x"] = x
-
                     story_row_ann = agg_annotation_df.loc[agg_annotation_df["story_id"] == story_id]
-                    # print(story_row_ann)
-                    if len(story_row_ann) > 0:
+
+                    if len(story_row_ann) > 0 and len(story_row) > 0:
+
+                        print(story_id)
+
+                        pred_row = story_row.loc[story_row["name"] == pm]
+                        x = float(pred_row.iloc[0][m])
+                        pred_dict["x"] = x
+
                         pred_row_ann = story_row_ann.loc[story_row_ann["name"] == ac]
                         y = pred_row_ann.iloc[0]["mean"]
                         pred_dict["y"] = y
@@ -560,9 +575,12 @@ def aggregate_annotations_df(annotation_df):
     for col in annotation_stats_columns:
         col_df = annotation_df.groupby([annotation_story_id_column], as_index=False).agg(
             {col: ['mean', 'var', 'std', 'median']})
+
+        #print(col_df)
         col_df.columns = col_df.columns.droplevel(0)
 
         col_df['name'] = col
+        #print(col_df)
         col_df = col_df.rename(columns={col_df.columns[0]: "story_id", col_df.columns[5]: 'name'})
 
         annotations_list.append(col_df)
