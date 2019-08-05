@@ -35,6 +35,7 @@ parser.add_argument("--no-umap", default=False, action="store_true" , help="Don'
 parser.add_argument("--no-pca", default=False, action="store_true" , help="Don't run PCA dim reduction.")
 parser.add_argument("--dont-save-csv", default=False, action="store_true" , help="Don't save summary fields to csv.")
 parser.add_argument('--gpus', default=4, type=int, help="GPUs")
+parser.add_argument('--dask-tmp', required=False, type=str, default='/disk/scratch_big/s1569885/dask/', help="Dask temp directory.")
 
 args = parser.parse_args()
 
@@ -79,218 +80,222 @@ def train_kmeans(x, k, niter, ngpu):
     return centroids.reshape(k, d)
 
 def extract_json_stats(args):
+
     print(args)
 
-    vector_fields = ["sentence_tensor","story_tensor"]
-    metadata_fields = ["story_id", "sentence_id", "sentence_num", "sentence_length", "sentence_text"]
+    ensure_dir(args["dask_tmp"])
+    with dask.config.set(temporary_directory=args["dask_tmp"]):
 
-    ensure_dir(args["output"])
-    ensure_dir(f'{args["output"]}/parquet/')
+        vector_fields = ["sentence_tensor","story_tensor"]
+        metadata_fields = ["story_id", "sentence_id", "sentence_num", "sentence_length", "sentence_text"]
 
-    if args["vectors"]:
-        import dask.dataframe as dd
-        original_df = dd.read_parquet(args["vectors"])
-        print(original_df.columns)
-    else:
-        original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
-        original_df = original_df.to_dataframe()
+        ensure_dir(args["output"])
+        ensure_dir(f'{args["output"]}/parquet/')
 
-        original_df.set_index("sentence_id", shuffle='disk')
+        if args["vectors"]:
+            import dask.dataframe as dd
+            original_df = dd.read_parquet(args["vectors"])
+            print(original_df.columns)
+        else:
+            original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
+            original_df = original_df.to_dataframe()
 
-        print(original_df)
+            original_df.set_index("sentence_id", shuffle='disk')
 
-        story_ids = original_df['story_id'].unique().compute().tolist()
+            print(original_df)
 
-        transition_data = []
-        for story_id in story_ids:
+            story_ids = original_df['story_id'].unique().compute().tolist()
 
-            story_df = original_df.loc[original_df['story_id'] == story_id].compute()
-            story_df = story_df.sort_values(by=['sentence_num'])
+            transition_data = []
+            for story_id in story_ids:
 
-            row_num = story_df.shape[0]
+                story_df = original_df.loc[original_df['story_id'] == story_id].compute()
+                story_df = story_df.sort_values(by=['sentence_num'])
 
-            for i in range(1, row_num):
-                earlier = story_df.iloc[i-1]
+                row_num = story_df.shape[0]
 
-                later = story_df.iloc[i]
+                for i in range(1, row_num):
+                    earlier = story_df.iloc[i-1]
 
-                merged_text = '{From}: ' + earlier['sentence_text'] + ' {To}: ' + later['sentence_text']
-                sentence_id = later['sentence_id']
+                    later = story_df.iloc[i]
 
-                diff_dict = {"sentence_id": sentence_id, "transition_text" : merged_text}
+                    merged_text = '{From}: ' + earlier['sentence_text'] + ' {To}: ' + later['sentence_text']
+                    sentence_id = later['sentence_id']
 
-                for vector_field in vector_fields:
+                    diff_dict = {"sentence_id": sentence_id, "transition_text" : merged_text}
 
-                    vector_diff = earlier[vector_field] - later[vector_field]
+                    for vector_field in vector_fields:
 
-                    diff_dict[f"{vector_field}_diff"] = vector_diff
+                        vector_diff = earlier[vector_field] - later[vector_field]
 
-                transition_data.append(diff_dict)
+                        diff_dict[f"{vector_field}_diff"] = vector_diff
 
-        vector_fields += ["sentence_tensor_diff", "story_tensor_diff"]
+                    transition_data.append(diff_dict)
 
-        diff_df = dask.bag.from_sequence(transition_data).to_dataframe()
-        diff_df.set_index("sentence_id", shuffle='disk')
+            vector_fields += ["sentence_tensor_diff", "story_tensor_diff"]
 
-        original_df = original_df.merge(diff_df, left_on="sentence_id", right_on="sentence_id")
+            diff_df = dask.bag.from_sequence(transition_data).to_dataframe()
+            diff_df.set_index("sentence_id", shuffle='disk')
 
-        print("Save preprocessed vectors")
-        original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
+            original_df = original_df.merge(diff_df, left_on="sentence_id", right_on="sentence_id")
 
-    cluster_dim_fields = []
-    for vector_field in vector_fields:
+            print("Save preprocessed vectors")
+            original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
 
-        cluster_dim_fields.append(vector_field)
+        cluster_dim_fields = []
+        for vector_field in vector_fields:
 
-        if not args["no_umap"]:
-            vector_data = numpy.stack(numpy.array(original_df[vector_field].compute().values), axis=0)
+            cluster_dim_fields.append(vector_field)
 
-            for sim_metric in args["similarity_metric"]:
+            if not args["no_umap"]:
+                vector_data = numpy.stack(numpy.array(original_df[vector_field].compute().values), axis=0)
+
+                for sim_metric in args["similarity_metric"]:
+                    for dim in args["dim_reduction_components"]:
+
+                        new_vector_field = f"{vector_field}_{sim_metric}_umap_{dim}"
+
+                        print(f"Dimensionality reduction for: {new_vector_field}")
+
+                        vector_data = umap.UMAP(n_neighbors=args["umap_n_neighbours"], min_dist=args["umap_min_dist"], n_components=dim, metric=sim_metric).fit_transform(
+                            vector_data)
+
+                        if dim > 3:
+                            cluster_dim_fields.append(new_vector_field)
+
+
+                        source = []
+                        for sentence_id, reduced_dim in zip (original_df["sentence_id"].compute().values.tolist(),numpy.split(vector_data, 1)[0]):
+                            source.append({"sentence_id": sentence_id, new_vector_field : reduced_dim})
+
+                        dim_df = dask.bag.from_sequence(source).to_dataframe()
+                        dim_df.set_index("sentence_id", shuffle='disk')
+
+                        original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
+
+            if not args["no_pca"]:
+                vector_data = numpy.stack(numpy.array(original_df[vector_field].compute().values), axis=0)
+
+                # PCA Dim reduction.
                 for dim in args["dim_reduction_components"]:
 
-                    new_vector_field = f"{vector_field}_{sim_metric}_umap_{dim}"
-
+                    new_vector_field = f"{vector_field}_pca_{dim}"
                     print(f"Dimensionality reduction for: {new_vector_field}")
 
-                    vector_data = umap.UMAP(n_neighbors=args["umap_n_neighbours"], min_dist=args["umap_min_dist"], n_components=dim, metric=sim_metric).fit_transform(
-                        vector_data)
+                    mat = faiss.PCAMatrix(vector_data.shape[1], dim)
+                    mat.train(vector_data)
+
+                    assert mat.is_trained
+                    vector_data = mat.apply_py(vector_data)
 
                     if dim > 3:
                         cluster_dim_fields.append(new_vector_field)
 
-
                     source = []
-                    for sentence_id, reduced_dim in zip (original_df["sentence_id"].compute().values.tolist(),numpy.split(vector_data, 1)[0]):
-                        source.append({"sentence_id": sentence_id, new_vector_field : reduced_dim})
-
+                    for sentence_id, reduced_dim in zip(original_df["sentence_id"].compute().values.tolist(),
+                                                        numpy.split(vector_data, 1)[0]):
+                        source.append({"sentence_id": sentence_id, new_vector_field: reduced_dim})
                     dim_df = dask.bag.from_sequence(source).to_dataframe()
                     dim_df.set_index("sentence_id", shuffle='disk')
 
                     original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
-        if not args["no_pca"]:
-            vector_data = numpy.stack(numpy.array(original_df[vector_field].compute().values), axis=0)
+        print("Save Dimensionality Reduction")
+        original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
 
-            # PCA Dim reduction.
-            for dim in args["dim_reduction_components"]:
+        if not args["no_hdbscan"]:
+            for field in cluster_dim_fields:
+                for sim_metric in args["similarity_metric"]:
 
-                new_vector_field = f"{vector_field}_pca_{dim}"
-                print(f"Dimensionality reduction for: {new_vector_field}")
+                    if  sim_metric in field or ("pca" in field and sim_metric == "euclidean") :
 
-                mat = faiss.PCAMatrix(vector_data.shape[1], dim)
-                mat.train(vector_data)
+                        cluster_field = f"{field}_cluster"
+                        print(f"HDBSCAN Clustering for : {cluster_field}")
 
-                assert mat.is_trained
-                vector_data = mat.apply_py(vector_data)
+                        # Cosine is failing because it doesn't work with the large KD Trees so use angular distance instead.
+                        metric = sim_metric
 
-                if dim > 3:
-                    cluster_dim_fields.append(new_vector_field)
+                        if sim_metric == "cosine":
+                            metric = "euclidean"
+                            vector_data = normalize(vector_data, norm='l2')
+
+                        clusterer = hdbscan.HDBSCAN(algorithm='best', metric=metric,
+                                                    min_cluster_size=args["min_cluster_size"],
+                                                    core_dist_n_jobs=multiprocessing.cpu_count() - 1)
+
+                        vector_data = dask.array.from_array(numpy.array(original_df[field].compute().values.tolist()), chunks=(1000, 1000))
+
+                        clusterer.fit(vector_data)
+
+                        source = []
+
+                        for sentence_id, label, prob, outlier in zip(original_df["sentence_id"].compute().values.tolist(),clusterer.labels_,
+                                                                     clusterer.probabilities_, clusterer.outlier_scores_):
+
+                            source.append({"sentence_id": sentence_id, f"{cluster_field}_label": label,
+                                           f"{cluster_field}_probability": prob, f"{cluster_field}_outlier_score": outlier})
+
+                            print(source[-1])
+
+                        dim_df = dask.bag.from_sequence(source).to_dataframe()
+                        dim_df.set_index("sentence_id", shuffle='disk')
+
+                        original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
+
+        if not args["no_kmeans"]:
+            res = faiss.StandardGpuResources()
+
+            for field in cluster_dim_fields:
+
+                cluster_field = f"{field}_cluster"
+                print(f"K-Means Clustering for : {cluster_field}")
+
+                vector_data = numpy.stack(numpy.array(original_df[field].compute().values), axis=0)
+
+                d = vector_data.shape[1]
+
+                pq = faiss.ProductQuantizer(d, args["code_size"], 8)
+
+                opq = faiss.OPQMatrix(d, args["code_size"])
+                opq.pq = pq
+                opq.train(vector_data)
+                xt = opq.apply_py(vector_data)
+
+                codes = pq.compute_codes(xt)
+
+                ncentroids = args["kmeans_ncentroids"]
+                niter = args["kmeans_iterations"]
+
+                centroids = train_kmeans(vector_data, ncentroids, niter, args["gpus"])
+
+                pandas.DataFrame(centroids).to_csv(f'{args["output"]}/_{field}_centroids.csv')
+
+                centroid_index = faiss.GpuIndexFlatL2(res, d)
+                centroid_index.add(centroids)
+
+                D, I = centroid_index.search(vector_data, 1)
 
                 source = []
-                for sentence_id, reduced_dim in zip(original_df["sentence_id"].compute().values.tolist(),
-                                                    numpy.split(vector_data, 1)[0]):
-                    source.append({"sentence_id": sentence_id, new_vector_field: reduced_dim})
+
+                for sentence_id, distance, cluster, code in zip(original_df["sentence_id"].compute().values.tolist(), D, I,
+                                                                codes):
+                    source.append({"sentence_id": sentence_id, f"{cluster_field}_kmeans_distance": distance[0],
+                                   f"{cluster_field}_kmeans_cluster": cluster[0], f"{cluster_field}_product_code": code})
+                    print(source[-1])
+
                 dim_df = dask.bag.from_sequence(source).to_dataframe()
-                dim_df.set_index("sentence_id", shuffle='disk')
 
                 original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
 
-    print("Save Dimensionality Reduction")
-    original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
+            del res
 
-    if not args["no_hdbscan"]:
-        for field in cluster_dim_fields:
-            for sim_metric in args["similarity_metric"]:
-
-                if  sim_metric in field or ("pca" in field and sim_metric == "euclidean") :
-
-                    cluster_field = f"{field}_cluster"
-                    print(f"HDBSCAN Clustering for : {cluster_field}")
-
-                    # Cosine is failing because it doesn't work with the large KD Trees so use angular distance instead.
-                    metric = sim_metric
-
-                    if sim_metric == "cosine":
-                        metric = "euclidean"
-                        vector_data = normalize(vector_data, norm='l2')
-
-                    clusterer = hdbscan.HDBSCAN(algorithm='best', metric=metric,
-                                                min_cluster_size=args["min_cluster_size"],
-                                                core_dist_n_jobs=multiprocessing.cpu_count() - 1)
-
-                    vector_data = dask.array.from_array(numpy.array(original_df[field].compute().values.tolist()), chunks=(1000, 1000))
-
-                    clusterer.fit(vector_data)
-
-                    source = []
-
-                    for sentence_id, label, prob, outlier in zip(original_df["sentence_id"].compute().values.tolist(),clusterer.labels_,
-                                                                 clusterer.probabilities_, clusterer.outlier_scores_):
-
-                        source.append({"sentence_id": sentence_id, f"{cluster_field}_label": label,
-                                       f"{cluster_field}_probability": prob, f"{cluster_field}_outlier_score": outlier})
-
-                        print(source[-1])
-
-                    dim_df = dask.bag.from_sequence(source).to_dataframe()
-                    dim_df.set_index("sentence_id", shuffle='disk')
-
-                    original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
-
-    if not args["no_kmeans"]:
-        res = faiss.StandardGpuResources()
-
-        for field in cluster_dim_fields:
-
-            cluster_field = f"{field}_cluster"
-            print(f"K-Means Clustering for : {cluster_field}")
-
-            vector_data = numpy.stack(numpy.array(original_df[field].compute().values), axis=0)
-
-            d = vector_data.shape[1]
-
-            pq = faiss.ProductQuantizer(d, args["code_size"], 8)
-
-            opq = faiss.OPQMatrix(d, args["code_size"])
-            opq.pq = pq
-            opq.train(vector_data)
-            xt = opq.apply_py(vector_data)
-
-            codes = pq.compute_codes(xt)
-
-            ncentroids = args["kmeans_ncentroids"]
-            niter = args["kmeans_iterations"]
-
-            centroids = train_kmeans(vector_data, ncentroids, niter, args["gpus"])
-
-            pandas.DataFrame(centroids).to_csv(f'{args["output"]}/_{field}_centroids.csv')
-
-            centroid_index = faiss.GpuIndexFlatL2(res, d)
-            centroid_index.add(centroids)
-
-            D, I = centroid_index.search(vector_data, 1)
-
-            source = []
-
-            for sentence_id, distance, cluster, code in zip(original_df["sentence_id"].compute().values.tolist(), D, I,
-                                                            codes):
-                source.append({"sentence_id": sentence_id, f"{cluster_field}_kmeans_distance": distance[0],
-                               f"{cluster_field}_kmeans_cluster": cluster[0], f"{cluster_field}_product_code": code})
-                print(source[-1])
-
-            dim_df = dask.bag.from_sequence(source).to_dataframe()
-
-            original_df = original_df.merge(dim_df, left_on="sentence_id", right_on="sentence_id")
-
-        del res
-
-    print("Save clusters")
-    original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
-    if not args["dont_save_csv"]:
-        csv_df = original_df[list(set(original_df.columns).difference(set(cluster_dim_fields)))]
-        csv_df = csv_df.compute()
-        print(csv_df)
-        csv_df.to_csv(f'{args["output"]}/vectors.csv.xz')
+        print("Save clusters")
+        original_df.to_parquet(f'{args["output"]}/parquet/', compression='snappy')
+        if not args["dont_save_csv"]:
+            csv_df = original_df[list(set(original_df.columns).difference(set(cluster_dim_fields)))]
+            csv_df = csv_df.compute()
+            print(csv_df)
+            csv_df.to_csv(f'{args["output"]}/vectors.csv.xz')
 
 def extract_rows(args, metadata_fields, vector_fields, max_num_stories):
     index_counter = 0
