@@ -340,11 +340,19 @@ def create_story_plots(args):
 
     position_df = pd.read_csv(args["position_stats"])
 
-    prediction_columns = ['generated_surprise_l1', 'generated_surprise_l2'
-        , 'generated_suspense_l1', 'generated_suspense_l2',
+    print(position_df[['generated_surprise_word_overlap','generated_surprise_simple_embedding']])
+    print(position_df.columns)
+    #exit()
+
+    prediction_columns = ["generated_surprise_word_overlap",
+                          "generated_surprise_simple_embedding",
+                         'generated_surprise_l1', 'generated_surprise_l2'
+                         , 'generated_suspense_l1', 'generated_suspense_l2',
                           'generated_suspense_entropy',
                           'corpus_suspense_entropy',
                           'generated_surprise_entropy',
+                          "corpus_surprise_word_overlap",
+                          "corpus_surprise_simple_embedding",
                           'corpus_surprise_entropy',
                           'corpus_surprise_l1', 'corpus_surprise_l2',
                           'corpus_suspense_l1', 'corpus_suspense_l2',
@@ -365,7 +373,7 @@ def create_story_plots(args):
 
         story_win_df = window_df.loc[window_df['story_id'] == name]
 
-        for y_axis_group in ['l1','l2','entropy']:
+        for y_axis_group in ['l1','l2','entropy','baseline']:
 
             data = []
 
@@ -374,15 +382,16 @@ def create_story_plots(args):
 
                 pred_name = pred.replace('suspense','susp').replace('surprise','surp').replace('corpus','cor').replace('generated','gen').replace('state','st')
 
-                if y_axis_group not in pred:
+                if y_axis_group not in pred and y_axis_group != "baseline" or (y_axis_group is "baseline" and "overlap" not in pred and "embedding" not in pred):
                     continue
 
                 if pred not in group_df.columns:
                     continue
 
+
                 # Don't plot both corpus and generation surprise as they are the same.
                 if "surprise" in pred:
-                  if not "generated" in pred and "entropy" not in pred:
+                  if not "generated" in pred and "entropy" not in pred and y_axis_group != "baseline":
                      continue
 
                 text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
