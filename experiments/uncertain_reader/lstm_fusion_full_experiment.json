@@ -17,15 +17,15 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
-      0
+      2
     ],
      "story_chunking": 50,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",//"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
-  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",//"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
-  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",//"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
+  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
+  "test_data_path": "afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
   "evaluate_on_test": true,
   "model": {
     "type": "uncertain_reader",
@@ -53,12 +53,14 @@
       }
     },
     "sentence_seq2vec_encoder": {
-      "type": "bag_of_embeddings",
-      "embedding_dim": 768,
-      "averaged": true
+      "type": "lstm",
+      "input_size": 768,
+      "hidden_size": 768,
+      "num_layers": 2,
+      "dropout": 0.0
     },
     "story_seq2seq_encoder": {
-      "type": "gru",
+      "type": "lstm",
       "input_size": 768,
       "hidden_size": 768,
       "num_layers": 3,
@@ -75,7 +77,7 @@
       }
     }
   },
-  "iterator": {
+   "iterator": {
     "type": "basic",
     "batch_size": 2,
     "max_instances_in_memory": 256
@@ -87,7 +89,7 @@
     "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      0
+      2
     ],
     "grad_clipping": 5.0,
     "model_save_interval": 3600.0,
