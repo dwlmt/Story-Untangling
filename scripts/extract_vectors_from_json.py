@@ -21,7 +21,7 @@ parser.add_argument('--source-json', required=True, type=str, help="JSON file to
 parser.add_argument('--vectors', required=False, type=str, help="If specified the reload existing file.")
 parser.add_argument('--output', required=True, type=str, help="Output, saved as a Parquet file")
 parser.add_argument('--umap-n-neighbours', default=100, type=int, help="The number of neighbours.")
-parser.add_argument('--umap-min-dist', default=0.1, type=float, help="Controls how clumpy umap will cluster points.")
+parser.add_argument('--umap-min-dist', default=0.0, type=float, help="Controls how clumpy umap will cluster points.")
 parser.add_argument('--similarity-metric', default=["cosine","euclidean"], nargs="+", type=str, help="The similarity measure to use.")
 parser.add_argument('--dim-reduction-components', default=[48, 2], type=int, nargs="+", help="The number of components to reduce to.")
 parser.add_argument('--min-cluster-size', default=20, type=int, help="Min size fo each cluster.")
@@ -35,7 +35,7 @@ parser.add_argument("--no-umap", default=False, action="store_true" , help="Don'
 parser.add_argument("--no-pca", default=False, action="store_true" , help="Don't run PCA dim reduction.")
 parser.add_argument("--dont-save-csv", default=False, action="store_true" , help="Don't save summary fields to csv.")
 parser.add_argument('--gpus', default=4, type=int, help="GPUs")
-parser.add_argument('--dask-tmp', required=False, type=str, default='/disk/scratch_big/s1569885/dask/', help="Dask temp directory.")
+parser.add_argument('--dask-tmp', required=False, type=str, default='/disk/scratch1/s1569885/dask/', help="Dask temp directory.")
 
 args = parser.parse_args()
 
@@ -86,13 +86,14 @@ def extract_json_stats(args):
     ensure_dir(args["dask_tmp"])
     with dask.config.set(temporary_directory=args["dask_tmp"]):
 
-        vector_fields = ["sentence_tensor","story_tensor"]
+        vector_fields += ["sentence_tensor_diff", "story_tensor_diff"]
         metadata_fields = ["story_id", "sentence_id", "sentence_num", "sentence_length", "sentence_text"]
 
         ensure_dir(args["output"])
         ensure_dir(f'{args["output"]}/parquet/')
 
         if args["vectors"]:
+            vector_fields = ["sentence_tensor", "story_tensor"]
             import dask.dataframe as dd
             original_df = dd.read_parquet(args["vectors"])
             print(original_df.columns)

@@ -190,7 +190,7 @@ def prediction_peaks(args, annotation_df, position_df):
                             y_df = type_y_df.loc[type_y_df["measure"] == c2]
                             y_list = list(y_df[m2])
 
-                            kendall, pearson, spearman = calculate_correlation(c, c2, table_list, x_list, y_list, measure=m, measure2=m2)
+                            kendall, pearson, spearman = calculate_correlation(c, c2, table_list, x_list, y_list, measure=m, measure2=m2, disc=t, disc2=t2)
 
                             pear_corr_ann.append(pearson)
                             spear_corr_ann.append(spearman)
@@ -279,7 +279,7 @@ def prediction_peaks(args, annotation_df, position_df):
                         if len(x_list) >= 2 and len(y_list) >= 2:
 
                             kendall, pearson, spearman = calculate_correlation(c, am, table_list, x_list, y_list,
-                                                                               measure="mean", measure2=m)
+                                                                               measure=m, measure2="mean", disc=t)
                             print(c,am, kendall, pearson, spearman)
                         else:
                             kendall = pearson = spearman = 0.0
@@ -360,25 +360,28 @@ def story_stats_correlation(args):
     print(annotation_df.columns)
 
     pred_df = pandas.read_csv(args["batch_stats"])
+    pred_df = pred_df.fillna(value=0.0)
 
     story_ids = pred_df["story_id"].to_list()
     story_ids.sort()
 
 
     position_df = pandas.read_csv(args["position_stats"])
+    position_df = position_df.fillna(value=0.0)
     print(position_df.columns)
 
-    #prediction_peaks(args, annotation_df, position_df)
-    #prediction_position_correlation(args, position_df)
+    prediction_peaks(args, annotation_df, position_df)
+    prediction_position_correlation(args, position_df)
     prediction_correlation(args, pred_df)
-    #annotation_correlation(args, annotation_df)
-    #prediction_annotation_correlation(args, annotation_df, pred_df)
+    annotation_correlation(args, annotation_df)
+    prediction_annotation_correlation(args, annotation_df, pred_df)
 
 def prediction_position_correlation(args, position_df):
 
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/")
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/box/")
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/scatter/")
+    ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/heatmap/")
 
     #print(position_df)
     columns = extract_position_measure_columns(position_df)
@@ -464,9 +467,9 @@ def prediction_position_correlation(args, position_df):
         point_df = pandas.DataFrame(data=prediction_list)
         fig = px.scatter(point_df, x="x", y="y", title=f"{c1}", color="z", trendline="lowess", hover_name="sentence_text", color_discrete_sequence=px.colors.cyclical.IceFire,)
 
-        export_plots(args, f"/prediction_sentence_correlation/scatter_{c1}", fig)
+        export_plots(args, f"/prediction_sentence_correlation/scatter/{c1}", fig)
 
-    export_correlations(args,  "/prediction_sentence_correlation/", columns, columns, ken_corr, pear_corr, spear_corr, table_list)
+    export_correlations(args,  "/prediction_sentence_correlation/heatmap/", columns, columns, ken_corr, pear_corr, spear_corr, table_list)
 
 def export_correlations(args, base, columns, columns2, ken_corr, pear_corr, spear_corr, table_list):
 
@@ -482,28 +485,28 @@ def export_correlations(args, base, columns, columns2, ken_corr, pear_corr, spea
             y=columns2
         ))
 
-        export_plots(args, f"{base}{corr_type}_heatmap", fig)
+        export_plots(args, f"{base}_{corr_type}_heatmap", fig)
     measure_correlation = pandas.DataFrame(table_list)
     measure_correlation.to_csv(f"{args['output_dir']}/{base}_corr.csv")
 
 
-def calculate_correlation(c1, c2, table_list, x_list, y_list, measure="value", measure2="value"):
+def calculate_correlation(c1, c2, table_list, x_list, y_list, measure="value", measure2="value", disc=None, disc2=None):
     print(c1, c2, x_list, y_list)
     pearson, pearson_p_value = pearsonr(x_list, y_list)
     table_list.append(
         {"c1": c1, "c2": c2, "type": "pearson",
          "correlation": pearson,
-         "p_value": pearson_p_value, "measure": measure, "measure_2": measure2})
+         "p_value": pearson_p_value, "measure": measure, "measure_2": measure2, "disc": disc,"disc_2": disc2})
     kendall, kendall_p_value = kendalltau(x_list, y_list, nan_policy="omit")
     table_list.append(
         {"c1": c1, "c2": c2, "type": "kendall",
          "correlation": kendall,
-         "p_value": kendall_p_value, "measure": measure, "measure_2": measure2})
+         "p_value": kendall_p_value, "measure": measure, "measure_2": measure2, "disc": disc,"disc_2": disc2})
     spearman, spearman_p_value = spearmanr(x_list, y_list)
     table_list.append(
         {"c1": c1, "c2": c2, "type": "spearman",
          "correlation": spearman,
-         "p_value": spearman_p_value, "measure": measure, "measure_2": measure2})
+         "p_value": spearman_p_value, "measure": measure, "measure_2": measure2, "disc": disc,"disc_2": disc2})
     return kendall, pearson, spearman
 
 
