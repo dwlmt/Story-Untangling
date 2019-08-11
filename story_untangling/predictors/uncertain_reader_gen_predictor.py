@@ -1,5 +1,6 @@
 import copy
 from collections import OrderedDict
+from itertools import groupby
 
 import more_itertools
 import numpy
@@ -15,6 +16,7 @@ from allennlp.predictors import Predictor
 from anytree import AnyNode, Node, PreOrderIter, LevelOrderGroupIter
 from anytree.exporter import DictExporter
 from nltk.sentiment import SentimentIntensityAnalyzer
+from nostril import nonsense
 from statsmodels.tsa.arima_model import ARIMA
 from statsmodels.tsa.holtwinters import Holt
 from textblob import TextBlob
@@ -22,6 +24,8 @@ from torch.distributions import Categorical
 from torch.nn import Softmax, PairwiseDistance
 
 from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
+
+from story_untangling.dataset_readers.writing_prompts_whole_story import punc
 
 sp = spacy.load('en_core_web_md')
 
@@ -45,6 +49,26 @@ def choose_max(logits: torch.Tensor, ) -> int:
     p, i = torch.max(logits, dim=-1)
     return i.item()
 
+def strip_repeating_punctuation(tokens):
+    # Strip repeating characters.
+    newtext = []
+    for k, g in groupby(tokens):
+        if k in punc:
+            newtext.append(k)
+        else:
+            newtext.extend(g)
+    tokens = ''.join(newtext)
+    return tokens
+
+def is_nonsense(text: str):
+    try:
+        if len(text) <= 10:
+            is_nonsense = False
+        else:
+            is_nonsense = nonsense(text)
+    except:
+        is_nonsense = True
+    return is_nonsense
 
 def only_tensor_nodes(node):
     if isinstance(node, AnyNode) and hasattr(node, "story_tensor"):
@@ -87,13 +111,13 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_set.csv"
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_witheld_splitaa"
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = True
 
-        self.levels_to_rollout = 1
+        self.levels_to_rollout = 2
         self.generate_per_branch = 50
         self.sample_per_level_branch = 50
 
@@ -862,7 +886,8 @@ class UncertainReaderGenPredictor(Predictor):
 
         steps_counter = 0
 
-        surprise_entropy = None
+        surprise_entropy = 0.0
+        surprise_entropy_culm = 0.0
         # Iterate and add chain probabilities through the tree structure.
         for i, node_group in enumerate(LevelOrderGroupIter(root, only_state_nodes), start=0):
 
@@ -888,6 +913,7 @@ class UncertainReaderGenPredictor(Predictor):
 
                 gold_log_prob = gold.chain_log_prob.item()
                 surprise_entropy = -gold_log_prob
+                surprise_entropy_culm += surprise_entropy
                 metrics_dict[f"{type}_surprise_entropy_{i}"] = surprise_entropy
 
                 if hasattr(gold, "sentiment"):
@@ -949,8 +975,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         # Use the last value for the main suspense.
         metrics_dict[f"{type}_suspense_entropy"] = suspense_entropy
-        if surprise_entropy:
-            metrics_dict[f"{type}_surprise_entropy"] = surprise_entropy
+        metrics_dict[f"{type}_surprise_entropy"] = surprise_entropy_culm
 
         #print("Calculated", surprise_word_overlap_culm, surprise_simple_embedding_culm)
         metrics_dict[f"{type}_surprise_word_overlap"] = surprise_word_overlap_culm
@@ -1076,24 +1101,26 @@ class UncertainReaderGenPredictor(Predictor):
             indexed_tokens[position + level] = gen_sentence_padded.detach().clone().long().to(self._device)
 
             sentence_text = [self.indexer.decoder[t].replace("</w>", "") for t in gen_sentence if t in self.indexer.decoder]
+            sentence_text = strip_repeating_punctuation(sentence_text)
 
-            sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
+            if not is_nonsense(sentence_text) and len(sentence_text) >= 3:
+                sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
 
-            created_node = AnyNode(gold=False,
-                                   story_tensor=encoded_story.cpu().detach(),
-                                   sentence_tensor=encoded_sentence.cpu().detach(),
-                                   embedded_text_tensor=embedded_text_tensor.cpu().detach(),
-                                   embedded_text_mask=embedded_text_mask.cpu().detach(),
-                                   indexed_tokens=indexed_tokens.cpu().detach(),
-                                   token_ids=gen_sentence,
-                                   level=level,
-                                   sentence_text=sentence_text,
-                                   sentence_length=sentence_length, type="generated",
-                                   sentiment=sentiment,
-                                   vader_sentiment=vader,
-                                   textblob_sentiment=textblob,
-                                   parent=parent)
-            return created_node
+                created_node = AnyNode(gold=False,
+                                       story_tensor=encoded_story.cpu().detach(),
+                                       sentence_tensor=encoded_sentence.cpu().detach(),
+                                       embedded_text_tensor=embedded_text_tensor.cpu().detach(),
+                                       embedded_text_mask=embedded_text_mask.cpu().detach(),
+                                       indexed_tokens=indexed_tokens.cpu().detach(),
+                                       token_ids=gen_sentence,
+                                       level=level,
+                                       sentence_text=sentence_text,
+                                       sentence_length=sentence_length, type="generated",
+                                       sentiment=sentiment,
+                                       vader_sentiment=vader,
+                                       textblob_sentiment=textblob,
+                                       parent=parent)
+                return created_node
 
         return None
 
