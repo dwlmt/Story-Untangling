@@ -3,6 +3,8 @@
 '''
 import argparse
 import os
+import statistics
+from textwrap import TextWrapper
 
 import colorlover as cl
 import pandas as pd
@@ -11,13 +13,15 @@ import plotly.graph_objs as go
 import plotly.io as pio
 
 # These are the default plotly colours.
+from scipy.signal import find_peaks
+
 colors = ['rgb(31, 119, 180)', 'rgb(255, 127, 14)',
                      'rgb(44, 160, 44)', 'rgb(214, 39, 40)',
                      'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
                      'rgb(227, 119, 194)', 'rgb(127, 127, 127)',
                      'rgb(188, 189, 34)', 'rgb(23, 190, 207)']
 
-shapes = ["circle", "square", "diamond","cross", "x","triangle-up", "triangle-down", "triangle-left", "triangle-right","pentagon","hexagon","octagon",'hexagram',"bowtie","hourglass"]
+shapes = ["circle", "square", "diamond","cross", "x","star-triangle-up", "star-triangle-down","triangle-up", "triangle-down", "triangle-left", "triangle-right","pentagon","hexagon","octagon",'hexagram',"bowtie","hourglass"]
 
 parser = argparse.ArgumentParser(
     description='Extract JSON vectors and perform dimensionality reduction.')
@@ -34,6 +38,8 @@ parser.add_argument("--no-html-plots", default=False, action="store_true" , help
 parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
 parser.add_argument("--no-cluster-output", default=False, action="store_true" , help="Don't calculate the cluster output.")
 parser.add_argument("--no-story-output", default=False, action="store_true" , help="Don't calculate the story plots.")
+parser.add_argument('--peak-prominence-weighting', default=0.35, type=float, help="Use to scale the standard deviation of a column.")
+parser.add_argument('--peak-width', default=1.0, type=float, help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
 
 args = parser.parse_args()
 
@@ -68,6 +74,7 @@ story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
                         ]
 
 # Add the diff (delta) sentence to sentence fields to fields to be processed.
+
 for fields in [projection_fields, sentence_cluster_fields, story_cluster_fields]:
     join_fields = []
     for field in fields:
@@ -308,7 +315,6 @@ def create_sentiment_plots(args):
 
             color_idx += 1
 
-
         layout = go.Layout(
             title=f'Story {name} Sentiment Plot',
             hovermode='closest',
@@ -339,10 +345,7 @@ def create_story_plots(args):
     ensure_dir(f"{args['output_dir']}/prediction_plots/")
 
     position_df = pd.read_csv(args["position_stats"])
-
-    print(position_df[['generated_surprise_word_overlap','generated_surprise_simple_embedding']])
-    print(position_df.columns)
-    #exit()
+    position_df = position_df.fillna(value=0.0)
 
     prediction_columns = ["generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
@@ -367,27 +370,45 @@ def create_story_plots(args):
 
     vector_df = pd.read_csv(args["vector_stats"])
 
-    for name, group in position_df.groupby("story_id"):
+    y_axis_map = {}
+
+    segmented_data = []
+
+    for y_axis_group in ['l1', 'l2', 'entropy', 'baseline']:
+
+        column_list = []
+
+        for i, pred in enumerate(prediction_columns):
+
+            if y_axis_group not in pred and y_axis_group != "baseline" or (
+                    y_axis_group is "baseline" and "overlap" not in pred and "embedding" not in pred):
+                continue
+
+            column_list.append(pred)
+
+        y_axis_map[y_axis_group] = column_list
+
+    for story_id, group in position_df.groupby("story_id"):
 
         group_df = group.sort_values(by=['sentence_num'])
 
-        story_win_df = window_df.loc[window_df['story_id'] == name]
+        story_win_df = window_df.loc[window_df['story_id'] == story_id]
 
-        for y_axis_group in ['l1','l2','entropy','baseline']:
+        for y_axis_group, y_axis_columns in y_axis_map.items():
 
             data = []
 
+            prom_data = []
+            for c in y_axis_columns:
+                prom_data.extend(group_df[c].tolist())
+
+            prominence_threshold = statistics.stdev(prom_data) * args["peak_prominence_weighting"]
+            print(f"Peak prominence {prominence_threshold}")
+
             color_idx = 0
-            for i, pred in enumerate(prediction_columns):
+            for i, pred in enumerate(y_axis_columns):
 
                 pred_name = pred.replace('suspense','susp').replace('surprise','surp').replace('corpus','cor').replace('generated','gen').replace('state','st')
-
-                if y_axis_group not in pred and y_axis_group != "baseline" or (y_axis_group is "baseline" and "overlap" not in pred and "embedding" not in pred):
-                    continue
-
-                if pred not in group_df.columns:
-                    continue
-
 
                 # Don't plot both corpus and generation surprise as they are the same.
                 if "surprise" in pred:
@@ -414,6 +435,57 @@ def create_story_plots(args):
                 )
                 data.append(trace)
 
+                sentence_nums = group_df["sentence_num"].tolist()
+                sentence_text = group_df["sentence_text"].tolist()
+                y = group_df[pred].tolist()
+
+                print(y, prominence_threshold, )
+                type = "peak"
+                peak_indices, peaks_meta = find_peaks(y, prominence=prominence_threshold, width=args["peak_width"])
+
+                if len(peak_indices) > 0:
+                    hover_text, peaks_data = create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sentence_text, story_id, "peak", y_axis_group, pred)
+
+                    segmented_data.extend(peaks_data)
+
+                    trace = go.Scatter(
+                        x=[sentence_nums[j] for j in peak_indices],
+                        y=[y[j] for j in peak_indices],
+                        mode='markers',
+                        marker=dict(
+                            color=colors[color_idx],
+                            symbol='star-triangle-up',
+                            size=14,
+                        ),
+                        name=f'{pred_name} - {type}',
+                        text=hover_text
+                    )
+                    data.append(trace)
+
+                type = "trough"
+                y_inverted = [x_n * -1.0 for x_n in y]
+                # prominence=prom, width=args["peak_width"]
+                if len(peak_indices) > 0:
+                    peak_indices, peaks_meta = find_peaks(y_inverted, prominence=prominence_threshold, width=args["peak_width"])
+
+                    hover_text, peaks_data = create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sentence_text, story_id, "trough", y_axis_group, pred)
+
+                    segmented_data.extend(peaks_data)
+
+                    trace = go.Scatter(
+                        x=[sentence_nums[j] for j in peak_indices],
+                        y=[y[j] for j in peak_indices],
+                        mode='markers',
+                        marker=dict(
+                            color=colors[color_idx],
+                            symbol='star-triangle-down',
+                            size=14,
+                        ),
+                        name=f'{pred_name} - {type}',
+                        text=hover_text
+                    )
+                    data.append(trace)
+
                 if args['smoothing_plots']:
                     if pred in measure_names:
                         for j, window in enumerate(window_sizes):
@@ -427,7 +499,6 @@ def create_story_plots(args):
 
                             win_df = win_df.loc[win_df['window_name'] == pred]
                             win_df = win_df.sort_values(by="position")
-
 
                             trace = go.Scatter(
                                 x=win_df['position'],
@@ -445,7 +516,7 @@ def create_story_plots(args):
 
 
             layout = go.Layout(
-                title=f'Story {name} Prediction Plot',
+                title=f'Story {story_id} Prediction Plot',
                 hovermode='closest',
                 xaxis=dict(
                     #title='Position',
@@ -453,6 +524,7 @@ def create_story_plots(args):
                 yaxis=dict(
                     title=f'{y_axis_group}',
                 ),
+
                 showlegend=True,
                 legend=dict(
                     orientation="h")
@@ -461,16 +533,72 @@ def create_story_plots(args):
             fig = go.Figure(data=data, layout=layout)
 
             if not args["no_html_plots"]:
-                file_path = f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.html"
+                file_path = f"{args['output_dir']}/prediction_plots/story_{story_id}_{y_axis_group}_plot.html"
                 print(f"Save plot {file_path}")
                 pio.write_html(fig, file_path)
             if not args["no_pdf_plots"]:
-                file_path =  f"{args['output_dir']}/prediction_plots/story_{name}_{y_axis_group}_plot.pdf"
+                file_path =  f"{args['output_dir']}/prediction_plots/story_{story_id}_{y_axis_group}_plot.pdf"
                 print(f"Save plot pdf: {file_path}")
                 pio.write_image(fig,file_path)
 
+    print(segmented_data)
+    segmented_data = pd.DataFrame(data=segmented_data)
+    segmented_data.to_csv(f"{args['output_dir']}/prediction_plots/peaks_and_troughs.csv")
 
-    print(position_df.columns)
+
+def create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sentence_text, story_id, type, group, field):
+    hover_text = []
+    peaks_list = []
+
+    for i, ind in enumerate(peak_indices):
+
+        peak_dict = {}
+
+        peak_dict["story_id"] = story_id
+        peak_dict["field"] = field
+        peak_dict["group"] = group
+        peak_dict["text"] = []
+        peak_dict["sentence_nums"] = []
+
+        left_base = peaks_meta["left_bases"][i]
+        right_base = peaks_meta["right_bases"][i]
+        text = ""
+
+        for j in range(left_base, right_base):
+            wrapper = TextWrapper(initial_indent="<br>",width=80)
+
+            if j == ind:
+                peak_dict["sentence"] = sentence_text[j]
+                peak_dict["sentence_num"] = sentence_nums[j]
+
+                wrapper = TextWrapper(initial_indent="<br>")
+                wrapped_text = wrapper.fill(f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>")
+
+                text += wrapped_text
+            else:
+
+                wrapped_text = wrapper.fill(f"{sentence_nums[j]} - {sentence_text[j]}")
+
+                text += wrapped_text
+
+            peak_dict["text"].append(sentence_text[j])
+            peak_dict["sentence_nums"].append(sentence_nums[j])
+
+        prominance = peaks_meta["prominences"][i]
+        width = peaks_meta["widths"][i]
+        importance = prominance * width
+
+        peak_dict["prominence"] = prominance
+        peak_dict["width"] = width
+        peak_dict["importance"] = importance
+        peak_dict["type"] = type
+
+        text += "<br>"
+        text += f"<br>Prominence: {prominance} <br>Width: {width} <br>Importance: {importance}"
+
+        peaks_list.append(peak_dict)
+        hover_text.append(text)
+    return hover_text, peaks_list
 
 
 def create_analysis_output(args):

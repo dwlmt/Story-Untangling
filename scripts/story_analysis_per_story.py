@@ -42,7 +42,6 @@ parser.add_argument('--similarity-metric', default=["cosine", "euclidean"], narg
 metadata_fields = ['sentence_id', 'sentence_length', 'sentence_num', 'sentence_tensor',
                    'sentence_text', 'transition_text', 'story_id']
 
-
 def create_analysis_output(args):
     ensure_dir(f"{args['output_dir']}/mst_plots/")
 
