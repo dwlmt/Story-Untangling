@@ -44,6 +44,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                             coreference_model: str = True,
                             batch_size: int = 100,
                             max_workers: int = 16,
+                            marked_sentences = False,
                             cuda_device: Union[List[int], int] = None) -> str:
     file_name = os.path.basename(file_path)
     database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
@@ -94,6 +95,9 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
 
                 story_ids = [id for id in list(db['story'].insert(dict(story_num=story_num)) for story_num in story_nums)]
+
+                if marked_sentences:
+                    sentence_splitter = MarkerSentenceSplitter()
 
                 create_story_tasks.append(
                     loop.run_in_executor(executor, ProcessStory(sentence_splitter),
@@ -395,7 +399,27 @@ def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
 
     return lang_list
 
+class MarkerSentenceSplitter():
+    """ Split sentences based on a predefined marker.
+    """
+    def __init__(self, start_marker="[STR_SENT]", end_marker="[END_SENT]"):
+        self.start_marker = start_marker
+        self.end_marker = end_marker
 
+    def split_sentences(self, text: str) -> List[str]:
+        """
+        Splits a ``text`` :class:`str` paragraph into a list of :class:`str`, where each is a sentence.
+        """
+        split_text = text.split(self.start_marker)
+        split_text = [t.replace(self.end_marker,"").replace(self.start_marker,"").strip() for t in split_text]
+        split_text = [t for t in split_text if len(t) > 0]
+        return split_text
+
+    def batch_split_sentences(self, texts: List[str]) -> List[List[str]]:
+        """
+        Default implementation is to just iterate over the texts and call ``split_sentences``.
+        """
+        return [self.split_sentences(text) for text in texts]
 
 class ProcessStory:
     def __init__(self, sentence_splitter):
