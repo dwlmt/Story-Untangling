@@ -605,8 +605,6 @@ def annotation_correlation(args, annotation_df):
     annotator_agreement = []
     for col in annotation_columns:
         triples = []
-        x_list = []
-        y_list = []
 
         for idx, row in annotation_df.iterrows():
 
@@ -617,20 +615,10 @@ def annotation_correlation(args, annotation_df):
 
             matching_df = annotation_df.loc[annotation_df[story_id_col] == story]
 
-            for match_row_idx, match_row in matching_df.iterrows():
-
-                if row[worker_id_col] != match_row[worker_id_col]:
-
-                    x_list.append(row[col])
-                    y_list.append(match_row[col])
-
         t = AnnotationTask(data=triples, distance=interval_distance)
 
         agreement_dict = {"measure" : col}
         agreement_dict["alpha"] = t.alpha()
-        agreement_dict["kendall_pairwise"],   agreement_dict["kendall_pairwise_p_value"]  = kendalltau(x_list, y_list)
-        agreement_dict["pearson_pairwise"], agreement_dict["pearson_pairwise_p_value"] = pearsonr(x_list, y_list)
-        agreement_dict["spearman_pairwise"], agreement_dict["spearman_pairwise_p_value"] = spearmanr(x_list, y_list)
 
         worker_ids = annotation_df[worker_id_col].unique()
 
@@ -656,8 +644,14 @@ def annotation_correlation(args, annotation_df):
                 mean_value = means_df.loc[means_df[story_id_col] == story][col].values
                 worker_value =  worker_df.loc[worker_df[story_id_col] == story][col].values
 
+                print(worker_df)
+                print(mean_value, worker_value)
+
                 if len(mean_value) > 0 and len(worker_value) > 0:
 
+                    if len(worker_value) > 1:
+                        worker_value = worker_value[0]
+                        print("Same worker has completed the task multiple times")
                     x_list.append(float(worker_value))
                     y_list.append(float(mean_value))
 
@@ -782,7 +776,7 @@ def check_quality(annotation_df, only_passes_checks=True):
 
         time_taken = submit_time - accept_time
 
-        if time_taken.seconds / 60.0 < 4: # Represents 3 minutes.
+        if time_taken.seconds / 60.0 < 3: # Represents 3 minutes.
             suspiciously_quick.append(True)
         else:
             suspiciously_quick.append(False)
@@ -794,7 +788,7 @@ def check_quality(annotation_df, only_passes_checks=True):
     for summary in annotation_df["Answer.storySummary"]:
         num_tokens = len(summary.split(" "))
         token_length.append(num_tokens)
-        if num_tokens < 3:
+        if num_tokens < 4:
             too_short.append(True)
         else:
             too_short.append(False)
