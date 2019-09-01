@@ -352,9 +352,8 @@ def create_story_plots(args):
 
     ensure_dir(f"{args['output_dir']}/prediction_plots/")
 
-
     turning_points_df = None
-    if "turning_points_csv" in args:
+    if "turning_points_csv" in args and args["turning_points_csv"] is not None:
         turning_points_df = pd.read_csv(args["turning_points_csv"])
         turning_points_df = turning_points_df.fillna(value=0.0)
 
@@ -427,7 +426,7 @@ def create_story_plots(args):
             prominence_threshold = statistics.stdev(prom_data) * prom_weighting
 
             if args["number_of_peaks"] > 0:
-                prominence_threshold = 0.0001 # Make tiny as is not specified then the metadata is not returned for prominences.
+                prominence_threshold = 0.00001 # Make tiny as is not specified then the metadata is not returned for prominences.
 
             color_idx = 0
 
@@ -474,93 +473,10 @@ def create_story_plots(args):
                 num_of_peaks = args["number_of_peaks"]
                 peak_indices = optionally_top_n_peaks(num_of_peaks, peak_indices, peaks_meta)
 
-                all_points = []
-                if turning_points_df is not None:
-
-                    turning_story_df = turning_points_df.loc[turning_points_df["story_id"] == story_id]
-                    if len(turning_story_df) > 0:
-
-                        all_points = []
-
-                        story_length = len(sentence_nums)
-                        expected_points_indices = []
-
-                        mean_expected = []
-                        lower_brackets = []
-                        upper_brackets = []
-                        for mean, std in zip(args["turning_point_means"], args["turning_point_stds"]):
-                            mean_pos = int(floor(mean * (story_length / 100)))
-                            mean_expected.append(mean_pos)
-                            lower_bracket = max(0, int(floor(mean - std) * (story_length / 100)))
-                            lower_brackets.append(lower_bracket)
-                            upper_bracket = min(story_length - 1, int(ceil(mean + std) * (story_length / 100)))
-                            upper_brackets.append(upper_bracket)
-
-                            sentence_whole = group_df[pred].tolist()
-
-                            index_pos = sentence_whole.index(max(sentence_whole[lower_bracket:upper_bracket + 1]))
-                            expected_points_indices.append(index_pos)
-
-                        for i, ann_point in turning_story_df.iterrows():
-
-                            turn_dict = {}
-
-                            turn_dict["story_id"] = story_id
-                            turn_dict["measure"] = pred
-                            turn_dict["annotator"] = i
-
-                            turn_dict["lower_brackets"] = lower_brackets
-                            turn_dict["upper_brackets"] = upper_brackets
-                            turn_dict["mean_expected"] = mean_expected
-
-                            annotated_points = []
-                            for col in args["turning_point_columns"]:
-                                point = ann_point[col]
-                                annotated_points.append(point)
-
-                            all_points.extend(annotated_points)
-
-                            exp_dict = deepcopy(turn_dict)
-
-                            calc_turning_point_distances(annotated_points, args, group_df, expected_points_indices, pred, sentence_nums,
-                                                         exp_dict, type="constrained", compared="annotated")
-                            turning_point_data_list.append(exp_dict)
-
-                            peak_dict = deepcopy(turn_dict)
-                            calc_turning_point_distances(annotated_points, args, group_df, peak_indices, pred,
-                                                         sentence_nums,
-                                                         peak_dict, type="unconstrained", compared="annotated")
-                            turning_point_data_list.append(peak_dict)
-
-                        exp_dict = deepcopy(turn_dict)
-                        calc_turning_point_distances(mean_expected, args, group_df, expected_points_indices, pred, sentence_nums,
-                                                     exp_dict, type="constrained", compared="dist_baseline")
-                        turning_point_data_list.append(exp_dict)
-
-                        peak_dict = deepcopy(turn_dict)
-                        calc_turning_point_distances(mean_expected, args, group_df, peak_indices, pred,
-                                                     sentence_nums,
-                                                     peak_dict, type="unconstrained", compared="dist_baseline")
-                        turning_point_data_list.append(peak_dict)
-
-
-                if len(expected_points_indices) > 0:
-                    trace = go.Scatter(
-                        x=[sentence_nums[j] for j in expected_points_indices],
-                        y=[y[j] for j in expected_points_indices],
-                        mode='markers',
-                        marker=dict(
-                            color=colors[color_idx],
-                            symbol='triangle-up',
-                            size=14,
-                        ),
-                        name=f'{pred_name} - {type} constrained',
-                        text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in expected_points_indices],
-                    )
-                    data.append(trace)
-
                 if len(peak_indices) > 0:
-                    hover_text, peaks_data = create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sentence_text, story_id, "peak", y_axis_group, pred)
+                    hover_text, peaks_data = create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums,
+                                                                           sentence_text, story_id, "peak",
+                                                                           y_axis_group, pred)
 
                     segmented_data.extend(peaks_data)
 
@@ -582,11 +498,14 @@ def create_story_plots(args):
                 y_inverted = [x_n * -1.0 for x_n in y]
                 # prominence=prom, width=args["peak_width"]
                 if len(peak_indices) > 0:
-                    peak_indices, peaks_meta = find_peaks(y_inverted, prominence=prominence_threshold, width=args["peak_width"],plateau_size=1)
+                    peak_indices, peaks_meta = find_peaks(y_inverted, prominence=prominence_threshold,
+                                                          width=args["peak_width"], plateau_size=1)
 
                     peak_indices = optionally_top_n_peaks(num_of_peaks, peak_indices, peaks_meta)
 
-                    hover_text, peaks_data = create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sentence_text, story_id, "trough", y_axis_group, pred)
+                    hover_text, peaks_data = create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums,
+                                                                           sentence_text, story_id, "trough",
+                                                                           y_axis_group, pred)
 
                     segmented_data.extend(peaks_data)
 
@@ -604,69 +523,164 @@ def create_story_plots(args):
                     )
                     data.append(trace)
 
-                if len(annotated_points) > 0 and not plotted_turning_points:
+                all_points = []
+                if turning_points_df is not None:
 
-                    plotted_turning_points = True
+                    turning_story_df = turning_points_df.loc[turning_points_df["story_id"] == story_id]
+                    if len(turning_story_df) > 0:
 
-                    trace = go.Scatter(
-                        x=[sentence_nums[p] for p in mean_expected if p < len(sentence_nums)],
-                        y=[0.0] * len(mean_expected),
-                        mode='markers',
-                        marker=dict(
-                            color="black",
-                            symbol='diamond',
-                            size=14,
-                        ),
-                        name=f'dist baseline',
-                        text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in mean_expected if j < len(sentence_nums)],
+                        all_points = []
 
-                    )
-                    data.append(trace)
+                        story_length = len(sentence_nums)
+                        expected_points_indices = []
 
-                    trace = go.Scatter(
-                        x=[sentence_nums[p] for p  in lower_brackets if p < len(sentence_nums)],
-                        y=[0.0] * len(lower_brackets),
-                        mode='markers',
-                        marker=dict(
-                            color="black",
-                            symbol='triangle-right',
-                            size=14,
-                        ),
-                        name=f'dist baseline lower',
-                        text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in lower_brackets if  j < len(sentence_nums)],
+                        mean_expected = []
+                        lower_brackets = []
+                        upper_brackets = []
+                        for mean, std in zip(args["turning_point_means"], args["turning_point_stds"]):
+                            mean_pos = int(round(mean * (story_length / 100)))
+                            mean_expected.append(mean_pos)
+                            lower_bracket = max(0, int(floor(mean - std) * (story_length / 100)))
+                            lower_brackets.append(lower_bracket)
+                            upper_bracket = min(story_length - 1, int(ceil(mean + std) * (story_length / 100)))
+                            upper_brackets.append(upper_bracket)
 
-                    )
-                    data.append(trace)
+                            sentence_whole = group_df[pred].tolist()
 
-                    trace = go.Scatter(
-                        x=[sentence_nums[p]  for p in upper_brackets if p < len(sentence_nums)],
-                        y=[0.0] * len(upper_brackets),
-                        mode='markers',
-                        marker=dict(
-                            color="black",
-                            symbol='triangle-left',
-                            size=14,
-                        ),
-                        name=f'dist baseline upper',
-                        text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in upper_brackets  if j < len(sentence_nums)],
+                            index_pos = sentence_whole.index(max(sentence_whole[lower_bracket:upper_bracket + 1]))
+                            expected_points_indices.append(index_pos)
 
-                    )
-                    data.append(trace)
+                        done_story = False
+                        for i, ann_point in turning_story_df.iterrows():
 
-                    trace = go.Scatter(
-                        x=[sentence_nums[p] for p in all_points if p < len(sentence_nums)],
-                        y=[0.0] * len(all_points),
-                        mode='markers',
-                        marker=dict(
-                            color="gold",
-                            symbol='star',
-                            size=14,
-                        ),
-                        name=f'annotated',
-                        text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in all_points if j < len(sentence_nums)],
+                            if done_story:
+                                continue
+                            else:
+                                done_story
 
-                    )
-                    data.append(trace)
+                            turn_dict = {}
+
+                            turn_dict["story_id"] = story_id
+                            turn_dict["measure"] = pred
+                            turn_dict["annotator"] = i
+
+                            turn_dict["lower_brackets"] = lower_brackets
+                            turn_dict["upper_brackets"] = upper_brackets
+                            turn_dict["mean_expected"] = mean_expected
+
+                            annotated_points = []
+                            for col in args["turning_point_columns"]:
+                                point = ann_point[col]
+                                annotated_points.append(point)
+
+                            all_points.extend(annotated_points)
+
+                            if len(expected_points_indices) == len(args["turning_point_columns"]):
+
+                                exp_dict = deepcopy(turn_dict)
+
+                                calc_turning_point_distances(annotated_points, args, expected_points_indices, sentence_nums,
+                                                             exp_dict, type="constrained", compared="annotated")
+                                turning_point_data_list.append(exp_dict)
+
+                            if len(peak_indices) == len(args["turning_point_columns"]):
+                                peak_dict = deepcopy(turn_dict)
+                                calc_turning_point_distances(annotated_points, args, peak_indices, sentence_nums,
+                                                             peak_dict, type="unconstrained", compared="annotated")
+                                turning_point_data_list.append(peak_dict)
+
+                        if len(peak_indices) == len(args["turning_point_columns"]):
+                            exp_dict = deepcopy(turn_dict)
+                            calc_turning_point_distances(mean_expected, args, expected_points_indices, sentence_nums,
+                                                         exp_dict, type="constrained", compared="dist_baseline")
+                            turning_point_data_list.append(exp_dict)
+
+                        if len(peak_indices) == len(args["turning_point_columns"]):
+                            peak_dict = deepcopy(turn_dict)
+                            calc_turning_point_distances(mean_expected, args, peak_indices, sentence_nums,
+                                                         peak_dict, type="unconstrained", compared="dist_baseline")
+                            turning_point_data_list.append(peak_dict)
+
+
+                    if len(expected_points_indices) > 0:
+                        trace = go.Scatter(
+                            x=[sentence_nums[j] for j in expected_points_indices],
+                            y=[y[j] for j in expected_points_indices],
+                            mode='markers',
+                            marker=dict(
+                                color=colors[color_idx],
+                                symbol='triangle-up',
+                                size=14,
+                            ),
+                            name=f'{pred_name} - {type} constrained',
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in expected_points_indices],
+                        )
+                        data.append(trace)
+
+
+                    if len(annotated_points) > 0 and not plotted_turning_points:
+
+                        plotted_turning_points = True
+
+                        trace = go.Scatter(
+                            x=[sentence_nums[p] for p in mean_expected if p < len(sentence_nums)],
+                            y=[0.0] * len(mean_expected),
+                            mode='markers',
+                            marker=dict(
+                                color="black",
+                                symbol='diamond',
+                                size=14,
+                            ),
+                            name=f'dist baseline',
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in mean_expected if j < len(sentence_nums)],
+
+                        )
+                        data.append(trace)
+
+                        trace = go.Scatter(
+                            x=[sentence_nums[p] for p  in lower_brackets if p < len(sentence_nums)],
+                            y=[0.0] * len(lower_brackets),
+                            mode='markers',
+                            marker=dict(
+                                color="black",
+                                symbol='triangle-right',
+                                size=14,
+                            ),
+                            name=f'dist baseline lower',
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in lower_brackets if  j < len(sentence_nums)],
+
+                        )
+                        data.append(trace)
+
+                        trace = go.Scatter(
+                            x=[sentence_nums[p]  for p in upper_brackets if p < len(sentence_nums)],
+                            y=[0.0] * len(upper_brackets),
+                            mode='markers',
+                            marker=dict(
+                                color="black",
+                                symbol='triangle-left',
+                                size=14,
+                            ),
+                            name=f'dist baseline upper',
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in upper_brackets  if j < len(sentence_nums)],
+
+                        )
+                        data.append(trace)
+
+                        trace = go.Scatter(
+                            x=[sentence_nums[p] for p in all_points if p < len(sentence_nums)],
+                            y=[0.0] * len(all_points),
+                            mode='markers',
+                            marker=dict(
+                                color="gold",
+                                symbol='star',
+                                size=14,
+                            ),
+                            name=f'annotated',
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in all_points if j < len(sentence_nums)],
+
+                        )
+                        data.append(trace)
 
                 if args['smoothing_plots']:
                     if pred in measure_names:
@@ -738,50 +752,53 @@ def create_story_plots(args):
 
             summary_dict = {}
 
-            summary_dict["total_agreement"] = group["total_agreement"].mean()
-            summary_dict["partial_agreement"] = group["partial_agreement"].sum() / len(group["partial_agreement"])
 
             summary_dict["measure"] = measure
             summary_dict["constraint_type"] = constraint_type
             summary_dict["compared"] = compared
+            summary_dict["num_of_stories_counted"] = len(group)
+
+            summary_dict["total_agreement"] = group["total_agreement"].mean()
+            summary_dict["partial_agreement"] = group["partial_agreement"].sum() / len(group["partial_agreement"])
 
             predict_all = []
             actual_all = []
-            for i in range(len(args["turning_point_columns"])):
-                j = i + 1
-                predicted_positions = group[f"predicted_relative_position_{j}"].tolist()
+            for col in args["turning_point_columns"]:
+
+                summary_dict[f"{col}_total_agreement"] = group[f"{col}_total_agreement_correct"].sum() / len(group[f"{col}_total_agreement_correct"] )
+
+                predicted_positions = group[f"{col}_predicted_relative_position"].tolist()
                 predict_all.extend(predicted_positions)
-                actual_positions =  group[f"expected_relative_position_{j}"].tolist()
+                actual_positions =  group[f"{col}_expected_relative_position"].tolist()
                 actual_all.extend(actual_positions)
 
-                print(predicted_positions, actual_positions)
+                if len(predicted_positions) >= 2 and len(actual_positions) >= 2:
+                    kendall, kendall_p_value = kendalltau(predicted_positions, actual_positions)
+                    spearman, spearman_p_value = spearmanr(predicted_positions, actual_positions)
+                    pearson, pearson_p_value = pearsonr(predicted_positions, actual_positions)
 
-                kendall, kendall_p_value = kendalltau(predicted_positions, actual_positions)
-                spearman, spearman_p_value = spearmanr(predicted_positions, actual_positions)
-                pearson, pearson_p_value = pearsonr(predicted_positions, actual_positions)
+                    summary_dict[f"{col}_predicted_relative_position_corr_kendall"] = kendall
+                    summary_dict[f"{col}_predicted_relative_position_corr_kendall_p_value"] = kendall_p_value
+                    summary_dict[f"{col}_predicted_relative_position_corr_spearman"] = spearman
+                    summary_dict[f"{col}_predicted_relative_position_corr_spearman_p_value"] = spearman_p_value
+                    summary_dict[f"{col}_predicted_relative_position_corr_pearson"] = pearson
+                    summary_dict[f"{col}_predicted_relative_position_corr_pearson_p_value"] = pearson_p_value
 
-                summary_dict[f"predicted_relative_position_{j}_corr_kendall"] = kendall
-                summary_dict[f"predicted_relative_position_{j}_corr_kendall_p_value"] = kendall_p_value
-                summary_dict[f"predicted_relative_position_{j}_corr_spearman"] = spearman
-                summary_dict[f"predicted_relative_position_{j}_corr_spearman_p_value"] = spearman_p_value
-                summary_dict[f"predicted_relative_position_{j}_corr_pearson"] = pearson
-                summary_dict[f"predicted_relative_position_{j}_corr_pearson_p_value"] = pearson_p_value
+            if len(predicted_positions) >= 2 and len(actual_positions) >=2 :
+                kendall, kendall_p_value = kendalltau(predict_all, actual_all)
+                spearman, spearman_p_value = spearmanr(predict_all, actual_all)
+                pearson, pearson_p_value = pearsonr(predict_all, actual_all)
 
-            kendall, kendall_p_value = kendalltau(predict_all, actual_all)
-            spearman, spearman_p_value = spearmanr(predict_all, actual_all)
-            pearson, pearson_p_value = pearsonr(predict_all, actual_all)
-
-            summary_dict[f"predicted_relative_position_all_corr_kendall"] = kendall
-            summary_dict[f"predicted_relative_position_all_corr_kendall_p_value"] = kendall_p_value
-            summary_dict[f"predicted_relative_position_all_corr_spearman"] = spearman
-            summary_dict[f"predicted_relative_position_all_corr_spearman_p_value"] = spearman_p_value
-            summary_dict[f"predicted_relative_position_all_corr_pearson"] = pearson
-            summary_dict[f"predicted_relative_position_all_corr_pearson_p_value"] = pearson_p_value
-
+                summary_dict[f"predicted_relative_position_all_corr_kendall"] = kendall
+                summary_dict[f"predicted_relative_position_all_corr_kendall_p_value"] = kendall_p_value
+                summary_dict[f"predicted_relative_position_all_corr_spearman"] = spearman
+                summary_dict[f"predicted_relative_position_all_corr_spearman_p_value"] = spearman_p_value
+                summary_dict[f"predicted_relative_position_all_corr_pearson"] = pearson
+                summary_dict[f"predicted_relative_position_all_corr_pearson_p_value"] = pearson_p_value
 
             for c in args["turning_point_columns"] + ["avg"]:
 
-                for d in ["norm_dist","abs_dist","dist"]:
+                for d in ["dist","norm_dist","abs_dist","abs_norm_dist"]:
                     col_series = group[f"{c}_{d}"]
 
                     col_stats = col_series.describe()
@@ -804,39 +821,54 @@ def create_story_plots(args):
 
         # Calculate summary stats.
 
-def calc_turning_point_distances(annotated_points, args, group_df, peak_indices, pred, sentence_nums, turn_dict, type="unconstrained", compared="annotated"):
+def calc_turning_point_distances(annotated_points, args, peak_indices, sentence_nums, turn_dict, type="unconstrained", compared="annotated"):
 
-    turn_dict["expected_indices"] = annotated_points
-    turn_dict["predicted_indices"] = peak_indices
-    for i, p in enumerate(peak_indices, start=1):
-        turn_dict[f"predicted_relative_position_{i}"] = p / len(sentence_nums)
+    turn_dict["constraint_type"] = type
+    turn_dict["compared"] = compared
 
-    for i, p in enumerate(annotated_points, start=1):
-        turn_dict[f"expected_relative_position_{i}"] = p / len(sentence_nums)
+    num_of_sentences = max(sentence_nums)
+
+    for col, p in zip(args["turning_point_columns"],peak_indices):
+        turn_dict[f"{col}_predicted_relative_position"] = p / len(sentence_nums)
+        turn_dict[f"{col}_predicted_position"] = p
+
+    for col, p in zip(args["turning_point_columns"], annotated_points):
+        turn_dict[f"{col}_expected_relative_position"] = p / len(sentence_nums)
+        turn_dict[f"{col}_expected_position"] = p
 
     points_set = set(annotated_points)
     peak_indices_set = set(peak_indices)
-    turn_dict["total_agreement"] = len(peak_indices_set.intersection(points_set)) / len(peak_indices_set.union(points_set))
+
+    for col, pred, exp in zip(args["turning_point_columns"], peak_indices, annotated_points):
+        turn_dict[f"{col}_total_agreement_correct"] = int(pred == exp)
+
+    turn_dict["total_agreement"] = len(peak_indices_set.intersection(points_set)) / len(points_set)
     turn_dict["partial_agreement"] = int(len(peak_indices_set.intersection(points_set)) > 0)
     turn_dict["annotated_total"] = len(points_set)
-    norm_distances = []
+
     distances = []
+    norm_distances = []
     abs_distances = []
-    for predicted, actual in zip_longest(peak_indices, annotated_points, fillvalue=int(len(sentence_nums) / 2)):
+    abs_norm_distances = []
+
+    for predicted, actual in zip_longest(peak_indices, annotated_points, fillvalue=peak_indices[-1]):
         distance = predicted - actual
         distances.append(distance)
+
+        norm_distances.append(distance / float(num_of_sentences))
         abs_distance = abs(distance)
         abs_distances.append(abs_distance)
-        norm_distances.append(1 / len(group_df[pred]) * abs_distance)
+        abs_norm_distances.append(abs_distance / float(num_of_sentences))
 
-    turn_dict[f"avg_norm_dist"] = sum(norm_distances) / len(norm_distances)
+    turn_dict[f"avg_abs_norm_dist"] = sum(abs_norm_distances) / len(abs_norm_distances)
     turn_dict[f"avg_abs_dist"] = sum(abs_distances) / len(abs_distances)
     turn_dict[f"avg_dist"] = sum(distances) / len(distances)
-    turn_dict["constraint_type"] = type
-    turn_dict["compared"] = compared
-    for norm, abs_dist, dist, col in zip(norm_distances, abs_distances, distances, args["turning_point_columns"]):
-        turn_dict[f"{col}_norm_dist"] = norm
+    turn_dict[f"avg_norm_dist"] = sum(norm_distances) / len(norm_distances)
+
+    for norm, abs_dist, norm_dist, dist, col in zip(abs_norm_distances, abs_distances, norm_distances, distances, args["turning_point_columns"]):
+        turn_dict[f"{col}_abs_norm_dist"] = norm
         turn_dict[f"{col}_abs_dist"] = abs_dist
+        turn_dict[f"{col}_norm_dist"] = norm_dist
         turn_dict[f"{col}_dist"] = dist
 
 
