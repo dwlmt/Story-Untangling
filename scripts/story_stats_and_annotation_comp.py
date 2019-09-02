@@ -5,6 +5,7 @@ import os
 import random
 import re
 import statistics
+from collections import Counter
 
 import numpy
 import pandas
@@ -35,6 +36,8 @@ parser.add_argument('--peak-width', default=1.0, type=float, help="How wide must
 
 args = parser.parse_args()
 
+genre_other = ["fantasy", "fable", "science_fiction","fairytale"]
+
 genre_categories = ['Answer.crime.on',
                     'Answer.erotic_fiction.on', 'Answer.fable.on', 'Answer.fairytale.on',
                     'Answer.fan_fiction.on', 'Answer.fantasy.on', 'Answer.folktale.on',
@@ -44,6 +47,8 @@ genre_categories = ['Answer.crime.on',
                     'Answer.other.on',
                     'Answer.realistic_fiction.on', 'Answer.science_fiction.on',
                     'Answer.swashbuckler.on', 'Answer.thriller.on']
+
+other_col = 'Answer.other.on'
 
 story_id_col = 'Answer.storyId'
 
@@ -416,6 +421,47 @@ def find_and_extract_peaks(story_df, type, x, c, prominence=1.0, width=1.0):
     return peak_list, story_peak_summary
 
 
+def genres_per_story(args, annotation_df):
+
+    ensure_dir(f"{args['output_dir']}/genres/")
+
+    story_ids = annotation_df[story_id_col].unique()
+
+    annotation_no_others_df = annotation_df.loc[annotation_df[other_col] == False]
+
+    story_genre_data = []
+    for story_id in story_ids:
+
+        story_df = annotation_no_others_df.loc[annotation_no_others_df[story_id_col] == story_id]
+
+        story_genre_dict = {}
+
+        for c in genre_categories:
+            c_true_df = story_df.loc[story_df[c] == True]
+            if not c_true_df.empty:
+                story_genre_dict[c] = len(c_true_df)
+
+        story_genre_counter = Counter(story_genre_dict)
+        story_genre_list = story_genre_counter.most_common(1)
+        if len(story_genre_list) > 0:
+            story_genre, _ = story_genre_list[0]
+            story_genre = story_genre.replace("Answer.","").replace(".on","")
+            if story_genre not in genre_other:
+                story_genre = "other"
+        else:
+            story_genre = "other"
+        story_genre_data.append({"story_id": story_id, "genre": story_genre})
+
+    genre_df = pandas.DataFrame(data=story_genre_data)
+
+    genre_sum_df = genre_df.groupby('genre', as_index=False).count().rename(columns={"story_id": "count"})
+
+    fig = px.bar(genre_sum_df, x="genre", y="count")
+    export_plots(args, "/genres/bar", fig)
+
+    return genre_df
+
+
 def story_stats_correlation(args):
 
     dfs = []
@@ -435,10 +481,11 @@ def story_stats_correlation(args):
     position_df = pandas.read_csv(args["position_stats"])
     position_df = position_df.fillna(value=0.0)
 
+    genres_per_story_df = genres_per_story(args, annotation_df)
+    annotation_correlation(args, annotation_df, genres_per_story_df)
     prediction_peaks(args, annotation_df, position_df)
     prediction_position_correlation(args, position_df)
     prediction_correlation(args, pred_df)
-    annotation_correlation(args, annotation_df)
     prediction_annotation_correlation(args, annotation_df, pred_df)
 
 def prediction_position_correlation(args, position_df):
@@ -574,6 +621,7 @@ def calculate_correlation(c1, c2, table_list, x_list, y_list, measure="value", m
 
 
 def export_plots(args, file, fig):
+    ensure_dir(f"{args['output_dir']}/{file}")
     if not args["no_html_plots"]:
         file_path = f"{args['output_dir']}/{file}.html"
         print(f"Save plot: {file_path}")
@@ -593,7 +641,7 @@ def extract_position_measure_columns(position_df):
     return columns
 
 
-def annotation_correlation(args, annotation_df):
+def annotation_correlation(args, annotation_df, genres_per_story_df):
 
     ensure_dir(f"{args['output_dir']}/annotation_correlation/")
 
@@ -602,162 +650,166 @@ def annotation_correlation(args, annotation_df):
     ensure_dir(f"{args['output_dir']}/annotation_correlation/scatter/")
     ensure_dir(f"{args['output_dir']}/annotation_correlation/agreement/")
 
-    annotator_agreement = []
-    for col in annotation_columns:
-        triples = []
+    for genre in genre_other + ["other", "all"]:
 
-        for idx, row in annotation_df.iterrows():
+        if genre != "all":
 
-            worker = row[worker_id_col]
-            story = row[story_id_col]
-            metrics_col = row[col]
-            triples.append((str(worker), str(story), int(metrics_col)))
+            genre_rows_df = genres_per_story_df.loc[genres_per_story_df['genre'] == genre]
 
-            matching_df = annotation_df.loc[annotation_df[story_id_col] == story]
+            annotation_genre_filtered_df = pandas.merge(annotation_df, genre_rows_df, left_on=story_id_col, right_on="story_id", how='inner')
 
-        t = AnnotationTask(data=triples, distance=interval_distance)
+        else:
 
-        agreement_dict = {"measure" : col}
-        agreement_dict["alpha"] = t.alpha()
+            annotation_genre_filtered_df = annotation_df
 
-        worker_ids = annotation_df[worker_id_col].unique()
+        annotator_agreement = []
+        for col in annotation_columns:
+            triples = []
 
-        kendall_list = []
-        pearson_list = []
-        spearman_list = []
+            for idx, row in annotation_genre_filtered_df.iterrows():
 
-        worker_items = []
+                worker = row[worker_id_col]
+                story = row[story_id_col]
+                metrics_col = row[col]
+                triples.append((str(worker), str(story), int(metrics_col)))
 
-        for worker in worker_ids:
+            t = AnnotationTask(data=triples, distance=interval_distance)
 
-            x_list = []
-            y_list = []
+            agreement_dict = {"measure" : col}
+            agreement_dict["alpha"] = t.alpha()
 
-            worker_df = annotation_df.loc[annotation_df[worker_id_col] == worker]
-            worker_stories = worker_df[story_id_col].unique()
+            worker_ids = annotation_genre_filtered_df[worker_id_col].unique()
 
-            exclude_df = annotation_df.loc[annotation_df[worker_id_col] != worker]
-            means_df = exclude_df.groupby(story_id_col, as_index=False).mean()
+            kendall_list = []
+            pearson_list = []
+            spearman_list = []
 
-            for story in worker_stories:
+            worker_items = []
 
-                mean_value = means_df.loc[means_df[story_id_col] == story][col].values
-                worker_value =  worker_df.loc[worker_df[story_id_col] == story][col].values
+            for worker in worker_ids:
 
-                print(worker_df)
-                print(mean_value, worker_value)
+                x_list = []
+                y_list = []
 
-                if len(mean_value) > 0 and len(worker_value) > 0:
+                worker_df = annotation_genre_filtered_df.loc[annotation_genre_filtered_df[worker_id_col] == worker]
+                worker_stories = worker_df[story_id_col].unique()
 
-                    if len(worker_value) > 1:
-                        worker_value = worker_value[0]
-                        print("Same worker has completed the task multiple times")
-                    x_list.append(float(worker_value))
-                    y_list.append(float(mean_value))
+                exclude_df = annotation_genre_filtered_df.loc[annotation_genre_filtered_df[worker_id_col] != worker]
+                means_df = exclude_df.groupby(story_id_col, as_index=False).mean()
 
-            if len(x_list) >=2 and len(y_list) == len(x_list):
-                kendall, _ = kendalltau(x_list, y_list)
-                if not numpy.isnan(kendall):
-                    kendall_list.append(kendall)
-                pearson, _ = pearsonr(x_list, y_list)
-                if not numpy.isnan(pearson):
-                    pearson_list.append(pearson)
-                spearman, _ = spearmanr(x_list, y_list)
-                if not numpy.isnan(spearman):
-                    spearman_list.append(spearman)
+                for story in worker_stories:
 
-                print(x_list)
-                print(y_list)
-                print(kendall, spearman, pearson)
-                print(col, worker, kendall_list, spearman_list, pearson_list)
+                    mean_value = means_df.loc[means_df[story_id_col] == story][col].values
+                    worker_value =  worker_df.loc[worker_df[story_id_col] == story][col].values
 
-                worker_items.append(len(x_list))
+                    if len(mean_value) > 0 and len(worker_value) > 0:
 
-        total_items = float(sum(worker_items))
-        probabilities = [p / total_items for p in worker_items]
+                        if len(worker_value) > 1:
+                            worker_value = worker_value[0]
 
-        agreement_dict["kendall_n_versus_1"] = sum([i * p for i, p in zip(kendall_list, probabilities)])
-        agreement_dict["spearman_n_versus_1"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
-        agreement_dict["pearson_n_versus_1"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
+                        x_list.append(float(worker_value))
+                        y_list.append(float(mean_value))
 
-        annotator_agreement.append(agreement_dict)
+                if len(x_list) >=2 and len(y_list) == len(x_list):
+                    kendall, _ = kendalltau(x_list, y_list)
+                    if not numpy.isnan(kendall):
+                        kendall_list.append(kendall)
+                    pearson, _ = pearsonr(x_list, y_list)
+                    if not numpy.isnan(pearson):
+                        pearson_list.append(pearson)
+                    spearman, _ = spearmanr(x_list, y_list)
+                    if not numpy.isnan(spearman):
+                        spearman_list.append(spearman)
 
-    agreement_df = pandas.DataFrame(data=annotator_agreement)
-    agreement_df.to_csv(f"{args['output_dir']}/annotation_correlation/agreement/inter_annotator.csv")
 
-    agg_annotation_df = aggregate_annotations_df(annotation_df)
-    annotation_measures = list(agg_annotation_df['name'].unique())
-    annotation_measures.sort()
+                    worker_items.append(len(x_list))
 
-    for m in ["mean", "median", "std"]:
-        fig = px.line_polar(agg_annotation_df, r="mean", theta="name",
-                            color="story_id", line_close=True)
-        export_plots(args, f"/annotation_correlation/multi/{m}_polar", fig)
+            total_items = float(sum(worker_items))
+            probabilities = [p / total_items for p in worker_items]
 
-    story_ids = list(agg_annotation_df['story_id'].unique())
+            agreement_dict["kendall_n_versus_1"] = sum([i * p for i, p in zip(kendall_list, probabilities)])
+            agreement_dict["spearman_n_versus_1"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
+            agreement_dict["pearson_n_versus_1"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
 
-    fig = px.box(agg_annotation_df, y="mean", x="name", notched=True, points="all")
+            annotator_agreement.append(agreement_dict)
 
-    export_plots(args, "/annotation_correlation/box", fig)
+        agreement_df = pandas.DataFrame(data=annotator_agreement)
+        ensure_dir(f"{args['output_dir']}/annotation_correlation/agreement/{genre}/")
+        agreement_df.to_csv(f"{args['output_dir']}/annotation_correlation/agreement/{genre}/inter_annotator.csv")
 
-    pear_corr = []
-    ken_corr = []
-    spear_corr = []
-    table_list = []
+        agg_annotation_df = aggregate_annotations_df(annotation_genre_filtered_df)
+        annotation_measures = list(agg_annotation_df['name'].unique())
+        annotation_measures.sort()
 
-    for am in annotation_measures:
-        prediction_list = []
+        for m in ["mean", "median", "std"]:
+            fig = px.line_polar(agg_annotation_df, r="mean", theta="name",
+                                color="story_id", line_close=True)
+            export_plots(args, f"/annotation_correlation/multi/{genre}/{m}_polar", fig)
 
-        pear_corr_ann = []
-        ken_corr_ann = []
-        spear_corr_ann = []
+        story_ids = list(agg_annotation_df['story_id'].unique())
 
-        for am2 in annotation_measures:
+        fig = px.box(agg_annotation_df, y="mean", x="name", notched=True, points="all")
 
-            x_list = []
-            y_list = []
+        export_plots(args, f"/annotation_correlation/box/{genre}/box", fig)
 
-            for story_id in story_ids:
-                story_row = agg_annotation_df.loc[agg_annotation_df["story_id"] == story_id]
+        pear_corr = []
+        ken_corr = []
+        spear_corr = []
+        table_list = []
 
-                pred_dict = {}
-                pred_dict["story_id"] = story_id
+        for am in annotation_measures:
+            prediction_list = []
 
-                #print(am, am2, story_id)
+            pear_corr_ann = []
+            ken_corr_ann = []
+            spear_corr_ann = []
 
-                pred_dict["z"] = am2
+            for am2 in annotation_measures:
 
-                pred_row = story_row.loc[story_row["name"] == am]
-                x = float(pred_row.iloc[0]["mean"])
-                pred_dict["x"] = x
-                x_list.append(x)
-                pred_dict["x_err"] = float(pred_row.iloc[0]["std"])
+                x_list = []
+                y_list = []
 
-                pred_row = story_row.loc[story_row["name"] == am2]
-                y = float(pred_row.iloc[0]["mean"])
-                pred_dict["y"] = y
-                y_list.append(y)
-                pred_dict["y_err"] = float(pred_row.iloc[0]["std"])
+                for story_id in story_ids:
+                    story_row = agg_annotation_df.loc[agg_annotation_df["story_id"] == story_id]
 
-                prediction_list.append(pred_dict)
+                    pred_dict = {}
+                    pred_dict["story_id"] = story_id
 
-            kendall, pearson, spearman = calculate_correlation(am, am2, table_list, x_list, y_list)
+                    #print(am, am2, story_id)
 
-            pear_corr_ann.append(pearson)
-            spear_corr_ann.append(spearman)
-            ken_corr_ann.append(kendall)
+                    pred_dict["z"] = am2
 
-        pear_corr.append(pear_corr_ann)
-        ken_corr.append(ken_corr_ann)
-        spear_corr.append(spear_corr_ann)
+                    pred_row = story_row.loc[story_row["name"] == am]
+                    x = float(pred_row.iloc[0]["mean"])
+                    pred_dict["x"] = x
+                    x_list.append(x)
+                    pred_dict["x_err"] = float(pred_row.iloc[0]["std"])
 
-        point_df = pandas.DataFrame(data=prediction_list)
-        fig = px.scatter(point_df, x="x", y="y", color="z", title=am, trendline="lowess", hover_name="story_id")
+                    pred_row = story_row.loc[story_row["name"] == am2]
+                    y = float(pred_row.iloc[0]["mean"])
+                    pred_dict["y"] = y
+                    y_list.append(y)
+                    pred_dict["y_err"] = float(pred_row.iloc[0]["std"])
 
-        export_plots(args, f"/annotation_correlation/scatter/{am}", fig)
+                    prediction_list.append(pred_dict)
 
-    export_correlations(args, f"/annotation_correlation/heatmap/", annotation_stats_columns, annotation_stats_columns, ken_corr, pear_corr, spear_corr,
-                        table_list)
+                kendall, pearson, spearman = calculate_correlation(am, am2, table_list, x_list, y_list)
+
+                pear_corr_ann.append(pearson)
+                spear_corr_ann.append(spearman)
+                ken_corr_ann.append(kendall)
+
+            pear_corr.append(pear_corr_ann)
+            ken_corr.append(ken_corr_ann)
+            spear_corr.append(spear_corr_ann)
+
+            point_df = pandas.DataFrame(data=prediction_list)
+            fig = px.scatter(point_df, x="x", y="y", color="z", title=am, trendline="lowess", hover_name="story_id")
+
+            export_plots(args, f"/annotation_correlation/scatter/{genre}/{am}", fig)
+
+        export_correlations(args, f"/annotation_correlation/heatmap/{genre}/", annotation_stats_columns, annotation_stats_columns, ken_corr, pear_corr, spear_corr,
+                            table_list)
 
 def check_quality(annotation_df, only_passes_checks=True):
 
