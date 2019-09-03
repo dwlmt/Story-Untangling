@@ -1,6 +1,7 @@
 import argparse
 import csv
 import datetime
+import itertools
 import os
 import random
 import re
@@ -9,9 +10,10 @@ from collections import Counter
 
 import numpy
 import pandas
-from nltk import AnnotationTask, interval_distance
+from nltk import AnnotationTask, interval_distance, binary_distance
 from scipy.signal import find_peaks, peak_prominences, find_peaks_cwt
 from scipy.stats import kendalltau, pearsonr, spearmanr
+from sklearn.metrics import matthews_corrcoef
 from statsmodels.compat import scipy
 
 import plotly
@@ -470,7 +472,11 @@ def story_stats_correlation(args):
 
     annotation_df = pandas.concat(dfs, ignore_index=True)
     annotation_df = annotation_df.fillna(value=0.0)
+
+    annotation_df = map_to_binary_answers(annotation_df)
+
     annotation_df = check_quality(annotation_df)
+
 
     pred_df = pandas.read_csv(args["batch_stats"])
     pred_df = pred_df.fillna(value=0.0)
@@ -483,10 +489,10 @@ def story_stats_correlation(args):
 
     genres_per_story_df = genres_per_story(args, annotation_df)
     annotation_correlation(args, annotation_df, genres_per_story_df)
-    prediction_peaks(args, annotation_df, position_df)
-    prediction_position_correlation(args, position_df)
-    prediction_correlation(args, pred_df)
-    prediction_annotation_correlation(args, annotation_df, pred_df)
+    #prediction_peaks(args, annotation_df, position_df)
+    #prediction_position_correlation(args, position_df)
+    #prediction_correlation(args, pred_df)
+    #prediction_annotation_correlation(args, annotation_df, pred_df)
 
 def prediction_position_correlation(args, position_df):
 
@@ -640,6 +646,18 @@ def extract_position_measure_columns(position_df):
                not c.endswith('_1') and not c.endswith('_2') and not c.endswith('_3') and not c.endswith('_4')]
     return columns
 
+def map_likert_to_bin(row, col):
+    if row[col] < 3:
+        return 0
+    else:#if row[col] > 3:
+        return 1
+
+def map_to_binary_answers(annotation_df):
+    for col in annotation_stats_columns:
+        annotation_df[f'{col}_bin'] = annotation_df.apply(lambda row: map_likert_to_bin(row, col), axis=1)
+        print(annotation_df[[f'{col}',f'{col}_bin']])
+
+    return annotation_df
 
 def annotation_correlation(args, annotation_df, genres_per_story_df):
 
@@ -653,17 +671,42 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
     for genre in genre_other + ["other", "all"]:
 
         if genre != "all":
-
             genre_rows_df = genres_per_story_df.loc[genres_per_story_df['genre'] == genre]
-
             annotation_genre_filtered_df = pandas.merge(annotation_df, genre_rows_df, left_on=story_id_col, right_on="story_id", how='inner')
-
         else:
-
             annotation_genre_filtered_df = annotation_df
 
+
+        story_ids = annotation_genre_filtered_df[story_id_col].unique()
+        story_worker_pairs_dict = {}
+        for story_id in story_ids:
+            workers_for_story_df = annotation_genre_filtered_df.loc[annotation_genre_filtered_df[story_id_col] == story_id]
+            workers_for_story = workers_for_story_df[worker_id_col].unique()
+            story_worker_pairs_dict[story_id] = list(itertools.combinations(workers_for_story, 2))
+
         annotator_agreement = []
-        for col in annotation_columns:
+        for col in annotation_columns + [f"{c}_bin" for c in annotation_columns]:
+
+            agreement_dict = {"measure": col}
+
+            x_list = []
+            y_list = []
+            for story_id, pairs in story_worker_pairs_dict.items():
+                if pairs is None or len(pairs) == 0:
+                    continue
+
+                story_df = annotation_genre_filtered_df.loc[annotation_genre_filtered_df[story_id_col] == story_id]
+
+                for worker_1, worker_2 in pairs:
+                    worker_1_values = story_df.loc[story_df[worker_id_col] == worker_1][col].values
+                    worker_2_values = story_df.loc[story_df[worker_id_col] == worker_2][col].values
+
+                    x_list.append(worker_1_values[0])
+                    y_list.append(worker_2_values[0])
+
+            phi = matthews_corrcoef(x_list, y_list)
+            agreement_dict["phi"] = phi
+
             triples = []
 
             for idx, row in annotation_genre_filtered_df.iterrows():
@@ -673,9 +716,13 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
                 metrics_col = row[col]
                 triples.append((str(worker), str(story), int(metrics_col)))
 
-            t = AnnotationTask(data=triples, distance=interval_distance)
+            if "_bin" in col:
+                dist = binary_distance
+            else:
+                dist = interval_distance
 
-            agreement_dict = {"measure" : col}
+            t = AnnotationTask(data=triples, distance=dist)
+
             agreement_dict["alpha"] = t.alpha()
 
             worker_ids = annotation_genre_filtered_df[worker_id_col].unique()
@@ -711,6 +758,7 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
                         y_list.append(float(mean_value))
 
                 if len(x_list) >=2 and len(y_list) == len(x_list):
+
                     kendall, _ = kendalltau(x_list, y_list)
                     if not numpy.isnan(kendall):
                         kendall_list.append(kendall)
@@ -721,7 +769,6 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
                     if not numpy.isnan(spearman):
                         spearman_list.append(spearman)
 
-
                     worker_items.append(len(x_list))
 
             total_items = float(sum(worker_items))
@@ -730,6 +777,9 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
             agreement_dict["kendall_n_versus_1"] = sum([i * p for i, p in zip(kendall_list, probabilities)])
             agreement_dict["spearman_n_versus_1"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
             agreement_dict["pearson_n_versus_1"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
+
+            #agreement_dict["phi_n_versus_1"] = sum([i * p for i, p in zip(phi_list, probabilities)])
+
 
             annotator_agreement.append(agreement_dict)
 
