@@ -111,15 +111,15 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_witheld_splitaa"
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_splitad"
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = True
 
         self.levels_to_rollout = 2
-        self.generate_per_branch = 50
-        self.sample_per_level_branch = 50
+        self.generate_per_branch = 100
+        self.sample_per_level_branch = 100
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
@@ -149,7 +149,9 @@ class UncertainReaderGenPredictor(Predictor):
         self.embedder._top_layer_only = True
 
         self.dataset_reader = dataset_reader
-        self.dataset_reader._story_chunking = 150  # Allow bigger batching for sampling.
+        self.dataset_reader._story_chunking = 200  # Allow bigger batching for sampling.
+        #self.dataset_reader._marked_sentences = True
+
         self.tokenizer = dataset_reader._tokenizer
         self.indexer =  dataset_reader._token_indexers["openai_transformer"]
 
@@ -245,25 +247,27 @@ class UncertainReaderGenPredictor(Predictor):
         cutoff_prob = self.calc_probability_cutoff(probs)
 
         pruned_child_list = []
-        for i, (c, l, p, lb) in enumerate(zip(child_list, logits, probs, log_probs)):
-            c.logit = l
-            c.prob = p
-            c.log_prob = lb
 
-            calc_prob = c.prob
+        if len(child_list) > 0:
+            for i, (c, l, p, lb) in enumerate(zip(child_list, logits, probs, log_probs)):
+                c.logit = l
+                c.prob = p
+                c.log_prob = lb
 
-            if c.gold:
-                pass
-            elif calc_prob < cutoff_prob:
-                c.parent = None
-                root.children = root.children[: i] + root.children[i + 1:]
-            else:
+                calc_prob = c.prob
 
-                pruned_child_list.append(c)
+                if c.gold:
+                    pass
+                elif calc_prob < cutoff_prob:
+                    c.parent = None
+                    root.children = root.children[: i] + root.children[i + 1:]
+                else:
 
-        self._calculate_distances(child_list, parent_story_tensor, child_story_tensors)
+                    pruned_child_list.append(c)
 
-        root.children = child_list
+            self._calculate_distances(child_list, parent_story_tensor, child_story_tensors)
+
+            root.children = child_list
 
         return root
 
@@ -1101,9 +1105,10 @@ class UncertainReaderGenPredictor(Predictor):
             indexed_tokens[position + level] = gen_sentence_padded.detach().clone().long().to(self._device)
 
             sentence_text = [self.indexer.decoder[t].replace("</w>", "") for t in gen_sentence if t in self.indexer.decoder]
-            sentence_text = strip_repeating_punctuation(sentence_text)
+            sentence_text_joined = " ".join(sentence_text)
+            sentence_text_joined = strip_repeating_punctuation(sentence_text_joined)
 
-            if not is_nonsense(sentence_text) and len(sentence_text) >= 3:
+            if not is_nonsense(sentence_text) and len(sentence_text_joined) >= 3:
                 sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
 
                 created_node = AnyNode(gold=False,

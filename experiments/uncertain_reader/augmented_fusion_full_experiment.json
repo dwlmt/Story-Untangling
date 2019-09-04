@@ -53,13 +53,13 @@
       }
     },
     "sentence_seq2vec_encoder": {
-      "type": "augmented_lstm",
+      "type": "alternating_lstm",
       "input_size": 768,
       "hidden_size": 768,
       "num_layers": 2
     },
     "story_seq2seq_encoder": {
-      "type": "augmented_lstm",
+      "type": "lstm",
       "input_size": 768,
       "hidden_size": 768,
       "num_layers": 3

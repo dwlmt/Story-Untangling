@@ -648,7 +648,7 @@ def extract_position_measure_columns(position_df):
 
 def map_likert_to_bin(row, col):
     if row[col] < 3:
-        return 0
+        return -1
     else:#if row[col] > 3:
         return 1
 

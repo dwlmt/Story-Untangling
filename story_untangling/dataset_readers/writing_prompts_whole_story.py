@@ -90,6 +90,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  story_chunking: int = 50,
                  ner_model: str = None,
                  coreference_model: str = None,
+                 marked_sentences: bool = False,
                  cuda_device: Union[List[int], int] = -1,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
@@ -112,6 +113,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._story_chunking = story_chunking
         self._ner_model = ner_model
         self._coreference_model = coreference_model
+        self._marked_sentences = marked_sentences
 
         self._cuda_device = cuda_device
 
@@ -144,8 +146,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         batch_num = 0
 
-        tensors = self.block_memory()
-        self.unblock_memory(tensors)
+        #tensors = self.block_memory()
+        #self.unblock_memory(tensors)
 
         dataset_db = self.create_cached_dataset(file_path)
 
@@ -209,7 +211,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         dataset_db = loop.run_until_complete(
             create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
                               file_path=file_path, use_existing_database=self._use_existing_cached_db,
-                              ner_model=self._ner_model, coreference_model=self._coreference_model,
+                              ner_model=self._ner_model, coreference_model=self._coreference_model, marked_sentences=self._marked_sentences,
                               cuda_device=self._cuda_device))
         self._dataset_db = dataset_db
         return dataset_db
@@ -402,7 +404,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 sentence_text_field = sentence_text_field.empty_field()
             story_text_original.append(sentence_text)
             story_text_fields.append(sentence_text_field)
-
 
             if "vader_sentiment" in sentence:
                 vader_sentiment.append(sentence["vader_sentiment"])
