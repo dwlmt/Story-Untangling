@@ -10,35 +10,30 @@
     "token_indexers": {
       "openai_transformer": {
         "type": "openai_transformer_byte_pair",
-        "n_ctx": 200,
+        "n_ctx": 150,
         "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
       }
     },
-    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/base",//,"/disk/scratch/s1569885/dataset",
+    "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text",
     "use_existing_cached_db": true,
     "cuda_device": [
-     2, 3
+      1
     ],
-    "story_chunking": 20,
-    //"ner_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/fine-grained-ner-model-elmo-2018.12.21.tar.gz",
-    //"coreference_model": "https://s3-us-west-2.amazonaws.com/allennlp/models/coref-model-2018.02.05.tar.gz",
+    "story_chunking": 50,
     "lazy": true
   },
   //"/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  "test_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/first_500",
-  //"evaluate_on_test": true,
+  "train_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/train.wp_target",
+  "validation_data_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/valid.wp_target",
+  "test_data_path": "afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/datasets/test.wp_target",
+  "evaluate_on_test": true,
   "model": {
     "type": "uncertain_reader",
-    //"disc_loss": true,
-    //"gen_loss": true,
-    "flip_loss": true,
-    //"lm_finetune_top_layers": 1,
+    "disc_loss": true,
+    "gen_loss": true,
     "distance_weights": [
       1.0
     ],
-    "disc_length_regularizer": false,
     "text_field_embedder": {
       "allow_unmatched_keys": true,
       "embedder_to_indexer_map": {
@@ -50,8 +45,8 @@
         "openai_transformer": {
           "type": "openai_transformer_embedder",
           "transformer": {
-            "n_ctx": 200,
-            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz"
+            "n_ctx": 150,
+            "model_path": "https://s3-us-west-2.amazonaws.com/allennlp/models/openai-transformer-lm-2018.07.23.tar.gz",
           },
           "top_layer_only": true
         }
@@ -70,20 +65,38 @@
       "hidden_size": 768,
       "num_layers": 3,
       "dropout": 0.0
+    },
+    "story_feedforward": {
+      "input_dim": 768,
+      "num_layers": 2,
+      "hidden_dims": 768,
+      "activations": "elu",
+      "dropout": 0.0
+    },
+    //"bilinear_fusion": true,
+    "fusion_seq2seq_encoder": {
+      "type": "feedforward",
+      "feedforward": {
+        "input_dim": 1536,
+        "num_layers": 2,
+        "hidden_dims": 768,
+        "activations": "elu",
+        "dropout": 0.0
+      }
     }
   },
-  "iterator": {
+ "iterator": {
     "type": "basic",
     "batch_size": 2,
     "max_instances_in_memory": 256
   },
   "trainer": {
-    "type": "uncertain_trainer_split_lm",
-    "num_epochs": 1,
+    //"type" : "apex",
+    "num_epochs": 5,
     "patience": 1,
     "shuffle": false,
     "cuda_device": [
-      2, 3
+      1
     ],
     "grad_clipping": 5.0,
     "model_save_interval": 3600.0,

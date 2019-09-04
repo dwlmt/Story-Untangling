@@ -9,6 +9,7 @@ import pandas
 from nltk.metrics.agreement import AnnotationTask
 from nltk.metrics.distance import interval_distance
 from scipy.stats import stats
+from tabulate import tabulate
 
 locale.setlocale(locale.LC_TIME, "en_US")  # swedish
 
@@ -47,7 +48,18 @@ def flatten(d, parent_key='', sep='_'):
 
 
 def process_annotations(args):
-    source_csv = pandas.read_csv(args["source_csv"])
+
+    li = []
+
+    for filename in args["source_csvs"]:
+        df = pandas.read_csv(filename, index_col=None, header=0)
+        li.append(df)
+
+    source_csv = pandas.concat(li, ignore_index=True, sort=False, axis=0)
+
+    #print(tabulate(source_csv, headers='keys', tablefmt='psql'))
+
+    print(source_csv.columns)
 
     accept_time_col = source_csv["AcceptTime"]
     submit_time_col = source_csv["SubmitTime"]
@@ -92,11 +104,16 @@ def process_annotations(args):
                 added = True
                 genre_name = g.split(".")[1]
                 genres.append(genre_name)
+
         if not added:
             genres.append("other")
     source_csv = source_csv.assign(genre=pandas.Series(genres))
 
     source_csv.to_csv(f"{args['target']}_processed.csv")
+
+    #print(f"Prefiltered: {len(source_csv)}")
+    #source_csv = source_csv.loc[(source_csv['too_quick'] == True) & (source_csv['too_short'] == True)]
+    #print(f"Postfiltered: {len(source_csv)}")
 
     stats_dict = defaultdict(dict)
     for col in stats_columns:
@@ -121,9 +138,11 @@ def process_annotations(args):
             worker = row[worker_id_col]
             story = row[story_id_col]
             metrics_col = row[col]
-            triples.append((worker, story, metrics_col))
+            triples.append((str(worker), str(story), int(metrics_col)))
+            print(worker, story, metrics_col)
         t = AnnotationTask(data=triples, distance=interval_distance)
         stats_dict[col]["krippendorff_alpha"] = t.alpha()
+        stats_dict[col]["average_agreement"] = t.alpha()
 
     pandas.DataFrame.from_dict(stats_dict, orient="index").to_csv(f"{args['target']}_stats.csv")
 
@@ -150,10 +169,10 @@ def process_annotations(args):
 
 parser = argparse.ArgumentParser(
     description='Process the whole corpus annotation data, convert values and calculate ')
-parser.add_argument('--source-csv', required=True, type=str, help="The RAW Amazon Mechanical Turk ")
+parser.add_argument('--source-csvs', required=True, nargs="+", type=str, help="The RAW Amazon Mechanical Turk ")
 parser.add_argument('--target', required=True, type=str, help="Base output name for the saved statistics.")
-parser.add_argument('--min-time', type=int, default=5, help="Min time in minutes not to be considered suspicious.")
-parser.add_argument('--min-tokens', type=int, default=5, help="Min tokens considered suspicious.")
+parser.add_argument('--min-time', type=int, default=4, help="Min time in minutes not to be considered suspicious.")
+parser.add_argument('--min-tokens', type=int, default=2, help="Min tokens considered suspicious.")
 
 args = parser.parse_args()
 
