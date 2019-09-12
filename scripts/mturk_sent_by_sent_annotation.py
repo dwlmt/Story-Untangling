@@ -12,9 +12,8 @@ parser.add_argument('--max-assignments', required=False, type=int, default=1, he
 parser.add_argument('--annotations-per-hit', required=False, type=int, default=1,
                     help="How many annotations per assignment.")
 parser.add_argument('--reward', required=False, type=float, default=0.25, help="The reward per HIT.")
-parser.add_argument('--access-key-id', required=False, type=str, default="AKIAI33ZD245LOFYMYAQ", help="AWS Access Key.")
-parser.add_argument('--secret-access-key', required=False, type=str, default="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",
-                    help="AWS Access Key.")
+parser.add_argument('--access-key-id', required=True, help="AWS Access Key.")
+parser.add_argument('--secret-access-key', required=True, type=str, help="AWS Access Key.")
 parser.add_argument('--mturk-url', required=False, type=str,
                     default="https://mturk-requester-sandbox.us-east-1.amazonaws.com/", help="Mechanical turk link.")
 
