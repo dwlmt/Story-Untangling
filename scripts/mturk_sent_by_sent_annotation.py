@@ -19,7 +19,6 @@ parser.add_argument('--mturk-url', required=False, type=str,
 
 args = parser.parse_args()
 
-
 def create_assignments(args):
     print(f"Create assignments: {args}")
 
@@ -67,7 +66,7 @@ def create_assignments(args):
 
             new_hit = mturk.create_hit(
                 Title=f'Story reading sentence by sentence {row["story_id"]}',
-                Description='Read a short story and record the level of interest or tension per sentence. Will take 5-10 minutes per hit. Fluent English speakers required.',
+                Description='Read a short story and record the level of dramatic tension per sentence. Will take 5-10 minutes per hit. Fluent English speakers required. Some violent, sexual or other disturbing content may be present in the stories.',
                 Keywords='story, narrative, storytelling, annotation, research, nlp, reading',
                 Reward=f'{args["reward"]}',
                 MaxAssignments=args["annotations_per_hit"],
@@ -75,7 +74,7 @@ def create_assignments(args):
                 AssignmentDurationInSeconds=3600,  # One hour
                 AutoApprovalDelayInSeconds=259200,  # 3 Days
                 Question=external_question_xml,
-                # QualificationRequirements=worker_requirements
+                QualificationRequirements=worker_requirements
             )
 
             print(new_hit)
