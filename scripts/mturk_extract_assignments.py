@@ -36,7 +36,6 @@ def create_assignments(args):
         hit_id = row["hit_id"]
         print(f"Retrieve HIT: {hit_id}")
 
-
         # Get a list of the Assignments that have been submitted
         response = mturk.list_assignments_for_hit(
             HITId=str(hit_id),
@@ -49,7 +48,6 @@ def create_assignments(args):
         for assignment in assignments:
 
             item = {}
-            item["hit_id"] = hit_id
 
             answer_dict = xmltodict.parse(assignment['Answer'])
             answer_dict_2 = answer_dict["QuestionFormAnswers"]["Answer"]
