@@ -31,19 +31,25 @@ def create_assignments(args):
         {
             'QualificationTypeId': '2F1QJWKUDD8XADTFD2Q0G6UTO95ALH',
             'Comparator': 'Exists',
-            'RequiredToPreview': False,
+            'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
         {
             'QualificationTypeId': '000000000000000000L0',
             'Comparator': 'GreaterThanOrEqualTo',
-            'IntegerValues': [95],
-            'RequiredToPreview': False,
+            'IntegerValues': [98],
+            'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
         {
             'QualificationTypeId': '00000000000000000040',
             'Comparator': 'GreaterThanOrEqualTo',
             'IntegerValues': [1000],
-            'RequiredToPreview': False,
+            'ActionsGuarded': 'DiscoverPreviewAndAccept',
+        },
+        {
+            'QualificationTypeId': '00000000000000000060',
+            'Comparator': 'EqualTo',
+            'IntegerValues': [1],
+            'ActionsGuarded': 'DiscoverPreviewAndAccept',
         }
     ]
 
