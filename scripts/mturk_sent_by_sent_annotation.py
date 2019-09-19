@@ -4,7 +4,7 @@ import boto3
 import pandas
 
 parser = argparse.ArgumentParser(
-    description='Extract JSON vectors and perform dimensionality reduction.')
+    description='Create tasks on MTurk using the API.')
 parser.add_argument('--annotations-file', required=True, type=str, help="Link to the annotations file and codes.")
 parser.add_argument('--output-file', required=True, type=str, help="The output file with the HIT ids data.")
 parser.add_argument('--task-url', required=True, type=str, help="Link to the online annotations app.")

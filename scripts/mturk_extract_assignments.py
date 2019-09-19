@@ -5,7 +5,7 @@ import pandas
 import xmltodict
 
 parser = argparse.ArgumentParser(
-    description='Extract JSON vectors and perform dimensionality reduction.')
+    description='Extract results from Mechanical Turk.')
 parser.add_argument('--assignments-file', required=True, type=str, help="Link to the annotations file and codes.")
 parser.add_argument('--output-file', required=True, type=str, help="The output file with the HIT ids data.")
 parser.add_argument('--access-key-id', required=False, type=str, default="AKIAI33ZD245LOFYMYAQ", help="AWS Access Key.")
