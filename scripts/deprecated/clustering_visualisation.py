@@ -124,7 +124,6 @@ def main(args):
                         story_embeddings = decomposition.PCA(
                             n_components=args["dim_reduction_components"]).fit_transform(story_embeddings)
 
-
                 story_clusterer = HDBSCAN(algorithm='best', metric=args["clustering_metric"],
                                           min_cluster_size=args["min_cluster_size"], approx_min_span_tree=False,
                                           gen_min_span_tree=True, )
@@ -141,7 +140,6 @@ def main(args):
                 plot_scatter(X, Y, colors=local_story_cluster_colors,
                              plot_name=f'{results_dir}/{embeddings_name}_{story_id}_scatter_local_cluster.pdf',
                              labels=story_positions)
-
 
                 ax = story_clusterer.minimum_spanning_tree_.plot()
 
