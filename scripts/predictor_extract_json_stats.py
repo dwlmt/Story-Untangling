@@ -12,12 +12,15 @@ def ensure_dir(file_path):
         print(f"Create directory: {directory}")
         os.makedirs(directory)
 
+
 parser = argparse.ArgumentParser(
     description='Extract JSON perform dimensionality reduction and save to Parquet format.')
 parser.add_argument('--source-json', required=True, type=str, help="JSON file to process.")
-parser.add_argument('--output-dir', required=True, type=str, help="Output for the Panda data frames with the extracted stats.")
+parser.add_argument('--output-dir', required=True, type=str,
+                    help="Output for the Panda data frames with the extracted stats.")
 
 args = parser.parse_args()
+
 
 def extract_json_stats(args):
     print(args)
@@ -30,7 +33,7 @@ def extract_json_stats(args):
     ensure_dir(args["output_dir"])
 
     source_basename = os.path.basename(args['source_json'])
-    source_basename = source_basename.replace('.jsonl','')
+    source_basename = source_basename.replace('.jsonl', '')
 
     with jsonlines.open(args['source_json']) as reader:
         for i, obj in tqdm(enumerate(reader)):
@@ -61,7 +64,9 @@ def extract_json_stats(args):
                             if "children" not in window_slot:
                                 continue
 
-                            window_stats.extend([{**w, **{"window_name": window_size, "window_size": window_slot["name"]}} for w in window_slot["children"]])
+                            window_stats.extend(
+                                [{**w, **{"window_name": window_size, "window_size": window_slot["name"]}} for w in
+                                 window_slot["children"]])
 
     print(f"Position {len(position_stats)}, Batch Stats: {len(batch_stats)}, Window Stats: {len(window_stats)}")
 
@@ -76,5 +81,6 @@ def extract_json_stats(args):
     window_stats_df = pandas.DataFrame(data=window_stats)
     window_stats_df.to_csv(f'{args["output_dir"]}/{source_basename}_window_stats.csv.xz')
     print(window_stats_df)
+
 
 extract_json_stats(vars(args))

@@ -12,47 +12,65 @@ from textwrap import TextWrapper
 import colorlover as cl
 import numpy
 import pandas as pd
-import plotly
 import plotly.graph_objs as go
 import plotly.io as pio
-
 # These are the default plotly colours.
 from scipy.signal import find_peaks
 from scipy.stats import kendalltau, spearmanr, pearsonr
 
 colors = ['rgb(31, 119, 180)', 'rgb(255, 127, 14)',
-                     'rgb(44, 160, 44)', 'rgb(214, 39, 40)',
-                     'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
-                     'rgb(227, 119, 194)', 'rgb(127, 127, 127)',
-                     'rgb(188, 189, 34)', 'rgb(23, 190, 207)']
+          'rgb(44, 160, 44)', 'rgb(214, 39, 40)',
+          'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
+          'rgb(227, 119, 194)', 'rgb(127, 127, 127)',
+          'rgb(188, 189, 34)', 'rgb(23, 190, 207)']
 
-shapes = ["circle", "square", "diamond","cross", "x","star-triangle-up", "star-triangle-down","triangle-up", "triangle-down", "triangle-left", "triangle-right","pentagon","hexagon","octagon",'hexagram',"bowtie","hourglass"]
+shapes = ["circle", "square", "diamond", "cross", "x", "star-triangle-up", "star-triangle-down", "triangle-up",
+          "triangle-down", "triangle-left", "triangle-right", "pentagon", "hexagon", "octagon", 'hexagram', "bowtie",
+          "hourglass"]
 
 parser = argparse.ArgumentParser(
-    description='Extract JSON vectors and perform dimensionality reduction.')
+    description='Run stats from  the prediction output, clustering and stats for the annotations and predictions.')
 parser.add_argument('--batch-stats', required=False, type=str, help="CSV of the prediction batch stats.")
 parser.add_argument('--position-stats', required=False, type=str, help="CSV of the prediction position stats.")
 parser.add_argument('--window-stats', required=False, type=str, help="CSV of the window stats.")
 parser.add_argument('--vector-stats', required=False, type=str, help="CSV containing the vector output.")
+parser.add_argument('--mturk-sentence-annotations', required=False, type=str, help="CSV export from Mechanical Turk.")
+parser.add_argument('--firebase-sentence-annotations', required=False, type=str,
+                    help="JSONL export of sentence annotations from Firebase.")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument('--smoothing', required=False, type=str, nargs='*', default=['exp','holt','avg','avg_2','reg','reg_2','arima'], help="CSV containing the vector output.")
+parser.add_argument('--smoothing', required=False, type=str, nargs='*',
+                    default=['exp', 'holt', 'avg', 'avg_2', 'reg', 'reg_2', 'arima'],
+                    help="CSV containing the vector output.")
 parser.add_argument('--max-plot-points', default=50000, type=int, help="Max number of scatter points.")
-parser.add_argument('--cluster-example-num', default=100, type=int, help="Max number of examples to select for each cluster category.")
-parser.add_argument("--smoothing-plots", default=False, action="store_true" , help="Plot sliding windows and smoothong as well as the raw position data.")
-parser.add_argument("--no-html-plots", default=False, action="store_true" , help="Don't save plots to HTML")
-parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
-parser.add_argument("--no-cluster-output", default=False, action="store_true" , help="Don't calculate the cluster output.")
-parser.add_argument("--no-story-output", default=False, action="store_true" , help="Don't calculate the story plots.")
-parser.add_argument('--peak-prominence-weighting', default=0.35, type=float, help="Use to scale the standard deviation of a column.")
-parser.add_argument('--peak-width', default=1.0, type=float, help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
-parser.add_argument('--number-of-peaks', default=-1, type=int, help="Number of peaks to find, overrides the other settings.")
-parser.add_argument('--turning-points-csv', required=False, type=str, help="If provided the turning points to compare against from the CSV.")
-parser.add_argument('--turning-point-columns', required=False, type=str, nargs="*", default=["tp1","tp2","tp3","tp4","tp5"], help="If provided the turning points to compare against from the CSV.")
-parser.add_argument('--turning-point-means', required=False, type=float, nargs="*", default=[11.39, 31.86, 50.65, 74.15, 89.43], help="If turning points provided then these are the expected positions.")
-parser.add_argument('--turning-point-stds', required=False, type=float, nargs="*", default=[6.72, 11.26, 12.15, 8.40, 4.74], help="If turning points provided then these are the expected positions.")
-
+parser.add_argument('--cluster-example-num', default=100, type=int,
+                    help="Max number of examples to select for each cluster category.")
+parser.add_argument("--smoothing-plots", default=False, action="store_true",
+                    help="Plot sliding windows and smoothong as well as the raw position data.")
+parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
+parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
+parser.add_argument("--no-cluster-output", default=False, action="store_true",
+                    help="Don't calculate the cluster output.")
+parser.add_argument("--no-story-output", default=False, action="store_true", help="Don't calculate the story plots.")
+parser.add_argument('--peak-prominence-weighting', default=0.35, type=float,
+                    help="Use to scale the standard deviation of a column.")
+parser.add_argument('--peak-width', default=1.0, type=float,
+                    help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
+parser.add_argument('--number-of-peaks', default=-1, type=int,
+                    help="Number of peaks to find, overrides the other settings.")
+parser.add_argument('--turning-points-csv', required=False, type=str,
+                    help="If provided the turning points to compare against from the CSV.")
+parser.add_argument('--turning-point-columns', required=False, type=str, nargs="*",
+                    default=["tp1", "tp2", "tp3", "tp4", "tp5"],
+                    help="If provided the turning points to compare against from the CSV.")
+parser.add_argument('--turning-point-means', required=False, type=float, nargs="*",
+                    default=[11.39, 31.86, 50.65, 74.15, 89.43],
+                    help="If turning points provided then these are the expected positions.")
+parser.add_argument('--turning-point-stds', required=False, type=float, nargs="*",
+                    default=[6.72, 11.26, 12.15, 8.40, 4.74],
+                    help="If turning points provided then these are the expected positions.")
 
 args = parser.parse_args()
+
 
 def ensure_dir(file_path):
     directory = os.path.dirname(file_path)
@@ -60,18 +78,19 @@ def ensure_dir(file_path):
         print(f"Create directory: {directory}")
         os.makedirs(directory)
 
-projection_fields = ['sentence_tensor_euclidean_umap_2', 'sentence_tensor_pca_2',  'sentence_tensor_cosine_umap_2',
-                        'story_tensor_euclidean_umap_2', 'story_tensor_pca_2',   'story_tensor_cosine_umap_2']
+
+projection_fields = ['sentence_tensor_euclidean_umap_2', 'sentence_tensor_pca_2', 'sentence_tensor_cosine_umap_2',
+                     'story_tensor_euclidean_umap_2', 'story_tensor_pca_2', 'story_tensor_cosine_umap_2']
 
 sentence_cluster_fields = ['sentence_tensor_euclidean_umap_48_cluster_kmeans_cluster',
-                               'sentence_tensor_euclidean_umap_48_cluster_product_code',
-                               'sentence_tensor_euclidean_umap_48_cluster_label',
-                               'sentence_tensor_cosine_umap_48_cluster_kmeans_cluster',
-                               'sentence_tensor_cosine_umap_48_cluster_product_code',
-                               'sentence_tensor_cosine_umap_48_cluster_label',
-                               'sentence_tensor_pca_48_cluster_kmeans_cluster',
-                               'sentence_tensor_pca_48_cluster_product_code',
-                               'sentence_tensor_pca_48_cluster_label']
+                           'sentence_tensor_euclidean_umap_48_cluster_product_code',
+                           'sentence_tensor_euclidean_umap_48_cluster_label',
+                           'sentence_tensor_cosine_umap_48_cluster_kmeans_cluster',
+                           'sentence_tensor_cosine_umap_48_cluster_product_code',
+                           'sentence_tensor_cosine_umap_48_cluster_label',
+                           'sentence_tensor_pca_48_cluster_kmeans_cluster',
+                           'sentence_tensor_pca_48_cluster_product_code',
+                           'sentence_tensor_pca_48_cluster_label']
 
 story_cluster_fields = ['story_tensor_euclidean_umap_48_cluster_kmeans_cluster',
                         'story_tensor_euclidean_umap_48_cluster_product_code',
@@ -90,16 +109,15 @@ for fields in [projection_fields, sentence_cluster_fields, story_cluster_fields]
     join_fields = []
     for field in fields:
         if "story_tensor" in field:
-            join_fields.append(field.replace("story_tensor","story_tensor_diff"))
+            join_fields.append(field.replace("story_tensor", "story_tensor_diff"))
         if "sentence_tensor" in field:
             join_fields.append(field.replace("sentence_tensor", "sentence_tensor_diff"))
 
     fields.extend(join_fields)
 
+
 def analyse_vector_stats(args):
-
     if not args["no_story_output"]:
-
         create_sentiment_plots(args)
         create_story_plots(args)
 
@@ -107,9 +125,9 @@ def analyse_vector_stats(args):
         create_cluster_examples(args)
         create_cluster_scatters(args)
 
-def create_cluster_examples(args):
 
-    metadata_fields = ["story_id", 'sentence_num','sentence_id',"sentence_text","transition_text"]
+def create_cluster_examples(args):
+    metadata_fields = ["story_id", 'sentence_num', 'sentence_id', "sentence_text", "transition_text"]
 
     vector_df = pd.read_csv(args["vector_stats"])
 
@@ -124,7 +142,7 @@ def create_cluster_examples(args):
 
         if "kmeans" in field:
             print(field)
-            distance_field = field.replace("kmeans_cluster","kmeans_distance")
+            distance_field = field.replace("kmeans_cluster", "kmeans_distance")
             fields_to_extract.append(distance_field)
 
         if "label" in field:
@@ -140,7 +158,8 @@ def create_cluster_examples(args):
         if "product_code" in field:
             product_columns = [f'{field}_1', f'{field}_2', f'{field}_3', f'{field}_4']
 
-            field_list = vector_df[field].apply(lambda x: [int(x) for x in x.replace('[','').replace(' ]','').replace(']','').split()]).tolist()
+            field_list = vector_df[field].apply(
+                lambda x: [int(x) for x in x.replace('[', '').replace(' ]', '').replace(']', '').split()]).tolist()
             field_list = [[sent_id] + l for l, sent_id in zip(field_list, vector_df['sentence_id'])]
 
             split_product_codes = pd.DataFrame(field_list,
@@ -152,23 +171,23 @@ def create_cluster_examples(args):
         else:
             fields_to_save.append(field)
 
-
         for field_to_save in fields_to_save:
             fields_to_extract.append(field_to_save)
 
             field_df = vector_df[fields_to_extract]
 
-            group = field_df.groupby(field_to_save).apply(lambda x: x.sample( min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
+            group = field_df.groupby(field_to_save).apply(
+                lambda x: x.sample(min(len(x), args["cluster_example_num"]))).reset_index(drop=True)
             file_path = f"{args['output_dir']}/cluster_examples/{field_to_save}.csv"
             print(f"Save examples: {file_path}")
             group.to_csv(file_path)
 
-def create_cluster_scatters(args):
 
+def create_cluster_scatters(args):
     vector_df = pd.read_csv(args["vector_stats"])
     ensure_dir(f"{args['output_dir']}/cluster_scatters/")
 
-    vector_df = vector_df.sample(n=min(args['max_plot_points'],len(vector_df)))
+    vector_df = vector_df.sample(n=min(args['max_plot_points'], len(vector_df)))
 
     product_fields = []
     for proj_field in story_cluster_fields + sentence_cluster_fields:
@@ -183,7 +202,6 @@ def create_cluster_scatters(args):
             split_product_codes = pd.DataFrame(field_list,
                                                columns=["sentence_id"] + product_columns)
 
-
             vector_df = vector_df.merge(split_product_codes, left_on='sentence_id', right_on='sentence_id')
 
             product_fields += product_columns
@@ -191,7 +209,7 @@ def create_cluster_scatters(args):
     for field in projection_fields:
         print(f"Create cluster examples for: {field}")
 
-        coord_columns=['x','y']
+        coord_columns = ['x', 'y']
 
         fields_to_extract = [field]
 
@@ -209,7 +227,7 @@ def create_cluster_scatters(args):
             lambda x: x.replace('[', '').replace(' ]', '').replace(']', '').split()).tolist()
 
         split_xy = pd.DataFrame(field_list,
-                                           columns=coord_columns)
+                                columns=coord_columns)
         field_df[coord_columns] = split_xy
 
         for cluster_field in product_fields + story_cluster_fields + sentence_cluster_fields:
@@ -226,16 +244,18 @@ def create_cluster_scatters(args):
 
             if ("pca" in field and "pca" in cluster_field) or ("umap" in field and "umap" in cluster_field):
 
-                if ("story" in field and "story" in cluster_field) or ("sentence" in field and "sentence" in cluster_field):
+                if ("story" in field and "story" in cluster_field) or (
+                        "sentence" in field and "sentence" in cluster_field):
 
                     if not "diff" in cluster_field:
                         text_field = 'sentence_text'
                     else:
                         text_field = 'transition_text'
 
-
                     field_df['label'] = field_df.apply(
-                        lambda row: f"<b>{row[text_field]}</b> <br>cluster: {row[cluster_field]} <br>story_id: {row['story_id']} <br>sentence_num: {row['sentence_num']}", axis=1)
+                        lambda
+                            row: f"<b>{row[text_field]}</b> <br>cluster: {row[cluster_field]} <br>story_id: {row['story_id']} <br>sentence_num: {row['sentence_num']}",
+                        axis=1)
 
                     data = []
 
@@ -286,8 +306,8 @@ def create_cluster_scatters(args):
                         print(f"Save plot pdf: {file_path}")
                         pio.write_image(fig, file_path)
 
-def create_sentiment_plots(args):
 
+def create_sentiment_plots(args):
     ensure_dir(f"{args['output_dir']}/sentiment_plots/")
 
     position_df = pd.read_csv(args["position_stats"])
@@ -299,13 +319,12 @@ def create_sentiment_plots(args):
         data = []
 
         color_idx = 0
-        for i, pred in enumerate(['textblob_sentiment','vader_sentiment','sentiment']):
+        for i, pred in enumerate(['textblob_sentiment', 'vader_sentiment', 'sentiment']):
 
             # Don't plot both corpus and generation surprise as they are the same.
             if "surprise" in pred:
                 if not "generated" in pred:
                     continue
-
 
             text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
 
@@ -317,7 +336,7 @@ def create_sentiment_plots(args):
                 line=dict(
                     color=colors[color_idx]
                 ),
-                name=f'{pred}'.replace('sentiment','sent'),
+                name=f'{pred}'.replace('sentiment', 'sent'),
             )
             data.append(trace)
 
@@ -327,7 +346,7 @@ def create_sentiment_plots(args):
             title=f'Story {name} Sentiment Plot',
             hovermode='closest',
             xaxis=dict(
-                #title='Position',
+                # title='Position',
             ),
             yaxis=dict(
                 title='Sentiment',
@@ -348,8 +367,8 @@ def create_sentiment_plots(args):
             print(f"Save plot pdf: {file_path}")
             pio.write_image(fig, file_path)
 
-def create_story_plots(args):
 
+def create_story_plots(args):
     ensure_dir(f"{args['output_dir']}/prediction_plots/")
 
     turning_points_df = None
@@ -362,8 +381,8 @@ def create_story_plots(args):
 
     prediction_columns = ["generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
-                         'generated_surprise_l1', 'generated_surprise_l2'
-                         , 'generated_suspense_l1', 'generated_suspense_l2',
+                          'generated_surprise_l1', 'generated_surprise_l2'
+        , 'generated_suspense_l1', 'generated_suspense_l2',
                           'generated_suspense_entropy',
                           'corpus_suspense_entropy',
                           'generated_surprise_entropy',
@@ -426,27 +445,29 @@ def create_story_plots(args):
             prominence_threshold = statistics.stdev(prom_data) * prom_weighting
 
             if args["number_of_peaks"] > 0:
-                prominence_threshold = 0.00001 # Make tiny as is not specified then the metadata is not returned for prominences.
+                prominence_threshold = 0.00001  # Make tiny as is not specified then the metadata is not returned for prominences.
 
             color_idx = 0
 
             max_point = 0.0
             for i, pred in enumerate(y_axis_columns):
 
-                pred_name = pred.replace('suspense','susp').replace('surprise','surp').replace('corpus','cor').replace('generated','gen').replace('state','st')
+                pred_name = pred.replace('suspense', 'susp').replace('surprise', 'surp').replace('corpus',
+                                                                                                 'cor').replace(
+                    'generated', 'gen').replace('state', 'st')
 
                 # Don't plot both corpus and generation surprise as they are the same.
                 if "surprise" in pred:
-                  if not "generated" in pred and "entropy" not in pred and y_axis_group != "baseline":
-                     continue
+                    if not "generated" in pred and "entropy" not in pred and y_axis_group != "baseline":
+                        continue
 
                 text = [f"<b>{t}</b>" for t in group_df["sentence_text"]]
 
                 if vector_df is not None:
                     vector_row_df = vector_df.merge(group_df, left_on='sentence_id', right_on='sentence_id')
-                    for field in sentence_cluster_fields + story_cluster_fields + ['sentiment', 'vader_sentiment', 'textblob_sentiment']:
+                    for field in sentence_cluster_fields + story_cluster_fields + ['sentiment', 'vader_sentiment',
+                                                                                   'textblob_sentiment']:
                         if field in vector_row_df.columns and len(vector_row_df[field]) > 0:
-
                             text = [t + f"<br>{field}: {f}" for (t, f) in zip(text, vector_row_df[field])]
 
                 max_point = max(max_point, max(group_df[pred]))
@@ -456,7 +477,7 @@ def create_story_plots(args):
                     y=group_df[pred],
                     text=text,
                     mode='lines+markers',
-                    line = dict(
+                    line=dict(
                         color=colors[color_idx]
                     ),
                     name=f'{pred_name}',
@@ -468,7 +489,8 @@ def create_story_plots(args):
                 y = group_df[pred].tolist()
 
                 type = "peak"
-                peak_indices, peaks_meta = find_peaks(y, prominence=prominence_threshold, width=args["peak_width"], plateau_size=1)
+                peak_indices, peaks_meta = find_peaks(y, prominence=prominence_threshold, width=args["peak_width"],
+                                                      plateau_size=1)
 
                 num_of_peaks = args["number_of_peaks"]
                 peak_indices = optionally_top_n_peaks(num_of_peaks, peak_indices, peaks_meta)
@@ -576,10 +598,10 @@ def create_story_plots(args):
                             all_points.extend(annotated_points)
 
                             if len(expected_points_indices) == len(args["turning_point_columns"]):
-
                                 exp_dict = deepcopy(turn_dict)
 
-                                calc_turning_point_distances(annotated_points, args, expected_points_indices, sentence_nums,
+                                calc_turning_point_distances(annotated_points, args, expected_points_indices,
+                                                             sentence_nums,
                                                              exp_dict, type="constrained", compared="annotated")
                                 turning_point_data_list.append(exp_dict)
 
@@ -601,7 +623,6 @@ def create_story_plots(args):
                                                          peak_dict, type="unconstrained", compared="dist_baseline")
                             turning_point_data_list.append(peak_dict)
 
-
                     if len(expected_points_indices) > 0:
                         trace = go.Scatter(
                             x=[sentence_nums[j] for j in expected_points_indices],
@@ -617,9 +638,7 @@ def create_story_plots(args):
                         )
                         data.append(trace)
 
-
                     if len(annotated_points) > 0 and not plotted_turning_points:
-
                         plotted_turning_points = True
 
                         trace = go.Scatter(
@@ -632,13 +651,14 @@ def create_story_plots(args):
                                 size=14,
                             ),
                             name=f'dist baseline',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in mean_expected if j < len(sentence_nums)],
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in mean_expected if
+                                  j < len(sentence_nums)],
 
                         )
                         data.append(trace)
 
                         trace = go.Scatter(
-                            x=[sentence_nums[p] for p  in lower_brackets if p < len(sentence_nums)],
+                            x=[sentence_nums[p] for p in lower_brackets if p < len(sentence_nums)],
                             y=[0.0] * len(lower_brackets),
                             mode='markers',
                             marker=dict(
@@ -647,13 +667,14 @@ def create_story_plots(args):
                                 size=14,
                             ),
                             name=f'dist baseline lower',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in lower_brackets if  j < len(sentence_nums)],
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in lower_brackets if
+                                  j < len(sentence_nums)],
 
                         )
                         data.append(trace)
 
                         trace = go.Scatter(
-                            x=[sentence_nums[p]  for p in upper_brackets if p < len(sentence_nums)],
+                            x=[sentence_nums[p] for p in upper_brackets if p < len(sentence_nums)],
                             y=[0.0] * len(upper_brackets),
                             mode='markers',
                             marker=dict(
@@ -662,7 +683,8 @@ def create_story_plots(args):
                                 size=14,
                             ),
                             name=f'dist baseline upper',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in upper_brackets  if j < len(sentence_nums)],
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in upper_brackets if
+                                  j < len(sentence_nums)],
 
                         )
                         data.append(trace)
@@ -677,7 +699,8 @@ def create_story_plots(args):
                                 size=14,
                             ),
                             name=f'annotated',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in all_points if j < len(sentence_nums)],
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in all_points if
+                                  j < len(sentence_nums)],
 
                         )
                         data.append(trace)
@@ -689,7 +712,7 @@ def create_story_plots(args):
                             if window not in args['smoothing']:
                                 continue
 
-                            win_df = story_win_df[['window_size','window_name','position','mean']]
+                            win_df = story_win_df[['window_size', 'window_name', 'position', 'mean']]
 
                             win_df = win_df.loc[win_df['window_size'] == window]
 
@@ -700,10 +723,10 @@ def create_story_plots(args):
                                 x=win_df['position'],
                                 y=win_df['mean'],
                                 mode='lines+markers',
-                                name=f'{pred_name} - {window.replace("exponential","exp")}',
+                                name=f'{pred_name} - {window.replace("exponential", "exp")}',
                                 line=dict(
-                                    dash='dot',color=colors[color_idx]),
-                                marker = dict(
+                                    dash='dot', color=colors[color_idx]),
+                                marker=dict(
                                     symbol=shapes[j])
                             )
                             data.append(trace)
@@ -714,7 +737,7 @@ def create_story_plots(args):
                 title=f'Story {story_id} Prediction Plot',
                 hovermode='closest',
                 xaxis=dict(
-                    #title='Position',
+                    # title='Position',
                 ),
                 yaxis=dict(
                     title=f'{y_axis_group}',
@@ -732,9 +755,9 @@ def create_story_plots(args):
                 print(f"Save plot {file_path}")
                 pio.write_html(fig, file_path)
             if not args["no_pdf_plots"]:
-                file_path =  f"{args['output_dir']}/prediction_plots/story_{story_id}_{y_axis_group}_plot.pdf"
+                file_path = f"{args['output_dir']}/prediction_plots/story_{story_id}_{y_axis_group}_plot.pdf"
                 print(f"Save plot pdf: {file_path}")
-                pio.write_image(fig,file_path)
+                pio.write_image(fig, file_path)
 
     segmented_data = pd.DataFrame(data=segmented_data)
     segmented_data.to_csv(f"{args['output_dir']}/prediction_plots/peaks_and_troughs.csv")
@@ -746,12 +769,11 @@ def create_story_plots(args):
 
         summary_data_list = []
 
-        for group_by, group in  turning_point_eval_df.groupby(by=["measure","constraint_type","compared"]):
+        for group_by, group in turning_point_eval_df.groupby(by=["measure", "constraint_type", "compared"]):
 
             measure, constraint_type, compared = group_by
 
             summary_dict = {}
-
 
             summary_dict["measure"] = measure
             summary_dict["constraint_type"] = constraint_type
@@ -765,11 +787,12 @@ def create_story_plots(args):
             actual_all = []
             for col in args["turning_point_columns"]:
 
-                summary_dict[f"{col}_total_agreement"] = group[f"{col}_total_agreement_correct"].sum() / len(group[f"{col}_total_agreement_correct"] )
+                summary_dict[f"{col}_total_agreement"] = group[f"{col}_total_agreement_correct"].sum() / len(
+                    group[f"{col}_total_agreement_correct"])
 
                 predicted_positions = group[f"{col}_predicted_relative_position"].tolist()
                 predict_all.extend(predicted_positions)
-                actual_positions =  group[f"{col}_expected_relative_position"].tolist()
+                actual_positions = group[f"{col}_expected_relative_position"].tolist()
                 actual_all.extend(actual_positions)
 
                 if len(predicted_positions) >= 2 and len(actual_positions) >= 2:
@@ -784,7 +807,7 @@ def create_story_plots(args):
                     summary_dict[f"{col}_predicted_relative_position_corr_pearson"] = pearson
                     summary_dict[f"{col}_predicted_relative_position_corr_pearson_p_value"] = pearson_p_value
 
-            if len(predicted_positions) >= 2 and len(actual_positions) >=2 :
+            if len(predicted_positions) >= 2 and len(actual_positions) >= 2:
                 kendall, kendall_p_value = kendalltau(predict_all, actual_all)
                 spearman, spearman_p_value = spearmanr(predict_all, actual_all)
                 pearson, pearson_p_value = pearsonr(predict_all, actual_all)
@@ -798,7 +821,7 @@ def create_story_plots(args):
 
             for c in args["turning_point_columns"] + ["avg"]:
 
-                for d in ["dist","norm_dist","abs_dist","abs_norm_dist"]:
+                for d in ["dist", "norm_dist", "abs_dist", "abs_norm_dist"]:
                     col_series = group[f"{c}_{d}"]
 
                     col_stats = col_series.describe()
@@ -813,7 +836,6 @@ def create_story_plots(args):
 
             summary_data_list.append(summary_dict)
 
-
         turning_point_eval_df.to_csv(f"{args['output_dir']}/turning_points/turning_point_eval_all.csv")
         turning_point_summary_df = pd.DataFrame(data=summary_data_list)
 
@@ -821,14 +843,15 @@ def create_story_plots(args):
 
         # Calculate summary stats.
 
-def calc_turning_point_distances(annotated_points, args, peak_indices, sentence_nums, turn_dict, type="unconstrained", compared="annotated"):
 
+def calc_turning_point_distances(annotated_points, args, peak_indices, sentence_nums, turn_dict, type="unconstrained",
+                                 compared="annotated"):
     turn_dict["constraint_type"] = type
     turn_dict["compared"] = compared
 
     num_of_sentences = max(sentence_nums)
 
-    for col, p in zip(args["turning_point_columns"],peak_indices):
+    for col, p in zip(args["turning_point_columns"], peak_indices):
         turn_dict[f"{col}_predicted_relative_position"] = p / len(sentence_nums)
         turn_dict[f"{col}_predicted_position"] = p
 
@@ -865,7 +888,8 @@ def calc_turning_point_distances(annotated_points, args, peak_indices, sentence_
     turn_dict[f"avg_dist"] = sum(distances) / len(distances)
     turn_dict[f"avg_norm_dist"] = sum(norm_distances) / len(norm_distances)
 
-    for norm, abs_dist, norm_dist, dist, col in zip(abs_norm_distances, abs_distances, norm_distances, distances, args["turning_point_columns"]):
+    for norm, abs_dist, norm_dist, dist, col in zip(abs_norm_distances, abs_distances, norm_distances, distances,
+                                                    args["turning_point_columns"]):
         turn_dict[f"{col}_abs_norm_dist"] = norm
         turn_dict[f"{col}_abs_dist"] = abs_dist
         turn_dict[f"{col}_norm_dist"] = norm_dist
@@ -908,7 +932,7 @@ def create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sente
         text = ""
 
         for j in range(left_base, right_base):
-            wrapper = TextWrapper(initial_indent="<br>",width=80)
+            wrapper = TextWrapper(initial_indent="<br>", width=80)
 
             if j == ind:
                 peak_dict["sentence"] = sentence_text[j]
@@ -945,7 +969,6 @@ def create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sente
 
 
 def create_analysis_output(args):
-
     print(args)
 
     ensure_dir(args["output_dir"])

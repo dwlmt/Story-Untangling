@@ -56,7 +56,7 @@ def create_assignments(args):
                 field_name = answer_pair["QuestionIdentifier"]
                 field_value = answer_pair["FreeText"]
                 answer_processed_dict[field_name] = field_value
-            del(assignment['Answer'])
+            del (assignment['Answer'])
 
             item = {**item, **assignment}
             item = {**item, **answer_processed_dict}

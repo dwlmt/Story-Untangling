@@ -1,4 +1,5 @@
 import argparse
+
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
@@ -7,8 +8,11 @@ from jsonlines import jsonlines
 parser = argparse.ArgumentParser(
     description='Download results from Mechanical Turk.')
 parser.add_argument('--firebase-key-path', required=True, type=str, help="The path to the JSON key.")
-parser.add_argument('--output-file', required=True, type=str, help="The output file to save the data to in JSON lines format.")
-parser.add_argument('--collection-name', required=True, type=str, help="The name of the Firebase collection to download.")
+parser.add_argument('--output-file', required=True, type=str,
+                    help="The output file to save the data to in JSON lines format.")
+parser.add_argument('--collection-name', required=True, type=str,
+                    help="The name of the Firebase collection to download.")
+
 
 def download_firebase_collection(args):
     print(f"Download Firebase collection: {args}")
@@ -32,6 +36,7 @@ def download_firebase_collection(args):
     with jsonlines.open(args['output_file'], mode='w') as writer:
         for d in collection_data:
             writer.write(d)
+
 
 args = parser.parse_args()
 

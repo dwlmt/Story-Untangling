@@ -34,9 +34,10 @@ def approve_reject_assignments(args):
             print(f"Approve assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']}")
             mturk.approve_assignment(AssignmentId=row['AssignmentId'])
         elif "Reject" in row and row["Reject"] == True:
-            print(f"Reject assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']} for reason - {row['RejectReason']}")
+            print(
+                f"Reject assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']} for reason - {row['RejectReason']}")
             mturk.reject_assignment(AssignmentId=row['AssignmentId'], RequesterFeedback=row['RejectReason'])
 
 
-#approve_assignment(assignment_id, feedback=None)
+# approve_assignment(assignment_id, feedback=None)
 approve_reject_assignments(vars(args))

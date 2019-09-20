@@ -3,14 +3,13 @@
 '''
 import argparse
 
-import pandas
-from nltk.metrics.distance import jaro_similarity, edit_distance
-from tabulate import tabulate
-import numpy
 import dataset
+import pandas
 import tqdm
+from nltk.metrics.distance import edit_distance
 
 engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 300, "check_same_thread": False}}
+
 
 def match_annotations(args):
     print(args)
@@ -23,13 +22,13 @@ def match_annotations(args):
     concat_df = pandas.concat(pandas_list, ignore_index=True, sort=False, axis=0)
 
     print(concat_df.columns)
-    #print(tabulate(concat_df, headers='keys', tablefmt='psql'))
+    # print(tabulate(concat_df, headers='keys', tablefmt='psql'))
 
     text_to_id_dict = {}
     id_to_story = {}
 
     text = concat_df["Input.text"]
-    answer_story_ids =  concat_df["Answer.storyId"]
+    answer_story_ids = concat_df["Answer.storyId"]
 
     original_database = args["original_database"]
     dataset_db = f"sqlite:///{original_database}"
@@ -37,7 +36,7 @@ def match_annotations(args):
     annotation_mapping_records = {}
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
-        for orig_id, t in zip(answer_story_ids,text):
+        for orig_id, t in zip(answer_story_ids, text):
 
             try:
                 orig_id = int(orig_id)
@@ -59,9 +58,10 @@ def match_annotations(args):
             best_total = int(1e6)
             best_match = None
 
-            for story in tqdm.tqdm(list(db["story"]),desc="Exact match loop"):
-                sentences = [s for s in db.query(f"SELECT * from sentence where story_id = {story['id']} and sentence_num < {args['num_sentence']} ORDER By sentence_num")]
-                    # print(sentence["text"])
+            for story in tqdm.tqdm(list(db["story"]), desc="Exact match loop"):
+                sentences = [s for s in db.query(
+                    f"SELECT * from sentence where story_id = {story['id']} and sentence_num < {args['num_sentence']} ORDER By sentence_num")]
+                # print(sentence["text"])
 
                 block = ' '.join([s["text"] for s in sentences])
                 compare = k[0:len(block)]
@@ -71,7 +71,7 @@ def match_annotations(args):
                     best_match = v
 
             if best_total != 0:
-                for story in tqdm.tqdm(list(db["story"]),desc="Fuzzy match loop"):
+                for story in tqdm.tqdm(list(db["story"]), desc="Fuzzy match loop"):
                     sentences = [s for s in db.query(
                         f"SELECT * from sentence where story_id = {story['id']} and sentence_num < {args['num_sentence']} ORDER By sentence_num")]
                     # print(sentence["text"])
@@ -95,9 +95,9 @@ def match_annotations(args):
             if best_match:
 
                 if best_match not in annotation_mapping_records:
-                    #print(f"Matched Story Text on {sentence}")
+                    # print(f"Matched Story Text on {sentence}")
                     annotation_mapping_records[best_match] = {"story_id": best_match,
-                                                                "annotation_story_id": v}
+                                                              "annotation_story_id": v}
                     print(annotation_mapping_records[best_match], best_total)
 
         db["story_annotation_map"].insert_many(annotation_mapping_records.values())
@@ -113,6 +113,5 @@ parser.add_argument('--database', required=True, type=str, help="The database to
 parser.add_argument('--num-sentence', default=5, type=int, help="Number of sentence: 5")
 
 args = parser.parse_args()
-
 
 match_annotations(vars(args))

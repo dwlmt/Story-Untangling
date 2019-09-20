@@ -1,44 +1,40 @@
 import argparse
-import csv
 import datetime
 import itertools
 import os
-import random
-import re
 import statistics
 from collections import Counter
 
 import numpy
 import pandas
-from nltk import AnnotationTask, interval_distance, binary_distance
-from scipy.signal import find_peaks, peak_prominences, find_peaks_cwt
-from scipy.stats import kendalltau, pearsonr, spearmanr
-from sklearn.metrics import matthews_corrcoef
-from statsmodels.compat import scipy
-
-import plotly
+import plotly.express as px
 import plotly.graph_objs as go
 import plotly.io as pio
-import plotly.express as px
+from nltk import AnnotationTask, interval_distance, binary_distance
+from scipy.signal import find_peaks
+from scipy.stats import kendalltau, pearsonr, spearmanr
+from sklearn.metrics import matthews_corrcoef
 
 px.defaults.height = 1000
 
-sentiment_columns = ["sentiment", "textblob_sentiment","vader_sentiment"]
+sentiment_columns = ["sentiment", "textblob_sentiment", "vader_sentiment"]
 
 parser = argparse.ArgumentParser(
     description='Extract JSON vectors and perform dimensionality reduction.')
 parser.add_argument('--batch-stats', required=True, type=str, help="CSV of the prediction batch stats.")
 parser.add_argument('--position-stats', required=True, type=str, help="The per sentence prediction output.")
 parser.add_argument('--annotation-stats', required=True, nargs='+', type=str, help="CSV of the prediction batch stats.")
-parser.add_argument("--no-html-plots", default=False, action="store_true" , help="Don't save plots to HTML")
-parser.add_argument("--no-pdf-plots", default=False, action="store_true" , help="Don't save plots to PDF")
+parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
+parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument('--peak-prominence-weighting', required=False, type=int, default=1.0, help="The peak prominence weighting.")
-parser.add_argument('--peak-width', default=1.0, type=float, help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
+parser.add_argument('--peak-prominence-weighting', required=False, type=int, default=1.0,
+                    help="The peak prominence weighting.")
+parser.add_argument('--peak-width', default=1.0, type=float,
+                    help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
 
 args = parser.parse_args()
 
-genre_other = ["fantasy", "fable", "science_fiction","fairytale"]
+genre_other = ["fantasy", "fable", "science_fiction", "fairytale"]
 
 genre_categories = ['Answer.crime.on',
                     'Answer.erotic_fiction.on', 'Answer.fable.on', 'Answer.fairytale.on',
@@ -57,12 +53,13 @@ story_id_col = 'Answer.storyId'
 worker_id_col = 'WorkerId'
 
 annotation_columns = ['Answer.doxaResonance',
-                 'Answer.doxaSurprise', 'Answer.doxaSuspense',
-                 'Answer.readerEmotionalResonance',
-                 'Answer.readerSurprise', 'Answer.readerSuspense',
-                 'Answer.storyInterest', 'Answer.storySentiment']
+                      'Answer.doxaSurprise', 'Answer.doxaSuspense',
+                      'Answer.readerEmotionalResonance',
+                      'Answer.readerSurprise', 'Answer.readerSuspense',
+                      'Answer.storyInterest', 'Answer.storySentiment']
 
 genre_column = "genre"
+
 
 def ensure_dir(file_path):
     directory = os.path.dirname(file_path)
@@ -70,13 +67,15 @@ def ensure_dir(file_path):
         print(f"Create directory: {directory}")
         os.makedirs(directory)
 
+
 annotation_stats_columns = ['Answer.doxaResonance',
-       'Answer.doxaSurprise', 'Answer.doxaSuspense',
-       'Answer.readerEmotionalResonance',
-       'Answer.readerSurprise', 'Answer.readerSuspense',
-       'Answer.storyInterest', 'Answer.storySentiment',
-]
+                            'Answer.doxaSurprise', 'Answer.doxaSuspense',
+                            'Answer.readerEmotionalResonance',
+                            'Answer.readerSurprise', 'Answer.readerSuspense',
+                            'Answer.storyInterest', 'Answer.storySentiment',
+                            ]
 annotation_story_id_column = 'Input.story_id'
+
 
 def label_bucket(row, attribute="measure"):
     to_label = row[attribute]
@@ -93,6 +92,7 @@ def label_bucket(row, attribute="measure"):
     else:
         return "other"
 
+
 def prediction_peaks(args, annotation_df, position_df):
     ensure_dir(f"{args['output_dir']}/prediction_peaks/")
 
@@ -106,7 +106,7 @@ def prediction_peaks(args, annotation_df, position_df):
 
     position_df["sentence_text"] = position_df["sentence_text"].astype(str)
 
-    peaks_list=[]
+    peaks_list = []
     peaks_summary_list = []
 
     story_ids = position_df["story_id"].unique()
@@ -116,7 +116,7 @@ def prediction_peaks(args, annotation_df, position_df):
 
     group_to_column_dict = {}
 
-    for column_groups in ['l1', 'l2', 'entropy', 'baseline','sentiment']:
+    for column_groups in ['l1', 'l2', 'entropy', 'baseline', 'sentiment']:
         column_list = []
 
         for i, pred in enumerate(columns):
@@ -145,20 +145,24 @@ def prediction_peaks(args, annotation_df, position_df):
     for story_id in story_ids:
 
         peak_story_row = position_df.loc[position_df["story_id"] == story_id]
-        peak_story_row =  peak_story_row.sort_values(by=["sentence_num"])
+        peak_story_row = peak_story_row.sort_values(by=["sentence_num"])
 
         for m in columns:
-            #print(story_df[["sentence_num","sentence_text",c]])
+            # print(story_df[["sentence_num","sentence_text",c]])
 
             x = peak_story_row[m].to_list()
 
-            peak_list, summary_dict = find_and_extract_peaks(peak_story_row, "peak", x, m, prominence=prom_dict[column_group_dict[c]], width=args["peak_width"])
+            peak_list, summary_dict = find_and_extract_peaks(peak_story_row, "peak", x, m,
+                                                             prominence=prom_dict[column_group_dict[c]],
+                                                             width=args["peak_width"])
 
             peaks_list.extend(peak_list)
             peaks_summary_list.append(summary_dict)
 
             x_inverted = [x_n * -1.0 for x_n in x]
-            trough_list, summary_dict = find_and_extract_peaks(peak_story_row, "trough", x_inverted, m, prominence=prom_dict[column_group_dict[c]], width=args["peak_width"])
+            trough_list, summary_dict = find_and_extract_peaks(peak_story_row, "trough", x_inverted, m,
+                                                               prominence=prom_dict[column_group_dict[c]],
+                                                               width=args["peak_width"])
             peaks_list.extend(trough_list)
             peaks_summary_list.append(summary_dict)
 
@@ -176,7 +180,6 @@ def prediction_peaks(args, annotation_df, position_df):
     for c in peaks_df['c'].unique():
         display_df = peaks_df.loc[peaks_df['c'] == c]
         for m in ["prominences", "widths"]:
-
             fig = px.box(display_df, y=m, x="measure", color="type", notched=True)
             export_plots(args, f"/prediction_peaks/box/{m}_{c}_box", fig)
 
@@ -194,7 +197,8 @@ def prediction_peaks(args, annotation_df, position_df):
 
         for m in ["peak", "trough"]:
             bubble_df = display_df.loc[display_df["type"] == m]
-            fig = px.scatter(bubble_df, x="num_of_peaks", y="width", size="prominence", color="measure", size_max=100, hover_name="story_id")
+            fig = px.scatter(bubble_df, x="num_of_peaks", y="width", size="prominence", color="measure", size_max=100,
+                             hover_name="story_id")
             export_plots(args, f"/prediction_peaks/scatter/{c}_{m}_summary", fig)
 
     for c in columns:
@@ -209,15 +213,17 @@ def prediction_peaks(args, annotation_df, position_df):
             polar_list = []
             for index, row in plot_df.iterrows():
                 print(row)
-                for c in ["num_of_peaks","prominence", "width", "importance"]:
-                    polar_list.append({"story_id": row["story_id"], "type": row["type"], "measure": row["measure"],"theta": c, "r": row[c]})
+                for c in ["num_of_peaks", "prominence", "width", "importance"]:
+                    polar_list.append(
+                        {"story_id": row["story_id"], "type": row["type"], "measure": row["measure"], "theta": c,
+                         "r": row[c]})
 
             if len(polar_list) == 0:
                 continue
 
-            #plot_polar_df = pandas.DataFrame(polar_list)
-            #print(plot_polar_df)
-            #fig = px.line_polar(plot_polar_df, r="r", theta="theta",
+            # plot_polar_df = pandas.DataFrame(polar_list)
+            # print(plot_polar_df)
+            # fig = px.line_polar(plot_polar_df, r="r", theta="theta",
             #                    color="story_id", line_close=True)
 
             export_plots(args, f"/prediction_peaks/multi/{c}_{t}_polar", fig)
@@ -226,7 +232,7 @@ def prediction_peaks(args, annotation_df, position_df):
     for m in ["num_of_peaks", "width", "prominence", "importance"]:
         for m2 in ["num_of_peaks", "width", "prominence", "importance"]:
 
-            for t in ["peak","trough"]:
+            for t in ["peak", "trough"]:
                 for t2 in ["peak", "trough"]:
 
                     table_list = []
@@ -242,7 +248,6 @@ def prediction_peaks(args, annotation_df, position_df):
                         spear_corr_ann = []
 
                         for c2 in columns:
-
                             type_x_df = peaks_summary_df.loc[peaks_summary_df["type"] == t]
 
                             x_df = type_x_df.loc[type_x_df["measure"] == c]
@@ -252,7 +257,8 @@ def prediction_peaks(args, annotation_df, position_df):
                             y_df = type_y_df.loc[type_y_df["measure"] == c2]
                             y_list = list(y_df[m2])
 
-                            kendall, pearson, spearman = calculate_correlation(c, c2, table_list, x_list, y_list, measure=m, measure2=m2, disc=t, disc2=t2)
+                            kendall, pearson, spearman = calculate_correlation(c, c2, table_list, x_list, y_list,
+                                                                               measure=m, measure2=m2, disc=t, disc2=t2)
 
                             pear_corr_ann.append(pearson)
                             spear_corr_ann.append(spearman)
@@ -264,7 +270,8 @@ def prediction_peaks(args, annotation_df, position_df):
 
                     full_table_list.extend(table_list)
 
-                    export_correlations(args, f"/prediction_peaks/self_correlation/{m}_{m2}_{t}_{t2}_", columns, columns, ken_corr, pear_corr,
+                    export_correlations(args, f"/prediction_peaks/self_correlation/{m}_{m2}_{t}_{t2}_", columns,
+                                        columns, ken_corr, pear_corr,
                                         spear_corr,
                                         table_list)
     full_table_df = pandas.DataFrame(full_table_list)
@@ -340,14 +347,13 @@ def prediction_peaks(args, annotation_df, position_df):
 
                             kendall, pearson, spearman = calculate_correlation(c, am, table_list, x_list, y_list,
                                                                                measure=m, measure2="mean", disc=t)
-                            print(c,am, kendall, pearson, spearman)
+                            print(c, am, kendall, pearson, spearman)
                         else:
                             kendall = pearson = spearman = 0.0
 
                         pear_corr_ann.append(pearson)
                         spear_corr_ann.append(spearman)
                         ken_corr_ann.append(kendall)
-
 
                     pear_corr.append(pear_corr_ann)
                     ken_corr.append(ken_corr_ann)
@@ -359,7 +365,8 @@ def prediction_peaks(args, annotation_df, position_df):
 
                 full_table_list.extend(table_list)
 
-                export_correlations(args, f"/prediction_peaks/annotation_correlation//heatmap/{b}_{m}_{t}_", annotation_stats_columns,
+                export_correlations(args, f"/prediction_peaks/annotation_correlation//heatmap/{b}_{m}_{t}_",
+                                    annotation_stats_columns,
                                     columns_in_group, ken_corr, pear_corr,
                                     spear_corr,
                                     table_list)
@@ -402,7 +409,6 @@ def find_and_extract_peaks(story_df, type, x, c, prominence=1.0, width=1.0):
         story_peak_summary["width"] += peak["widths"]
         story_peak_summary["importance"] += peak["prominences"] * peak["widths"]
 
-
     if len(peak_list) == 0:
         row = story_df.loc[story_df["sentence_id"] == sentence_ids[0]]
 
@@ -419,12 +425,10 @@ def find_and_extract_peaks(story_df, type, x, c, prominence=1.0, width=1.0):
 
         peak_list.append(peak)
 
-
     return peak_list, story_peak_summary
 
 
 def genres_per_story(args, annotation_df):
-
     ensure_dir(f"{args['output_dir']}/genres/")
 
     story_ids = annotation_df[story_id_col].unique()
@@ -447,7 +451,7 @@ def genres_per_story(args, annotation_df):
         story_genre_list = story_genre_counter.most_common(1)
         if len(story_genre_list) > 0:
             story_genre, _ = story_genre_list[0]
-            story_genre = story_genre.replace("Answer.","").replace(".on","")
+            story_genre = story_genre.replace("Answer.", "").replace(".on", "")
             if story_genre not in genre_other:
                 story_genre = "other"
         else:
@@ -465,7 +469,6 @@ def genres_per_story(args, annotation_df):
 
 
 def story_stats_correlation(args):
-
     dfs = []
     for filename in args["annotation_stats"]:
         dfs.append(pandas.read_csv(filename))
@@ -476,7 +479,6 @@ def story_stats_correlation(args):
     annotation_df = map_to_binary_answers(annotation_df)
 
     annotation_df = check_quality(annotation_df)
-
 
     pred_df = pandas.read_csv(args["batch_stats"])
     pred_df = pred_df.fillna(value=0.0)
@@ -489,19 +491,19 @@ def story_stats_correlation(args):
 
     genres_per_story_df = genres_per_story(args, annotation_df)
     annotation_correlation(args, annotation_df, genres_per_story_df)
-    #prediction_peaks(args, annotation_df, position_df)
-    #prediction_position_correlation(args, position_df)
-    #prediction_correlation(args, pred_df)
-    #prediction_annotation_correlation(args, annotation_df, pred_df)
+    # prediction_peaks(args, annotation_df, position_df)
+    # prediction_position_correlation(args, position_df)
+    # prediction_correlation(args, pred_df)
+    # prediction_annotation_correlation(args, annotation_df, pred_df)
+
 
 def prediction_position_correlation(args, position_df):
-
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/")
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/box/")
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/scatter/")
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/heatmap/")
 
-    #print(position_df)
+    # print(position_df)
     columns = extract_position_measure_columns(position_df)
 
     hor_list = []
@@ -531,7 +533,7 @@ def prediction_position_correlation(args, position_df):
     spear_corr = []
 
     table_list = []
-    for c1 in  columns:
+    for c1 in columns:
 
         prediction_list = []
 
@@ -544,7 +546,7 @@ def prediction_position_correlation(args, position_df):
             if "Unnamed" in c1 or "Unnamed" in c2:
                 continue
 
-            #print(c1, c2)
+            # print(c1, c2)
             x_series = list(position_df[c1])
             y_series = list(position_df[c2])
             sentence_ids = list(position_df["sentence_id"])
@@ -583,16 +585,17 @@ def prediction_position_correlation(args, position_df):
         spear_corr.append(spear_corr_ann)
 
         point_df = pandas.DataFrame(data=prediction_list)
-        fig = px.scatter(point_df, x="x", y="y", title=f"{c1}", color="z", trendline="lowess", hover_name="sentence_text", color_discrete_sequence=px.colors.cyclical.IceFire,)
+        fig = px.scatter(point_df, x="x", y="y", title=f"{c1}", color="z", trendline="lowess",
+                         hover_name="sentence_text", color_discrete_sequence=px.colors.cyclical.IceFire, )
 
         export_plots(args, f"/prediction_sentence_correlation/scatter/{c1}", fig)
 
-    export_correlations(args,  "/prediction_sentence_correlation/heatmap/", columns, columns, ken_corr, pear_corr, spear_corr, table_list)
+    export_correlations(args, "/prediction_sentence_correlation/heatmap/", columns, columns, ken_corr, pear_corr,
+                        spear_corr, table_list)
+
 
 def export_correlations(args, base, columns, columns2, ken_corr, pear_corr, spear_corr, table_list):
-
     for corr_type, d in zip(["pearson", "spearman", "kendall"], [pear_corr, spear_corr, ken_corr]):
-
         # print(measure, d, pred_measures, annotation_stats_columns)
 
         fig = go.Figure(data=go.Heatmap(
@@ -607,22 +610,21 @@ def export_correlations(args, base, columns, columns2, ken_corr, pear_corr, spea
 
 
 def calculate_correlation(c1, c2, table_list, x_list, y_list, measure="value", measure2="value", disc=None, disc2=None):
-
     pearson, pearson_p_value = pearsonr(x_list, y_list)
     table_list.append(
         {"c1": c1, "c2": c2, "type": "pearson",
          "correlation": pearson,
-         "p_value": pearson_p_value, "measure": measure, "measure_2": measure2, "disc": disc,"disc_2": disc2})
+         "p_value": pearson_p_value, "measure": measure, "measure_2": measure2, "disc": disc, "disc_2": disc2})
     kendall, kendall_p_value = kendalltau(x_list, y_list, nan_policy="omit")
     table_list.append(
         {"c1": c1, "c2": c2, "type": "kendall",
          "correlation": kendall,
-         "p_value": kendall_p_value, "measure": measure, "measure_2": measure2, "disc": disc,"disc_2": disc2})
+         "p_value": kendall_p_value, "measure": measure, "measure_2": measure2, "disc": disc, "disc_2": disc2})
     spearman, spearman_p_value = spearmanr(x_list, y_list)
     table_list.append(
         {"c1": c1, "c2": c2, "type": "spearman",
          "correlation": spearman,
-         "p_value": spearman_p_value, "measure": measure, "measure_2": measure2, "disc": disc,"disc_2": disc2})
+         "p_value": spearman_p_value, "measure": measure, "measure_2": measure2, "disc": disc, "disc_2": disc2})
     return kendall, pearson, spearman
 
 
@@ -646,21 +648,23 @@ def extract_position_measure_columns(position_df):
                not c.endswith('_1') and not c.endswith('_2') and not c.endswith('_3') and not c.endswith('_4')]
     return columns
 
+
 def map_likert_to_bin(row, col):
     if row[col] < 3:
         return -1
-    else:#if row[col] > 3:
+    else:  # if row[col] > 3:
         return 1
+
 
 def map_to_binary_answers(annotation_df):
     for col in annotation_stats_columns:
         annotation_df[f'{col}_bin'] = annotation_df.apply(lambda row: map_likert_to_bin(row, col), axis=1)
-        print(annotation_df[[f'{col}',f'{col}_bin']])
+        print(annotation_df[[f'{col}', f'{col}_bin']])
 
     return annotation_df
 
-def annotation_correlation(args, annotation_df, genres_per_story_df):
 
+def annotation_correlation(args, annotation_df, genres_per_story_df):
     ensure_dir(f"{args['output_dir']}/annotation_correlation/")
 
     ensure_dir(f"{args['output_dir']}/annotation_correlation/multi/")
@@ -672,15 +676,16 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
 
         if genre != "all":
             genre_rows_df = genres_per_story_df.loc[genres_per_story_df['genre'] == genre]
-            annotation_genre_filtered_df = pandas.merge(annotation_df, genre_rows_df, left_on=story_id_col, right_on="story_id", how='inner')
+            annotation_genre_filtered_df = pandas.merge(annotation_df, genre_rows_df, left_on=story_id_col,
+                                                        right_on="story_id", how='inner')
         else:
             annotation_genre_filtered_df = annotation_df
-
 
         story_ids = annotation_genre_filtered_df[story_id_col].unique()
         story_worker_pairs_dict = {}
         for story_id in story_ids:
-            workers_for_story_df = annotation_genre_filtered_df.loc[annotation_genre_filtered_df[story_id_col] == story_id]
+            workers_for_story_df = annotation_genre_filtered_df.loc[
+                annotation_genre_filtered_df[story_id_col] == story_id]
             workers_for_story = workers_for_story_df[worker_id_col].unique()
             story_worker_pairs_dict[story_id] = list(itertools.combinations(workers_for_story, 2))
 
@@ -710,7 +715,6 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
             triples = []
 
             for idx, row in annotation_genre_filtered_df.iterrows():
-
                 worker = row[worker_id_col]
                 story = row[story_id_col]
                 metrics_col = row[col]
@@ -747,7 +751,7 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
                 for story in worker_stories:
 
                     mean_value = means_df.loc[means_df[story_id_col] == story][col].values
-                    worker_value =  worker_df.loc[worker_df[story_id_col] == story][col].values
+                    worker_value = worker_df.loc[worker_df[story_id_col] == story][col].values
 
                     if len(mean_value) > 0 and len(worker_value) > 0:
 
@@ -757,7 +761,7 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
                         x_list.append(float(worker_value))
                         y_list.append(float(mean_value))
 
-                if len(x_list) >=2 and len(y_list) == len(x_list):
+                if len(x_list) >= 2 and len(y_list) == len(x_list):
 
                     kendall, _ = kendalltau(x_list, y_list)
                     if not numpy.isnan(kendall):
@@ -778,8 +782,7 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
             agreement_dict["spearman_n_versus_1"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
             agreement_dict["pearson_n_versus_1"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
 
-            #agreement_dict["phi_n_versus_1"] = sum([i * p for i, p in zip(phi_list, probabilities)])
-
+            # agreement_dict["phi_n_versus_1"] = sum([i * p for i, p in zip(phi_list, probabilities)])
 
             annotator_agreement.append(agreement_dict)
 
@@ -825,7 +828,7 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
                     pred_dict = {}
                     pred_dict["story_id"] = story_id
 
-                    #print(am, am2, story_id)
+                    # print(am, am2, story_id)
 
                     pred_dict["z"] = am2
 
@@ -858,11 +861,12 @@ def annotation_correlation(args, annotation_df, genres_per_story_df):
 
             export_plots(args, f"/annotation_correlation/scatter/{genre}/{am}", fig)
 
-        export_correlations(args, f"/annotation_correlation/heatmap/{genre}/", annotation_stats_columns, annotation_stats_columns, ken_corr, pear_corr, spear_corr,
+        export_correlations(args, f"/annotation_correlation/heatmap/{genre}/", annotation_stats_columns,
+                            annotation_stats_columns, ken_corr, pear_corr, spear_corr,
                             table_list)
 
-def check_quality(annotation_df, only_passes_checks=True):
 
+def check_quality(annotation_df, only_passes_checks=True):
     accept_time_col = annotation_df["AcceptTime"]
     submit_time_col = annotation_df["SubmitTime"]
 
@@ -878,7 +882,7 @@ def check_quality(annotation_df, only_passes_checks=True):
 
         time_taken = submit_time - accept_time
 
-        if time_taken.seconds / 60.0 < 3: # Represents 3 minutes.
+        if time_taken.seconds / 60.0 < 3:  # Represents 3 minutes.
             suspiciously_quick.append(True)
         else:
             suspiciously_quick.append(False)
@@ -904,8 +908,8 @@ def check_quality(annotation_df, only_passes_checks=True):
 
     return annotation_df
 
-def prediction_correlation(args,  pred_df):
 
+def prediction_correlation(args, pred_df):
     ensure_dir(f"{args['output_dir']}/prediction_summary_correlation/")
     ensure_dir(f"{args['output_dir']}/prediction_summary_correlation/multi/")
     ensure_dir(f"{args['output_dir']}/prediction_summary_correlation/box/")
@@ -914,7 +918,7 @@ def prediction_correlation(args,  pred_df):
 
     story_ids = pred_df['story_id'].unique()
     pred_measures = pred_df['name'].unique()
-    #print(pred_measures)
+    # print(pred_measures)
 
     pred_df['c'] = pred_df.apply(lambda row: label_bucket(row, attribute="name"), axis=1)
 
@@ -923,14 +927,12 @@ def prediction_correlation(args,  pred_df):
         display_df = pred_df.loc[pred_df["c"] == c]
 
         for m in ["mean", "50_perc", "std"]:
-
             fig = px.box(display_df, y=m, x="name", notched=True)
             export_plots(args, f"/prediction_summary_correlation/box/{c}_{m}", fig)
 
             fig = px.line_polar(display_df, r=m, theta="name",
                                 color="story_id", line_close=True)
             export_plots(args, f"/prediction_summary_correlation/multi/{c}_{m}_polar", fig)
-
 
         for pm in pred_measures:
             prediction_list = []
@@ -962,7 +964,6 @@ def prediction_correlation(args,  pred_df):
     full_table_list = []
     for m in ["mean", "std"]:
 
-
         table_list = []
 
         ken_corr = []
@@ -980,7 +981,6 @@ def prediction_correlation(args,  pred_df):
                 x_list = []
                 y_list = []
                 for story_id in story_ids:
-
                     story_row = pred_df.loc[pred_df["story_id"] == story_id]
                     pred_row = story_row.loc[story_row["name"] == pm]
                     x = float(pred_row.iloc[0][m])
@@ -1013,12 +1013,11 @@ def prediction_correlation(args,  pred_df):
 
 
 def prediction_annotation_correlation(args, annotation_df, pred_df):
-
     ensure_dir(f"{args['output_dir']}/prediction_annotation_correlation/")
     ensure_dir(f"{args['output_dir']}/prediction_annotation_correlation/heatmap/")
     ensure_dir(f"{args['output_dir']}/prediction_annotation_correlation/scatter/")
 
-    pred_df['c'] = pred_df.apply(lambda row: label_bucket(row,attribute="name"), axis=1)
+    pred_df['c'] = pred_df.apply(lambda row: label_bucket(row, attribute="name"), axis=1)
 
     pred_measures = pred_df['name'].unique()
 
@@ -1065,7 +1064,6 @@ def prediction_annotation_correlation(args, annotation_df, pred_df):
                         story_row_ann = agg_annotation_df.loc[agg_annotation_df["story_id"] == story_id]
 
                         if len(story_row_ann) > 0 and len(story_row) > 0:
-
                             pred_row = story_row.loc[story_row["name"] == pm]
                             x = float(pred_row.iloc[0][m])
                             pred_dict["x"] = x
@@ -1080,7 +1078,8 @@ def prediction_annotation_correlation(args, annotation_df, pred_df):
 
                         prediction_list.append(pred_dict)
 
-                    kendall, pearson, spearman = calculate_correlation(pm, ac, table_list, x_list, y_list, measure=pm, measure2="mean")
+                    kendall, pearson, spearman = calculate_correlation(pm, ac, table_list, x_list, y_list, measure=pm,
+                                                                       measure2="mean")
 
                     pear_corr_ann.append(pearson)
                     spear_corr_ann.append(spearman)
@@ -1097,11 +1096,13 @@ def prediction_annotation_correlation(args, annotation_df, pred_df):
 
             full_table_list.extend(table_list)
 
-            export_correlations(args, f"/prediction_annotation_correlation/heatmap/{m}_", pred_measures, annotation_stats_columns, ken_corr, pear_corr,
+            export_correlations(args, f"/prediction_annotation_correlation/heatmap/{m}_", pred_measures,
+                                annotation_stats_columns, ken_corr, pear_corr,
                                 spear_corr, table_list)
 
     full_table_df = pandas.DataFrame(full_table_list)
     full_table_df.to_csv(f"{args['output_dir']}/prediction_annotation_correlation/all_correlation.csv")
+
 
 def aggregate_annotations_df(annotation_df):
     annotations_list = []
@@ -1109,15 +1110,16 @@ def aggregate_annotations_df(annotation_df):
         col_df = annotation_df.groupby([annotation_story_id_column], as_index=False).agg(
             {col: ['mean', 'var', 'std', 'median']})
 
-        #print(col_df)
+        # print(col_df)
         col_df.columns = col_df.columns.droplevel(0)
 
         col_df['name'] = col
-        #print(col_df)
+        # print(col_df)
         col_df = col_df.rename(columns={col_df.columns[0]: "story_id", col_df.columns[5]: 'name'})
 
         annotations_list.append(col_df)
     agg_annotation_df = pandas.concat(annotations_list, ignore_index=True)
     return agg_annotation_df
+
 
 story_stats_correlation(vars(args))

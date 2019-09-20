@@ -19,6 +19,7 @@ parser.add_argument('--mturk-url', required=False, type=str,
 
 args = parser.parse_args()
 
+
 def create_assignments(args):
     print(f"Create assignments: {args}")
 

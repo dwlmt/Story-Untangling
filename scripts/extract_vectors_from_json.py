@@ -3,17 +3,16 @@ import multiprocessing
 import os
 
 import dask
-import dask.bag
 import dask.array
+import dask.bag
 import faiss
 import hdbscan
 import numpy
 import pandas
+import umap
 from jsonlines import jsonlines
-from sklearn.neighbors.dist_metrics import DistanceMetric
 from sklearn.preprocessing import normalize
 from tqdm import tqdm
-import umap
 
 parser = argparse.ArgumentParser(
     description='Extract JSON vectors and perform dimensionality reduction.')
@@ -22,28 +21,33 @@ parser.add_argument('--vectors', required=False, type=str, help="If specified th
 parser.add_argument('--output', required=True, type=str, help="Output, saved as a Parquet file")
 parser.add_argument('--umap-n-neighbours', default=100, type=int, help="The number of neighbours.")
 parser.add_argument('--umap-min-dist', default=0.0, type=float, help="Controls how clumpy umap will cluster points.")
-parser.add_argument('--similarity-metric', default=["cosine","euclidean"], nargs="+", type=str, help="The similarity measure to use.")
-parser.add_argument('--dim-reduction-components', default=[48, 2], type=int, nargs="+", help="The number of components to reduce to.")
+parser.add_argument('--similarity-metric', default=["cosine", "euclidean"], nargs="+", type=str,
+                    help="The similarity measure to use.")
+parser.add_argument('--dim-reduction-components', default=[48, 2], type=int, nargs="+",
+                    help="The number of components to reduce to.")
 parser.add_argument('--min-cluster-size', default=20, type=int, help="Min size fo each cluster.")
 parser.add_argument('--kmeans-ncentroids', default=32, type=int, help="Number of K-means centroids.")
 parser.add_argument('--kmeans-iterations', default=25, type=int, help="Number of K-means iteration.")
 parser.add_argument('--code-size', default=4, type=int, help="Byte size for the product quantization")
 parser.add_argument('--num-stories', default=100, type=int, help="Max number of stories to process")
-parser.add_argument("--no-hdbscan", default=False, action="store_true" , help="Don't run HDBSCAN")
-parser.add_argument("--no-kmeans", default=False, action="store_true" , help="Don't run K-Means and the product code.")
-parser.add_argument("--no-umap", default=False, action="store_true" , help="Don't run UMAP dim reduction.")
-parser.add_argument("--no-pca", default=False, action="store_true" , help="Don't run PCA dim reduction.")
-parser.add_argument("--dont-save-csv", default=False, action="store_true" , help="Don't save summary fields to csv.")
+parser.add_argument("--no-hdbscan", default=False, action="store_true", help="Don't run HDBSCAN")
+parser.add_argument("--no-kmeans", default=False, action="store_true", help="Don't run K-Means and the product code.")
+parser.add_argument("--no-umap", default=False, action="store_true", help="Don't run UMAP dim reduction.")
+parser.add_argument("--no-pca", default=False, action="store_true", help="Don't run PCA dim reduction.")
+parser.add_argument("--dont-save-csv", default=False, action="store_true", help="Don't save summary fields to csv.")
 parser.add_argument('--gpus', default=4, type=int, help="GPUs")
-parser.add_argument('--dask-tmp', required=False, type=str, default='/disk/scratch1/s1569885/dask/', help="Dask temp directory.")
+parser.add_argument('--dask-tmp', required=False, type=str, default='/disk/scratch1/s1569885/dask/',
+                    help="Dask temp directory.")
 
 args = parser.parse_args()
+
 
 def ensure_dir(file_path):
     directory = os.path.dirname(file_path)
     if not os.path.exists(directory):
         print(f"Create directory: {directory}")
         os.makedirs(directory)
+
 
 def train_kmeans(x, k, niter, ngpu):
     "Runs kmeans on one or several GPUs"
@@ -79,8 +83,8 @@ def train_kmeans(x, k, niter, ngpu):
 
     return centroids.reshape(k, d)
 
-def extract_json_stats(args):
 
+def extract_json_stats(args):
     print(args)
 
     ensure_dir(args["dask_tmp"])
@@ -98,7 +102,8 @@ def extract_json_stats(args):
             original_df = dd.read_parquet(args["vectors"])
             print(original_df.columns)
         else:
-            original_df = dask.bag.from_sequence(extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
+            original_df = dask.bag.from_sequence(
+                extract_rows(args, metadata_fields, vector_fields, args["num_stories"]))
             original_df = original_df.to_dataframe()
 
             original_df.set_index("sentence_id", shuffle='disk')
@@ -116,17 +121,16 @@ def extract_json_stats(args):
                 row_num = story_df.shape[0]
 
                 for i in range(1, row_num):
-                    earlier = story_df.iloc[i-1]
+                    earlier = story_df.iloc[i - 1]
 
                     later = story_df.iloc[i]
 
                     merged_text = '{From}: ' + earlier['sentence_text'] + ' {To}: ' + later['sentence_text']
                     sentence_id = later['sentence_id']
 
-                    diff_dict = {"sentence_id": sentence_id, "transition_text" : merged_text}
+                    diff_dict = {"sentence_id": sentence_id, "transition_text": merged_text}
 
                     for vector_field in vector_fields:
-
                         vector_diff = earlier[vector_field] - later[vector_field]
 
                         diff_dict[f"{vector_field}_diff"] = vector_diff
@@ -158,16 +162,17 @@ def extract_json_stats(args):
 
                         print(f"Dimensionality reduction for: {new_vector_field}")
 
-                        vector_data = umap.UMAP(n_neighbors=args["umap_n_neighbours"], min_dist=args["umap_min_dist"], n_components=dim, metric=sim_metric).fit_transform(
+                        vector_data = umap.UMAP(n_neighbors=args["umap_n_neighbours"], min_dist=args["umap_min_dist"],
+                                                n_components=dim, metric=sim_metric).fit_transform(
                             vector_data)
 
                         if dim > 3:
                             cluster_dim_fields.append(new_vector_field)
 
-
                         source = []
-                        for sentence_id, reduced_dim in zip (original_df["sentence_id"].compute().values.tolist(),numpy.split(vector_data, 1)[0]):
-                            source.append({"sentence_id": sentence_id, new_vector_field : reduced_dim})
+                        for sentence_id, reduced_dim in zip(original_df["sentence_id"].compute().values.tolist(),
+                                                            numpy.split(vector_data, 1)[0]):
+                            source.append({"sentence_id": sentence_id, new_vector_field: reduced_dim})
 
                         dim_df = dask.bag.from_sequence(source).to_dataframe()
                         dim_df.set_index("sentence_id", shuffle='disk')
@@ -208,7 +213,7 @@ def extract_json_stats(args):
             for field in cluster_dim_fields:
                 for sim_metric in args["similarity_metric"]:
 
-                    if  sim_metric in field or ("pca" in field and sim_metric == "euclidean") :
+                    if sim_metric in field or ("pca" in field and sim_metric == "euclidean"):
 
                         cluster_field = f"{field}_cluster"
                         print(f"HDBSCAN Clustering for : {cluster_field}")
@@ -224,17 +229,19 @@ def extract_json_stats(args):
                                                     min_cluster_size=args["min_cluster_size"],
                                                     core_dist_n_jobs=multiprocessing.cpu_count() - 1)
 
-                        vector_data = dask.array.from_array(numpy.array(original_df[field].compute().values.tolist()), chunks=(1000, 1000))
+                        vector_data = dask.array.from_array(numpy.array(original_df[field].compute().values.tolist()),
+                                                            chunks=(1000, 1000))
 
                         clusterer.fit(vector_data)
 
                         source = []
 
-                        for sentence_id, label, prob, outlier in zip(original_df["sentence_id"].compute().values.tolist(),clusterer.labels_,
-                                                                     clusterer.probabilities_, clusterer.outlier_scores_):
-
+                        for sentence_id, label, prob, outlier in zip(
+                                original_df["sentence_id"].compute().values.tolist(), clusterer.labels_,
+                                clusterer.probabilities_, clusterer.outlier_scores_):
                             source.append({"sentence_id": sentence_id, f"{cluster_field}_label": label,
-                                           f"{cluster_field}_probability": prob, f"{cluster_field}_outlier_score": outlier})
+                                           f"{cluster_field}_probability": prob,
+                                           f"{cluster_field}_outlier_score": outlier})
 
                             print(source[-1])
 
@@ -278,10 +285,12 @@ def extract_json_stats(args):
 
                 source = []
 
-                for sentence_id, distance, cluster, code in zip(original_df["sentence_id"].compute().values.tolist(), D, I,
+                for sentence_id, distance, cluster, code in zip(original_df["sentence_id"].compute().values.tolist(), D,
+                                                                I,
                                                                 codes):
                     source.append({"sentence_id": sentence_id, f"{cluster_field}_kmeans_distance": distance[0],
-                                   f"{cluster_field}_kmeans_cluster": cluster[0], f"{cluster_field}_product_code": code})
+                                   f"{cluster_field}_kmeans_cluster": cluster[0],
+                                   f"{cluster_field}_product_code": code})
                     print(source[-1])
 
                 dim_df = dask.bag.from_sequence(source).to_dataframe()
@@ -298,13 +307,14 @@ def extract_json_stats(args):
             print(csv_df)
             csv_df.to_csv(f'{args["output"]}/vectors.csv.xz')
 
+
 def extract_rows(args, metadata_fields, vector_fields, max_num_stories):
     index_counter = 0
     with jsonlines.open(args['source_json']) as reader:
         for i, obj in tqdm(enumerate(reader)):
             for child in obj["children"]:
-
-                yield {**{k: child[k] for k in metadata_fields},  **{k: numpy.array(child[k],dtype=numpy.float32) for k in vector_fields}}
+                yield {**{k: child[k] for k in metadata_fields},
+                       **{k: numpy.array(child[k], dtype=numpy.float32) for k in vector_fields}}
 
                 index_counter += 1
 

@@ -9,7 +9,6 @@ import pandas
 from nltk.metrics.agreement import AnnotationTask
 from nltk.metrics.distance import interval_distance
 from scipy.stats import stats
-from tabulate import tabulate
 
 locale.setlocale(locale.LC_TIME, "en_US")  # swedish
 
@@ -48,7 +47,6 @@ def flatten(d, parent_key='', sep='_'):
 
 
 def process_annotations(args):
-
     li = []
 
     for filename in args["source_csvs"]:
@@ -57,7 +55,7 @@ def process_annotations(args):
 
     source_csv = pandas.concat(li, ignore_index=True, sort=False, axis=0)
 
-    #print(tabulate(source_csv, headers='keys', tablefmt='psql'))
+    # print(tabulate(source_csv, headers='keys', tablefmt='psql'))
 
     print(source_csv.columns)
 
@@ -111,9 +109,9 @@ def process_annotations(args):
 
     source_csv.to_csv(f"{args['target']}_processed.csv")
 
-    #print(f"Prefiltered: {len(source_csv)}")
-    #source_csv = source_csv.loc[(source_csv['too_quick'] == True) & (source_csv['too_short'] == True)]
-    #print(f"Postfiltered: {len(source_csv)}")
+    # print(f"Prefiltered: {len(source_csv)}")
+    # source_csv = source_csv.loc[(source_csv['too_quick'] == True) & (source_csv['too_short'] == True)]
+    # print(f"Postfiltered: {len(source_csv)}")
 
     stats_dict = defaultdict(dict)
     for col in stats_columns:

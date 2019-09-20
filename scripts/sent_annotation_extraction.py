@@ -9,8 +9,8 @@ parser.add_argument('--database', required=True, type=str, help="The testset dat
 parser.add_argument('--annotation-story-ids', required=True, help='The file with the ids of the annotation stories.')
 parser.add_argument('--output-json', required=True, type=str, help="The output JSON file location.")
 
-
 args = parser.parse_args()
+
 
 def generate_random_code(length=12):
     """Generate a random string of letters and digits """
@@ -32,7 +32,6 @@ def extract_annotations(args):
 
     import dataset
     with dataset.connect(f'sqlite:///{args["database"]}', engine_kwargs={"pool_recycle": 3600}) as db:
-
         for story_id in story_ids:
             story_dict = {}
             print(f"{story_id}")
@@ -56,6 +55,7 @@ def extract_annotations(args):
             json.dump(output_dict, outfile)
 
         metadata_df = pd.DataFrame(data=metadata_list)
-        metadata_df.to_csv(args["output_json"].replace(".json","_meta.csv"))
+        metadata_df.to_csv(args["output_json"].replace(".json", "_meta.csv"))
+
 
 extract_annotations(vars(args))

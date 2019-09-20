@@ -2,13 +2,10 @@ import argparse
 import asyncio
 from concurrent.futures.process import ProcessPoolExecutor
 
-import dataset
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from textblob import TextBlob
-
-from story_untangling.dataset_readers.dataset_features import update_table_on_id, save_sentiment
+from story_untangling.dataset_readers.dataset_features import save_sentiment
 
 engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 1000, "check_same_thread": False}}
+
 
 async def add_sentiment_features(args):
     database = args["database"]
@@ -17,6 +14,7 @@ async def add_sentiment_features(args):
     loop = asyncio.get_event_loop()
     with ProcessPoolExecutor(max_workers=args["max_workers"]) as executor:
         await save_sentiment(args["batch_size"], dataset_db, executor, loop)
+
 
 parser = argparse.ArgumentParser(
     description='Add per sentence sentiment information to the database.')

@@ -23,24 +23,26 @@ parser = argparse.ArgumentParser(
     description='story level clustering and annotations.')
 parser.add_argument('--vectors', required=True, type=str, help="Parquet store with the vectors")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
-parser.add_argument("--projection-fields", required=False, type=str, nargs="+", default=['sentence_tensor_euclidean_umap_48',
-                                                                         'sentence_tensor_diff_euclidean_umap_48',
-                                                                         'story_tensor_diff_euclidean_umap_48',
-                                                                         'story_tensor_euclidean_umap_48',
-                                                                         'sentence_tensor_cosine_umap_48',
-                                                                         'sentence_tensor_diff_cosine_umap_48',
-                                                                         'story_tensor_diff_cosine_umap_48',
-                                                                         'story_tensor_cosine_umap_48',
-                                                                         'sentence_tensor_pca_48',
-                                                                         'story_tensor_pca_48',
-                                                                         'sentence_tensor_diff_pca_48',
-                                                                         'story_tensor_diff_pca_48'
-                                                                         ])
+parser.add_argument("--projection-fields", required=False, type=str, nargs="+",
+                    default=['sentence_tensor_euclidean_umap_48',
+                             'sentence_tensor_diff_euclidean_umap_48',
+                             'story_tensor_diff_euclidean_umap_48',
+                             'story_tensor_euclidean_umap_48',
+                             'sentence_tensor_cosine_umap_48',
+                             'sentence_tensor_diff_cosine_umap_48',
+                             'story_tensor_diff_cosine_umap_48',
+                             'story_tensor_cosine_umap_48',
+                             'sentence_tensor_pca_48',
+                             'story_tensor_pca_48',
+                             'sentence_tensor_diff_pca_48',
+                             'story_tensor_diff_pca_48'
+                             ])
 parser.add_argument('--similarity-metric', default=["cosine", "euclidean"], nargs="+", type=str,
                     help="The similarity measure to use.")
 
 metadata_fields = ['sentence_id', 'sentence_length', 'sentence_num', 'sentence_tensor',
                    'sentence_text', 'transition_text', 'story_id']
+
 
 def create_analysis_output(args):
     ensure_dir(f"{args['output_dir']}/mst_plots/")
@@ -75,9 +77,9 @@ def create_analysis_output(args):
                         metric = "euclidean"
                         proj_arr = normalize(proj_arr, norm='l2')
 
-                    clusterer = HDBSCAN(algorithm='best', metric=metric, gen_min_span_tree=True, approx_min_span_tree=False,
+                    clusterer = HDBSCAN(algorithm='best', metric=metric, gen_min_span_tree=True,
+                                        approx_min_span_tree=False,
                                         core_dist_n_jobs=16, min_cluster_size=3)
-
 
                     clusterer.fit(proj_arr)
 
