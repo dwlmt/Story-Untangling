@@ -1,6 +1,6 @@
 import torch
 from allennlp.modules import TextFieldEmbedder, FeedForward
-from allennlp.nn import Activation, util
+from allennlp.nn import Activation
 from allennlp.nn.util import get_text_field_mask
 from torch.nn import Module
 
@@ -16,6 +16,7 @@ class DynamicEntity(torch.nn.Module):
     -------
     Output contexts from the entity.
     """
+
     def __init__(self,
                  embedder: TextFieldEmbedder,
                  embedding_dim: int,

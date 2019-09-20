@@ -16,6 +16,7 @@ from story_untangling.modules.gpt_lm import MixtureLM, FusionLM, BilinearLM
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
+
 @Model.register("uncertain_reader")
 class UncertainReader(Model):
     """
@@ -82,7 +83,7 @@ class UncertainReader(Model):
                  disc_loss_weight: float = 1.0,
                  full_output_scores: bool = False,
                  full_output_embeddings: bool = False,
-                 flip_loss = False,
+                 flip_loss=False,
                  initializer: InitializerApplicator = InitializerApplicator(),
                  regularizer: Optional[RegularizerApplicator] = None
                  ) -> None:
@@ -119,7 +120,6 @@ class UncertainReader(Model):
                 if i == lm_finetune_top_layers:
                     break
 
-
         if bilinear_fusion:
             self._lm_model = BilinearLM(
                 transformer=transformer,
@@ -140,7 +140,6 @@ class UncertainReader(Model):
                 encoder=fusion_seq2seq_encoder,
                 metrics=self._metrics,
                 accuracy_top_k=accuracy_top_k)
-
 
         self._distance_weights = distance_weights
         self._disc_length_regularizer = disc_length_regularizer
@@ -229,12 +228,14 @@ class UncertainReader(Model):
                 if k == self._primary_token_namespace:
                     batch_size, num_sentences, sentence_length = v.shape
                 def_device = v.device
-                text_mod[k] = v.view(batch_size * num_sentences, -1).to(self._lm_model.transformer.decoder.weight.device)
+                text_mod[k] = v.view(batch_size * num_sentences, -1).to(
+                    self._lm_model.transformer.decoder.weight.device)
 
             embedded_text_tensor = self._text_field_embedder(text_mod).to(def_device)
-            embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1], -1)
+            embedded_text_tensor = embedded_text_tensor.view(batch_size, num_sentences, embedded_text_tensor.shape[1],
+                                                             -1)
 
-            masks_tensor =  text_mod["mask"]
+            masks_tensor = text_mod["mask"]
 
             masks_tensor = masks_tensor.to(def_device).view(batch_size, num_sentences, -1)
 
@@ -281,9 +282,9 @@ class UncertainReader(Model):
                 loss += (gen_loss * self._gen_loss_weight)
 
             if self.full_output_embedding:
-
-                padded_embedded_text_tensor = torch.zeros((embedded_text_tensor.shape[0],embedded_text_tensor.shape[1],
-                                                           masks_tensor.shape[-1], embedded_text_tensor.shape[-1])).float()
+                padded_embedded_text_tensor = torch.zeros((embedded_text_tensor.shape[0], embedded_text_tensor.shape[1],
+                                                           masks_tensor.shape[-1],
+                                                           embedded_text_tensor.shape[-1])).float()
 
                 output_dict["source_encoded_stories"] = source_encoded_stories.cpu()
                 output_dict["embedded_text_tensor"] = padded_embedded_text_tensor.cpu()
@@ -295,7 +296,7 @@ class UncertainReader(Model):
             return output_dict
 
         except Exception as e:
-            print(text,metadata)
+            print(text, metadata)
             raise e
 
     def encode_story_vectors(self, story_embedded_text, story_mask, sentence_hidden_state=None,
@@ -313,7 +314,7 @@ class UncertainReader(Model):
         elif self._sentence_seq2seq_encoder:
             encoded_sentences = self._sentence_seq2seq_encoder(story_embedded_text, story_mask)
             story_mask[:, 0] = 1
-            encoded_sentence_vecs = get_final_encoder_states(encoded_sentences,story_mask)
+            encoded_sentence_vecs = get_final_encoder_states(encoded_sentences, story_mask)
         else:
             story_mask[:, 0] = 1
             encoded_sentence_vecs = get_final_encoder_states(story_embedded_text, story_mask)
@@ -389,7 +390,7 @@ class UncertainReader(Model):
         dot_product_scores = self.calculate_logits(encoded_stories_flat, target_encoded_sentences_flat)
 
         dot_product_mask = (
-                    1.0 - torch.diag(torch.ones(dot_product_scores.shape[0]), 0).float().to(dot_product_scores.device))
+                1.0 - torch.diag(torch.ones(dot_product_scores.shape[0]), 0).float().to(dot_product_scores.device))
         dot_product_scores *= dot_product_mask
 
         if self._disc_length_regularizer:
@@ -414,7 +415,8 @@ class UncertainReader(Model):
 
                 dot_product_scores_copy = dot_product_scores_copy * exclude_mask
 
-            target_mask = torch.diag(torch.ones((batch_size * sentence_num) - i), i).byte().to(dot_product_scores.device)
+            target_mask = torch.diag(torch.ones((batch_size * sentence_num) - i), i).byte().to(
+                dot_product_scores.device)
             target_classes = torch.argmax(target_mask, dim=1).long().to(dot_product_scores.device)
 
             # Remove rows which spill over batches.
@@ -430,7 +432,7 @@ class UncertainReader(Model):
             # Mask out sentences that are not present in the target classes.
             nll_loss = self._nll_loss(scores_softmax, target_classes)
 
-            loss += nll_loss * distance_weights # Add the loss and scale it.
+            loss += nll_loss * distance_weights  # Add the loss and scale it.
 
             # Regularizer to try and keep the vectors as similar lengths.
             if self._disc_length_regularizer:

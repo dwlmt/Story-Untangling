@@ -3,7 +3,6 @@ import copy
 import itertools
 import logging
 import os
-import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Union
@@ -33,9 +32,11 @@ def isAscii(s):
     else:
         return True
 
+
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 1000, "check_same_thread": False}}
+
 
 async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path: str, use_existing_database=True,
                             sentence_splitter: SentenceSplitter = SpacySentenceSplitter(),
@@ -44,7 +45,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                             coreference_model: str = True,
                             batch_size: int = 100,
                             max_workers: int = 16,
-                            marked_sentences = False,
+                            marked_sentences=False,
                             cuda_device: Union[List[int], int] = None) -> str:
     file_name = os.path.basename(file_path)
     database_file = f"{dataset_path}/{file_name}_{db_discriminator}.db"
@@ -94,7 +95,8 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
 
             async for lines, story_nums in chunk_stories_from_file(file_path, batch_size=batch_size):
 
-                story_ids = [id for id in list(db['story'].insert(dict(story_num=story_num)) for story_num in story_nums)]
+                story_ids = [id for id in
+                             list(db['story'].insert(dict(story_num=story_num)) for story_num in story_nums)]
 
                 if marked_sentences:
                     sentence_splitter = MarkerSentenceSplitter()
@@ -109,7 +111,7 @@ async def create_dataset_db(dataset_path: str, db_discriminator: str, file_path:
                 db["sentence"].insert_many(sentences_to_save)
 
                 for m in story_metrics:
-                    db["story"].update(m,['id'])
+                    db["story"].update(m, ['id'])
 
                 print(f"Batch {i} - stories text saved: {story_ids}")
 
@@ -160,7 +162,6 @@ async def save_sentiment(batch_size, dataset_db, executor, loop):
 
 
 async def save_language_features(batch_size, dataset_db, executor, loop):
-
     tasks = []
 
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
@@ -190,6 +191,7 @@ async def save_language_features(batch_size, dataset_db, executor, loop):
             print(f"Sentence Language batch saved {i}")
 
         logger.info(f"Language Features Saved")
+
 
 async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_device: Union[List[int], int] = None,
                    save_batch_size: int = 25):
@@ -245,7 +247,6 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
                             save_batch_size: int = 25, sentence_chunks: int = 100):
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
-        
         coref_table = db.create_table('coreference')
         coref_table.create_column('story_id', db.types.bigint)
         coref_table.create_column('start_span', db.types.integer)
@@ -253,7 +254,6 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
         coref_table.create_index(['story_id'])
         coref_table.create_index(['start_span'])
         coref_table.create_index(['end_span'])
-        
 
         gpu_max_workers = 1
 
@@ -276,7 +276,7 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
 
             tasks = []
             # Order by shortest to longest so possible failures are at the end.
-            for story in db['story'].find(order_by=['sentence_num','id']):
+            for story in db['story'].find(order_by=['sentence_num', 'id']):
 
                 sentence_list = [s["text"] for s in db["sentence"].find(story_id=story["id"], order_by='id')]
                 sentence_tokens = word_tokenizer.batch_tokenize(sentence_list)
@@ -296,21 +296,21 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
 
                         for coref_to_save in results:
                             try:
-                                
+
                                 db["coreference"].insert_many(copy.deepcopy(coref_to_save))
-                                
+
                             except Exception as e:
                                 logging.error(e)
-                                
+
                         tasks = []
 
             results = await asyncio.gather(*tasks)
 
             for coref_to_save in results:
                 try:
-                    
+
                     db["coreference"].insert_many(coref_to_save)
-                    
+
                 except Exception as e:
                     logging.error(e)
 
@@ -324,6 +324,7 @@ def update_table_on_id(db, table, data):
             sentence_table.update(sent_dict, ["id"])
     except Exception as e:
         logging.error(e)
+
 
 async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
     """ Async yield batches of stories that are line separated/
@@ -346,7 +347,7 @@ async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[Lis
     yield lines, story_nums
 
 
-def sentiment_features( story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
+def sentiment_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     sents_to_save = []
     for sent_dict in story_sentences:
         analyzer = SentimentIntensityAnalyzer()
@@ -366,7 +367,8 @@ def sentiment_features( story_sentences: List[Dict[str, Any]]) -> List[Dict[str,
 
     return sents_to_save
 
-def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
+
+def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     lang_list = []
 
     wtl = WhatTheLang()
@@ -376,7 +378,7 @@ def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
         text = sent_dict["text"]
 
         try:
-            lang =  wtl.predict_lang(text)
+            lang = wtl.predict_lang(text)
 
             if not isinstance(lang, str):
                 lang = "UKN"
@@ -399,9 +401,11 @@ def lang_features(story_sentences: List[Dict[str, Any]]) -> List[Dict[str,Any]]:
 
     return lang_list
 
+
 class MarkerSentenceSplitter():
     """ Split sentences based on a predefined marker.
     """
+
     def __init__(self, start_marker="[STR_SENT]", end_marker="[END_SENT]"):
         self.start_marker = start_marker
         self.end_marker = end_marker
@@ -411,7 +415,7 @@ class MarkerSentenceSplitter():
         Splits a ``text`` :class:`str` paragraph into a list of :class:`str`, where each is a sentence.
         """
         split_text = text.split(self.start_marker)
-        split_text = [t.replace(self.end_marker,"").replace(self.start_marker,"").strip() for t in split_text]
+        split_text = [t.replace(self.end_marker, "").replace(self.start_marker, "").strip() for t in split_text]
         split_text = [t for t in split_text if len(t) > 0]
         return split_text
 
@@ -420,6 +424,7 @@ class MarkerSentenceSplitter():
         Default implementation is to just iterate over the texts and call ``split_sentences``.
         """
         return [self.split_sentences(text) for text in texts]
+
 
 class ProcessStory:
     def __init__(self, sentence_splitter):

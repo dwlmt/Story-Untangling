@@ -1,18 +1,14 @@
 import copy
+import random
 from collections import OrderedDict
 from math import exp
-from time import sleep
-
-import numpy
-import random
-from typing import List, Any, Dict
+from typing import List
 
 from allennlp.common.util import JsonDict
 from allennlp.common.util import get_spacy_model
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
 from allennlp.predictors.predictor import Predictor
-from allennlp.common.util import sanitize
 from scipy.stats import stats
 
 from story_untangling.predictors.welford import Welford
@@ -59,13 +55,11 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
         else:
             random.shuffle(shuffled_instances)
 
-
         story_ids = []
         gold_order = []
         for i, instance in enumerate(gold_instances):
             story_ids.append(instance["metadata"]["story_id"])
             gold_order.append(instance["metadata"]["absolute_position"])
-
 
         # Do not split the ordering task across stories.
         if len(set(story_ids)) > 1:
@@ -78,10 +72,10 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
             shuffled_sentence_pos_to_idx[instance["metadata"]["absolute_position"]] = i
         shuffled_sentence_idx_to_pos = {v: k for k, v in shuffled_sentence_pos_to_idx.items()}
 
-
         results = {}
 
-        predicted_order, log_prob, best_n = self.search(shuffled_instances, shuffled_sentence_pos_to_idx, shuffled_sentence_idx_to_pos)
+        predicted_order, log_prob, best_n = self.search(shuffled_instances, shuffled_sentence_pos_to_idx,
+                                                        shuffled_sentence_idx_to_pos)
 
         if predicted_order is None:
             return {}
@@ -92,7 +86,6 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
         else:
             gold_order_to_eval = gold_order
             predicted_order_to_eval = predicted_order
-
 
         kendalls_tau, kendalls_tau_p_value = stats.kendalltau(gold_order_to_eval, predicted_order_to_eval)
         spearmanr, spearmanr_p_value = stats.spearmanr(gold_order_to_eval, predicted_order_to_eval)
@@ -113,7 +106,6 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
         self._pos_acc_correct += [a == b for a, b in
                                   zip(gold_order_to_eval, predicted_order_to_eval)].count(True)
         self._pos_acc_total += len(gold_order_to_eval)
-
 
         results["initial_ordering"] = shuffled_sentence_order
         results["gold_ordering"] = gold_order
@@ -144,7 +136,7 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
 
     def search(self, shuffled_instances, shuffled_sentence_pos_to_idx, shuffled_sentence_idx_to_pos):
 
-        #TODO: This wouldn't handle a sliding window with a step of more than one so this would need to be changed.
+        # TODO: This wouldn't handle a sliding window with a step of more than one so this would need to be changed.
 
         max_pos = max(shuffled_sentence_pos_to_idx, key=int)
 
@@ -163,7 +155,6 @@ class ReadingThoughtsLocalGreedyPredictor(Predictor):
                 for j, log_prob in [(i, p) for i, p in enumerate(all_probs[shuffled_sentence_pos_to_idx[seq[-1]]])]:
                     next_pos = min(max_pos, shuffled_sentence_idx_to_pos[j] + 1)
                     if next_pos not in set(seq):
-
                         # Plus one is needed because the correct target needs to redirect to the next in the sequence.
                         fringe_candidate = (seq + [next_pos], score + log_prob)
                         fringe_sequences.append(fringe_candidate)

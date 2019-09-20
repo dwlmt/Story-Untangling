@@ -1,12 +1,15 @@
+import math
+
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-import numpy as np
-import math
 
 '''
 This implementation is from https://github.com/leimao/Sampled_Softmax_PyTorch/blob/master/utils.py
 '''
+
+
 class LogUniformSampler(object):
     def __init__(self, ntokens):
 
@@ -17,15 +20,15 @@ class LogUniformSampler(object):
 
     def generate_distribution(self):
         for i in range(self.N):
-            self.prob[i] = (np.log(i+2) - np.log(i+1)) / np.log(self.N + 1)
+            self.prob[i] = (np.log(i + 2) - np.log(i + 1)) / np.log(self.N + 1)
 
-    def probability(self,idx):
+    def probability(self, idx):
         return self.prob[idx]
 
     def expected_count(self, num_tries, samples):
         freq = list()
         for sample_idx in samples:
-            freq.append(-(np.exp(num_tries * np.log(1-self.prob[sample_idx]))-1))
+            freq.append(-(np.exp(num_tries * np.log(1 - self.prob[sample_idx])) - 1))
         return freq
 
     def accidental_match(self, labels, samples):
@@ -70,6 +73,7 @@ class LogUniformSampler(object):
         sample_freq = self.expected_count(size, samples)
 
         return samples, true_freq, sample_freq
+
 
 class SampledSoftmax(nn.Module):
     def __init__(self, ntokens, nsampled, nhid, tied_weight):

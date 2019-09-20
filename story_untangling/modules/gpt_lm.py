@@ -97,7 +97,8 @@ class FusionLM(BaseLMHead):
         lm_logits = self._decoder(fused_states.to(self._decoder.weight.device))
 
         if lm_labels is not None:
-            return self.calc_loss(lm_labels.to(feature_hidden_states.device), lm_logits.to(feature_hidden_states)).to(lm_hidden_states.device)
+            return self.calc_loss(lm_labels.to(feature_hidden_states.device), lm_logits.to(feature_hidden_states)).to(
+                lm_hidden_states.device)
 
         return lm_logits
 

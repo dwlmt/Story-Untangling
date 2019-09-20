@@ -1,7 +1,5 @@
 import asyncio
 import logging
-from collections import OrderedDict
-from time import sleep
 from typing import Dict, List, Union, Any
 
 import dataset
@@ -14,7 +12,6 @@ from allennlp.data.fields import TextField, MetadataField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
-from allennlp.semparse.contexts.knowledge_graph import KnowledgeGraph
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler
@@ -88,6 +85,7 @@ class WritingPromptsDatasetReader(DatasetReader):
     cuda_device : List[Int] (optional, default=-1)
         List of CUDA devices. This is needed in cases such as NER and coreferencing where preprocessing benefits from CUDA.
     """
+
     def __init__(self,
                  source_tokenizer: Tokenizer = None,
                  target_tokenizer: Tokenizer = None,
@@ -318,10 +316,10 @@ class WritingPromptsDatasetReader(DatasetReader):
             field_dict["target_coreferences"] = entity_field
 
             if self._target_negative and negative_sequence:
-                tokenized_text = self._source_tokenizer.tokenize(" ".join([s["coreferences"] for s in negative_sequence]))
+                tokenized_text = self._source_tokenizer.tokenize(
+                    " ".join([s["coreferences"] for s in negative_sequence]))
                 entity_field = TextField(tokenized_text, {"coreferences": self._entity_token_indexer})
                 field_dict["negative_coreferences"] = entity_field
-
 
         if self._sentiment_features:
             source_features.extend(self.construct_global_sentiment_features(
@@ -379,7 +377,6 @@ class WritingPromptsDatasetReader(DatasetReader):
                 # TODO: More options for the max recent entities, keep duplicates, etc,
                 coreferences_encoded = reversed(list(more_itertools.unique_everseen(reversed(coreferences_encoded))))
             sentence["coreferences"] = " ".join(coreferences_encoded)
-
 
     def create_temp_dataset(self, temp_db_location):
         self._dataset_path = temp_db_location

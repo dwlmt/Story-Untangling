@@ -1,30 +1,20 @@
-import io
-import tarfile
-import zipfile
-import re
 import logging
 import warnings
-import itertools
 from collections import defaultdict, deque
-from typing import Optional, Tuple, Sequence, cast, IO, Iterator, Any, NamedTuple
 
+import torch
 from allennlp.modules import Embedding
 from allennlp.modules.token_embedders.embedding import _read_pretrained_embeddings_file
 from overrides import overrides
-import numpy
-import torch
 from torch.nn.functional import embedding
 
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning)
-    import h5py
 
-from allennlp.common import Params, Tqdm
+from allennlp.common import Params
 from allennlp.common.checks import ConfigurationError
-from allennlp.common.file_utils import get_file_extension, cached_path
 from allennlp.data import Vocabulary
 from allennlp.modules.token_embedders.token_embedder import TokenEmbedder
-from allennlp.modules.time_distributed import TimeDistributed
 from allennlp.nn import util
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -90,7 +80,6 @@ class EntityEmbedding(Embedding):
 
         self.embeddings_history = defaultdict(lambda: deque(maxlen=self.keep_history))
 
-
     @overrides
     def forward(self, inputs):
 
@@ -114,7 +103,6 @@ class EntityEmbedding(Embedding):
             if self.keep_history > 0:
                 # Separate from computational graph and transfer to CPU so as not to run out of memory.
                 self.embeddings_history[i.item()].append(ent.clone().detach().cpu())
-
 
     @classmethod
     def from_params(cls, vocab: Vocabulary, params: Params) -> 'Embedding':  # type: ignore

@@ -1,5 +1,5 @@
-from typing import Dict, TypeVar, Generic, Optional
 from collections import OrderedDict
+from typing import Dict, TypeVar, Generic, Optional
 
 import torch
 

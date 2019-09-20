@@ -84,8 +84,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                  max_story_sentences: int = 500,
                  min_sequence_length: int = 2,
                  max_sequence_length: int = 50,
-                 max_avg_length_per_word = 8,
-                 max_word_length = 25,
+                 max_avg_length_per_word=8,
+                 max_word_length=25,
                  min_check_word_length=8,
                  story_chunking: int = 50,
                  ner_model: str = None,
@@ -146,8 +146,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         batch_num = 0
 
-        #tensors = self.block_memory()
-        #self.unblock_memory(tensors)
+        # tensors = self.block_memory()
+        # self.unblock_memory(tensors)
 
         dataset_db = self.create_cached_dataset(file_path)
 
@@ -211,7 +211,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         dataset_db = loop.run_until_complete(
             create_dataset_db(dataset_path=self._dataset_path, db_discriminator=self._db_discriminator,
                               file_path=file_path, use_existing_database=self._use_existing_cached_db,
-                              ner_model=self._ner_model, coreference_model=self._coreference_model, marked_sentences=self._marked_sentences,
+                              ner_model=self._ner_model, coreference_model=self._coreference_model,
+                              marked_sentences=self._marked_sentences,
                               cuda_device=self._cuda_device))
         self._dataset_db = dataset_db
         return dataset_db
@@ -224,7 +225,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             t = t.cpu()
             del t
         del tensors
-        #torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
     def block_memory(self):
         ''' Blocks GPU memory unless 1GB is already being used. The random memory tensor is 8GB.
@@ -232,12 +233,14 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         tensors = []
         with torch.no_grad():
             if isinstance(self._cuda_device, int):
-                memory_used = max(torch.cuda.memory_allocated(self._cuda_device),torch.cuda.memory_cached(device=self._cuda_device))
+                memory_used = max(torch.cuda.memory_allocated(self._cuda_device),
+                                  torch.cuda.memory_cached(device=self._cuda_device))
                 if memory_used < 1e+9:
                     tensors.append(torch.rand(int(20e8), device=self._cuda_device))
             else:
                 for cuda_device in self._cuda_device:
-                    memory_used = max(torch.cuda.memory_allocated(cuda_device),torch.cuda.memory_cached(device=cuda_device))
+                    memory_used = max(torch.cuda.memory_allocated(cuda_device),
+                                      torch.cuda.memory_cached(device=cuda_device))
                     if memory_used < 1e+9:
                         tensors.append(torch.rand(int(20e8), device=cuda_device))
 
@@ -293,10 +296,10 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         return self.text_to_instance(sentence_batch, story_batch, db)
 
-
     @overrides
     def text_to_instance(self,
-                         sentences: Dict[str, Any], story: Dict[str, Any], db, batch_num=None) -> Instance:  # type: ignore
+                         sentences: Dict[str, Any], story: Dict[str, Any], db,
+                         batch_num=None) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         field_dict = {}
         story_text_original = []
@@ -345,7 +348,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                         print(f"Rejected token: {token_text}")
 
             tokenized_text = stripped_tokens
-
 
             if self._add_start_end_token:
                 tokenized_text.insert(0, Token(START_SYMBOL))
@@ -422,7 +424,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             story_id = story["id"]
             sentence_num = story["sentence_num"]
 
-
         metadata = {"story_id": story_id, "sentence_ids": [s["id"] for s in sentences],
                     "sentence_nums": [s["sentence_num"] for s in sentences],
                     "number_of_sentences": sentence_num}
@@ -435,7 +436,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         if len(textblob_polarity) > 0:
             metadata["textblob_polarity"] = textblob_polarity
             metadata["textblob_subjectivity"] = textblob_subjectivity
-
 
         if batch_num is not None:
             metadata["batch_num"] = batch_num
