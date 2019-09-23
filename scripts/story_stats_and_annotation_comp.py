@@ -10,6 +10,8 @@ import pandas
 import plotly.express as px
 import plotly.graph_objs as go
 import plotly.io as pio
+import scipy
+from jsonlines import jsonlines
 from nltk import AnnotationTask, interval_distance, binary_distance
 from scipy.signal import find_peaks
 from scipy.stats import kendalltau, pearsonr, spearmanr
@@ -20,10 +22,13 @@ px.defaults.height = 1000
 sentiment_columns = ["sentiment", "textblob_sentiment", "vader_sentiment"]
 
 parser = argparse.ArgumentParser(
-    description='Extract JSON vectors and perform dimensionality reduction.')
-parser.add_argument('--batch-stats', required=True, type=str, help="CSV of the prediction batch stats.")
-parser.add_argument('--position-stats', required=True, type=str, help="The per sentence prediction output.")
-parser.add_argument('--annotation-stats', required=True, nargs='+', type=str, help="CSV of the prediction batch stats.")
+    description='Annotations statistical analysis and comparisons with the Story output preidictions.')
+parser.add_argument('--batch-stats', required=False, type=str, help="CSV of the prediction batch stats.")
+parser.add_argument('--position-stats', required=False, type=str, help="The per sentence prediction output.")
+parser.add_argument('--annotation-stats', required=False, nargs='+', type=str, help="CSV of the prediction batch stats.")
+parser.add_argument('--mturk-sentence-annotations', required=False, nargs='+', type=str, help="CSV export from Mechanical Turk.")
+parser.add_argument('--firebase-sentence-annotations', required=False, type=str,
+                    help="JSONL export of sentence annotations from Firebase.")
 parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
@@ -31,6 +36,7 @@ parser.add_argument('--peak-prominence-weighting', required=False, type=int, def
                     help="The peak prominence weighting.")
 parser.add_argument('--peak-width', default=1.0, type=float,
                     help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
+parser.add_argument('--min-time', type=int, default=4, help="Min time in minutes not to be considered suspicious.")
 
 args = parser.parse_args()
 
@@ -468,33 +474,147 @@ def genres_per_story(args, annotation_df):
     return genre_df
 
 
+def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
+
+    sentence_stats_columns = ['suspense','duration_milliseconds','sentence_len']
+
+    ensure_dir(f"{args['output_dir']}/sentence_annotations_stats/")
+    print(mturk_df)
+    #print(firebase_data)
+
+    mturk_df = calculate_task_time(args, mturk_df)
+
+    print(mturk_df)
+
+    story_level_data = []
+    sentence_level_data = []
+    for f in firebase_data:
+        story_dict = {}
+        story_dict["firebase_id"] = f["id"]
+        story_dict["firebase_collection"] = f["collection"]
+
+        document = f["document"]
+        for k in set(document.keys()).difference(set(["training_annotations","sentence_annotations"])):
+            story_dict[k] = document[k]
+
+        for sent in document["sentence_annotations"]:
+            sent_dict = {**sent, **story_dict}
+
+            sentence_level_data.append(sent_dict)
+
+        for stats_column in sentence_stats_columns:
+
+            stat_data = [s[stats_column] for s in document["sentence_annotations"]]
+
+            nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(stat_data)
+
+            story_dict[f"{stats_column}_num"] = nobs
+            story_dict[f"{stats_column}_min"], story_dict[f"{stats_column}_max"]  = minmax
+            story_dict[f"{stats_column}_var"] = variance
+            story_dict[f"{stats_column}_skew"] = skew
+            story_dict[f"{stats_column}_kurt"] = kurtosis
+
+
+        story_level_data.append(story_dict)
+
+    story_annotation_df = pandas.DataFrame(data=story_level_data)
+    sentence_annotation_df = pandas.DataFrame(data=sentence_level_data)
+
+    merged_story_df = pandas.merge(story_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId', how='outer')
+
+
+    merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
+
+    merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
+                                   how='outer')
+    merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
+
+
+def calculate_task_time(args, mturk_df):
+    suspiciously_quick = []
+    task_time_taken = []
+    accept_time_col = mturk_df['AcceptTime']
+    submit_time_col = mturk_df['SubmitTime']
+    for accept_time, submit_time in zip(accept_time_col, submit_time_col):
+
+        mturk_date_format = "%Y-%m-%d %H:%M:%S%z"
+        accept_time = datetime.datetime.strptime(accept_time, mturk_date_format)
+        submit_time = datetime.datetime.strptime(submit_time, mturk_date_format)
+
+        time_taken = submit_time - accept_time
+        task_time_taken.append(task_time_taken)
+
+        if time_taken.seconds / 60.0 < args["min_time"]:
+            suspiciously_quick.append(True)
+        else:
+            suspiciously_quick.append(False)
+    mturk_df = mturk_df.assign(too_quick=pandas.Series(suspiciously_quick))
+    mturk_df = mturk_df.assign(total_task_duration=pandas.Series(task_time_taken))
+    return mturk_df
+
+
 def story_stats_correlation(args):
+
+    annotation_df = None
+    position_df = None
+    pred_df = None
+    mturk_df = None
+
     dfs = []
-    for filename in args["annotation_stats"]:
-        dfs.append(pandas.read_csv(filename))
+    if args["mturk_sentence_annotations"] is not None and len(args["mturk_sentence_annotations"]) > 0:
 
-    annotation_df = pandas.concat(dfs, ignore_index=True)
-    annotation_df = annotation_df.fillna(value=0.0)
+        for filename in args["mturk_sentence_annotations"]:
+            dfs.append(pandas.read_csv(filename))
 
-    annotation_df = map_to_binary_answers(annotation_df)
+        mturk_df = pandas.concat(dfs, ignore_index=True)
 
-    annotation_df = check_quality(annotation_df)
 
-    pred_df = pandas.read_csv(args["batch_stats"])
-    pred_df = pred_df.fillna(value=0.0)
+    firebase_data = []
+    if args["firebase_sentence_annotations"] is not None and len(args["firebase_sentence_annotations"]) > 0:
+        with jsonlines.open(args["firebase_sentence_annotations"]) as reader:
+            for obj in reader:
+                firebase_data.append(obj)
 
-    story_ids = pred_df["story_id"].to_list()
-    story_ids.sort()
 
-    position_df = pandas.read_csv(args["position_stats"])
-    position_df = position_df.fillna(value=0.0)
+    dfs = []
+    if args["annotation_stats"] is not None and len(args["annotation_stats"]) > 0:
+        for filename in args["annotation_stats"]:
+            dfs.append(pandas.read_csv(filename))
 
-    genres_per_story_df = genres_per_story(args, annotation_df)
-    annotation_correlation(args, annotation_df, genres_per_story_df)
-    # prediction_peaks(args, annotation_df, position_df)
-    # prediction_position_correlation(args, position_df)
-    # prediction_correlation(args, pred_df)
-    # prediction_annotation_correlation(args, annotation_df, pred_df)
+        annotation_df = pandas.concat(dfs, ignore_index=True)
+        annotation_df = annotation_df.fillna(value=0.0)
+
+        annotation_df = map_to_binary_answers(annotation_df)
+
+        annotation_df = check_quality(annotation_df)
+
+    if args["batch_stats"] is not None and len(args["batch_stats"]) > 0:
+        pred_df = pandas.read_csv(args["batch_stats"])
+        pred_df = pred_df.fillna(value=0.0)
+
+        story_ids = pred_df["story_id"].to_list()
+        story_ids.sort()
+
+    if args["position_stats"] is not None and len(args["position_stats"]) > 0:
+        position_df = pandas.read_csv(args["position_stats"])
+        position_df = position_df.fillna(value=0.0)
+
+    if annotation_df is not None:
+        genres_per_story_df = genres_per_story(args, annotation_df)
+        annotation_correlation(args, annotation_df, genres_per_story_df)
+
+
+    if mturk_df is not None and len(firebase_data):
+        sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data)
+
+    if annotation_df is not None and position_df is not None:
+        prediction_peaks(args, annotation_df, position_df)
+    if position_df is not None:
+        prediction_position_correlation(args, position_df)
+    if pred_df is not None:
+        prediction_correlation(args, pred_df)
+    if annotation_df is not None and pred_df is not None:
+        prediction_annotation_correlation(args, annotation_df, pred_df)
 
 
 def prediction_position_correlation(args, position_df):
