@@ -127,6 +127,10 @@ def analyse_vector_stats(args):
 
 
 def create_cluster_examples(args):
+
+    if "vector_stats" not in args or len(args["vector_stats"] == 0):
+        return
+
     metadata_fields = ["story_id", 'sentence_num', 'sentence_id', "sentence_text", "transition_text"]
 
     vector_df = pd.read_csv(args["vector_stats"])
@@ -184,6 +188,10 @@ def create_cluster_examples(args):
 
 
 def create_cluster_scatters(args):
+
+    if "vector_stats" not in args or len(args["vector_stats"] == 0):
+        return
+
     vector_df = pd.read_csv(args["vector_stats"])
     ensure_dir(f"{args['output_dir']}/cluster_scatters/")
 
@@ -308,6 +316,10 @@ def create_cluster_scatters(args):
 
 
 def create_sentiment_plots(args):
+
+    if "position_stats" not in args or len(args["position_stats"] == 0):
+        return
+
     ensure_dir(f"{args['output_dir']}/sentiment_plots/")
 
     position_df = pd.read_csv(args["position_stats"])
@@ -369,6 +381,9 @@ def create_sentiment_plots(args):
 
 
 def create_story_plots(args):
+    if "position_stats" not in args or len(args["position_stats"] == 0):
+        return
+
     ensure_dir(f"{args['output_dir']}/prediction_plots/")
 
     turning_points_df = None
