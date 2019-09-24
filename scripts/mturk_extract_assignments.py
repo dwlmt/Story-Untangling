@@ -16,7 +16,6 @@ parser.add_argument('--mturk-url', required=False, type=str,
 
 args = parser.parse_args()
 
-
 def create_assignments(args):
     print(f"Create assignments: {args}")
 
@@ -33,6 +32,7 @@ def create_assignments(args):
     assignment_results = []
     for i, row in assignment_df.iterrows():
 
+        print(row)
         hit_id = row["hit_id"]
         print(f"Retrieve HIT: {hit_id}")
 
@@ -58,7 +58,8 @@ def create_assignments(args):
                 answer_processed_dict[field_name] = field_value
             del (assignment['Answer'])
 
-            item = {**item, **assignment}
+            for k in assignment.keys():
+                item[k.strip()] = assignment[k]
             item = {**item, **answer_processed_dict}
 
             assignment_results.append(item)
