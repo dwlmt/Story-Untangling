@@ -474,17 +474,123 @@ def genres_per_story(args, annotation_df):
     return genre_df
 
 
+def inter_annotator_agreement(merged_sentence_df, args):
+    print("Calculate Interannotator Agreement")
+
+    ensure_dir(f"{args['output_dir']}/agreement/")
+    # Calculate inter-annotator agreement.
+
+    measure_cols = ["suspense","duration_milliseconds"]
+    merged_sentence_df = map_to_binary_answers(merged_sentence_df,cols=measure_cols)
+
+    agreement_list = []
+    for coding in ["norm","bin"]:
+        for c in measure_cols:
+
+            if coding == "bin" and c != "suspense":
+                continue
+
+            agreement_dict = {}
+
+            agreement_dict["coding"] = coding
+
+            agreement_triples = []
+
+            for i, row in merged_sentence_df.iterrows():
+                if coding is "bin":
+                    value = row[f"{c}_bin"]
+                else:
+                    value = row[c]
+                if coding == "binary":
+                    if value in [1,2]:
+                        value = 1
+                    elif value == [3]:
+                        value = 2
+                    elif value in [4,5]:
+                        value = 3
+                agreement_triples.append((str(row["worker_id"]), str(row["sentence_id"]), int(value)))
+
+            print(f"Pairs for agreement: {len(agreement_triples)}")
+
+            if coding == "bin":
+                dist = binary_distance
+            else:
+                dist = interval_distance
+
+            t = AnnotationTask(data=agreement_triples, distance=dist)
+
+            agreement_dict[f"alpha"] = t.alpha()
+
+            worker_ids = merged_sentence_df["worker_id"].unique()
+
+            kendall_list = []
+            pearson_list = []
+            spearman_list = []
+
+            worker_items = []
+
+            for worker in worker_ids:
+                x_list = []
+                y_list = []
+
+                worker_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] == worker]
+                worker_stories = worker_df["sentence_id"].unique()
+
+                exclude_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] != worker]
+                means_df = exclude_df.groupby("sentence_id", as_index=False).mean()
+
+                for story in worker_stories:
+
+                    if "bin" in coding:
+                        mean_col = f"{c}_bin"
+                    else:
+                        mean_col = c
+
+                    mean_value = means_df.loc[means_df["sentence_id"] == story][mean_col].values
+                    worker_value = worker_df.loc[worker_df["sentence_id"] == story][mean_col].values
+
+                    if len(mean_value) == 1 and len(worker_value) == 1:
+
+                        x_list.append(float(worker_value))
+                        y_list.append(float(mean_value))
+
+                if len(x_list) >= 2 and len(y_list) == len(x_list):
+
+                    kendall, _ = kendalltau(x_list, y_list)
+                    if not numpy.isnan(kendall):
+                        kendall_list.append(kendall)
+                    pearson, _ = pearsonr(x_list, y_list)
+                    if not numpy.isnan(pearson):
+                        pearson_list.append(pearson)
+                    spearman, _ = spearmanr(x_list, y_list)
+                    if not numpy.isnan(spearman):
+                        spearman_list.append(spearman)
+
+                    worker_items.append(len(x_list))
+
+            total_items = float(sum(worker_items))
+            probabilities = [p / total_items for p in worker_items]
+
+            agreement_dict[f"kendall_1_vs_all"] = sum([i * p for i, p in zip(kendall_list, probabilities)])
+            agreement_dict[f"spearman_1_vs_all"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
+            agreement_dict[f"pearson_1_vs_all"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
+
+            agreement_dict["measure"] = c
+
+            agreement_list.append(agreement_dict)
+
+    agreement_df = pandas.DataFrame(data=agreement_list)
+    print(agreement_df)
+    agreement_df.to_csv(f"{args['output_dir']}/agreement/agreement.csv")
+
+
 def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
     sentence_stats_columns = ['suspense','duration_milliseconds','sentence_len']
 
     ensure_dir(f"{args['output_dir']}/sentence_annotations_stats/")
-    print(mturk_df)
-    #print(firebase_data)
 
     mturk_df = calculate_task_time(args, mturk_df)
-
-    print(mturk_df)
 
     story_level_data = []
     sentence_level_data = []
@@ -500,6 +606,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
         for sent in document["sentence_annotations"]:
             sent_dict = {**sent, **story_dict}
 
+            print(sent_dict)
             sentence_level_data.append(sent_dict)
 
         for stats_column in sentence_stats_columns:
@@ -514,7 +621,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
             story_dict[f"{stats_column}_skew"] = skew
             story_dict[f"{stats_column}_kurt"] = kurtosis
 
-
+        print(story_dict)
         story_level_data.append(story_dict)
 
     story_annotation_df = pandas.DataFrame(data=story_level_data)
@@ -523,10 +630,12 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
     merged_story_df = pandas.merge(story_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId', how='outer')
 
 
-    merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
-
     merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
                                    how='outer')
+
+    inter_annotator_agreement(merged_sentence_df, args)
+
+    merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
     merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
 
 
@@ -542,12 +651,15 @@ def calculate_task_time(args, mturk_df):
         submit_time = datetime.datetime.strptime(submit_time, mturk_date_format)
 
         time_taken = submit_time - accept_time
-        task_time_taken.append(task_time_taken)
+
+        task_time_taken.append(time_taken)
 
         if time_taken.seconds / 60.0 < args["min_time"]:
             suspiciously_quick.append(True)
         else:
             suspiciously_quick.append(False)
+    print(suspiciously_quick)
+    print(task_time_taken)
     mturk_df = mturk_df.assign(too_quick=pandas.Series(suspiciously_quick))
     mturk_df = mturk_df.assign(total_task_duration=pandas.Series(task_time_taken))
     return mturk_df
@@ -574,7 +686,6 @@ def story_stats_correlation(args):
         with jsonlines.open(args["firebase_sentence_annotations"]) as reader:
             for obj in reader:
                 firebase_data.append(obj)
-
 
     dfs = []
     if args["annotation_stats"] is not None and len(args["annotation_stats"]) > 0:
@@ -776,8 +887,8 @@ def map_likert_to_bin(row, col):
         return 1
 
 
-def map_to_binary_answers(annotation_df):
-    for col in annotation_stats_columns:
+def map_to_binary_answers(annotation_df, cols=annotation_stats_columns):
+    for col in cols:
         annotation_df[f'{col}_bin'] = annotation_df.apply(lambda row: map_likert_to_bin(row, col), axis=1)
         print(annotation_df[[f'{col}', f'{col}_bin']])
 
