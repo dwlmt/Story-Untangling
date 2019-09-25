@@ -576,7 +576,7 @@ def inter_annotator_agreement(merged_sentence_df, args):
                     pearson, _ = pearsonr(x_list, y_list)
                     if not numpy.isnan(pearson):
                         pearson_list.append(pearson)
-                        worker_dict["kendall"] = pearson
+                        worker_dict["pearson"] = pearson
                     spearman, _ = spearmanr(x_list, y_list)
                     if not numpy.isnan(spearman):
                         spearman_list.append(spearman)
