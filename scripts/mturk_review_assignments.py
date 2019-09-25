@@ -14,7 +14,6 @@ parser.add_argument('--mturk-url', required=False, type=str,
 
 args = parser.parse_args()
 
-
 def approve_reject_assignments(args):
     print(f"Create assignments: {args}")
 
@@ -30,13 +29,16 @@ def approve_reject_assignments(args):
 
     for i, row in assignment_df.iterrows():
 
-        if "Approve" in row and row["Approve"] == True:
-            print(f"Approve assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']}")
-            mturk.approve_assignment(AssignmentId=row['AssignmentId'])
-        elif "Reject" in row and row["Reject"] == True:
-            print(
-                f"Reject assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']} for reason - {row['RejectReason']}")
-            mturk.reject_assignment(AssignmentId=row['AssignmentId'], RequesterFeedback=row['RejectReason'])
+        try:
+            if "Approve" in row and row["Approve"] == True:
+                print(f"Approve assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']}")
+                mturk.approve_assignment(AssignmentId=row['AssignmentId'])
+            elif "Reject" in row and row["Reject"] == True:
+                print(
+                    f"Reject assignment id: {row['AssignmentId']}, for worker {row['WorkerId']} and HIT {row['HITId']} for reason - {row['RejectReason']}")
+                mturk.reject_assignment(AssignmentId=row['AssignmentId'], RequesterFeedback=row['RejectReason'])
+        except:
+            pass
 
 
 # approve_assignment(assignment_id, feedback=None)
