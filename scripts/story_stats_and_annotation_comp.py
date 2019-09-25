@@ -584,11 +584,104 @@ def inter_annotator_agreement(merged_sentence_df, args):
     agreement_df.to_csv(f"{args['output_dir']}/agreement/agreement.csv")
 
 
+def plot_annotator_sentences(merged_sentence_df, args):
+    print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
+
+    story_ids = merged_sentence_df["story_id"].unique()
+
+    for story_id in story_ids:
+        print(story_id)
+
+        story_df = merged_sentence_df.loc[merged_sentence_df["story_id"] == story_id]
+
+        if len(story_df) > 0:
+            print(story_df)
+
+            worker_ids = story_df["worker_id"].unique()
+
+            data = []
+
+            for worker_id in worker_ids:
+
+                worker_df = story_df.loc[story_df["worker_id"] == worker_id]
+
+                if len(worker_df) > 0:
+
+                    worker_df = worker_df.sort_values(by=["sentence_num"])
+
+                    value_series = []
+                    value_series.append(100)
+                    for s in worker_df["suspense"][1:]:
+
+                       value = relative_to_abs_plot(s)
+
+                       value_series.append(value_series[-1] + value)
+
+                    trace = go.Scatter(
+                        x=worker_df["sentence_num"],
+                        y=value_series,
+                        mode='lines+markers',
+                        name=f"{worker_id}",
+                    )
+                    data.append(trace)
+
+            median_df = story_df.groupby(["sentence_num"], as_index=False)[['suspense']].median()
+
+            value_series = []
+            value_series.append(100)
+            for s in median_df["suspense"][1:]:
+                value = relative_to_abs_plot(s)
+                value_series.append(value_series[-1] + value)
+
+            trace = go.Scatter(
+                x=median_df["sentence_num"],
+                y=value_series,
+                mode='lines+markers',
+                name=f"median",
+            )
+            data.append(trace)
+
+            layout = go.Layout(
+                title=f'Sentence Annotation Plot {story_id}',
+                hovermode='closest',
+                xaxis=dict(
+                    # title='Position',
+                ),
+                yaxis=dict(
+                    title=f"Suspense",
+                ),
+                showlegend=True,
+                legend=dict(
+                    orientation="h")
+            )
+
+            fig = go.Figure(data=data, layout=layout)
+
+            export_plots(args, f"/annotation_plots/{story_id}", fig)
+
+
+def relative_to_abs_plot(s):
+    if s == 1:
+        value = -20
+    elif s == 2:
+        value = -5
+    elif s == 3:
+        value = 0
+    elif s == 4:
+        value = 5
+    elif s == 5:
+        value = 20
+    else:
+        value = 0
+    return value
+
+
 def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
     sentence_stats_columns = ['suspense','duration_milliseconds','sentence_len']
 
     ensure_dir(f"{args['output_dir']}/sentence_annotations_stats/")
+
 
     mturk_df = calculate_task_time(args, mturk_df)
 
@@ -633,7 +726,13 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
     merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
                                    how='outer')
 
-    inter_annotator_agreement(merged_sentence_df, args)
+    merged_story_df = merged_story_df.fillna(value=0)
+    merged_sentence_df = merged_sentence_df.fillna(value=0)
+
+    #inter_annotator_agreement(merged_sentence_df, args)
+    plot_annotator_sentences(merged_sentence_df, args)
+
+    print(mturk_df["AssignmentStatus"].unique())
 
     merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
     merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
@@ -658,8 +757,6 @@ def calculate_task_time(args, mturk_df):
             suspiciously_quick.append(True)
         else:
             suspiciously_quick.append(False)
-    print(suspiciously_quick)
-    print(task_time_taken)
     mturk_df = mturk_df.assign(too_quick=pandas.Series(suspiciously_quick))
     mturk_df = mturk_df.assign(total_task_duration=pandas.Series(task_time_taken))
     return mturk_df
