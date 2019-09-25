@@ -36,7 +36,7 @@ parser.add_argument('--peak-prominence-weighting', required=False, type=int, def
                     help="The peak prominence weighting.")
 parser.add_argument('--peak-width', default=1.0, type=float,
                     help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
-parser.add_argument('--min-time', type=int, default=4, help="Min time in minutes not to be considered suspicious.")
+parser.add_argument('--min-time', type=int, default=150, help="Min time in seconds.")
 
 args = parser.parse_args()
 
@@ -484,7 +484,8 @@ def inter_annotator_agreement(merged_sentence_df, args):
     merged_sentence_df = map_to_binary_answers(merged_sentence_df,cols=measure_cols)
 
     agreement_list = []
-    for coding in ["norm","bin"]:
+    worker_agreement_list = []
+    for coding in ["norm"]:
         for c in measure_cols:
 
             if coding == "bin" and c != "suspense":
@@ -519,7 +520,7 @@ def inter_annotator_agreement(merged_sentence_df, args):
 
             t = AnnotationTask(data=agreement_triples, distance=dist)
 
-            agreement_dict[f"alpha"] = t.alpha()
+            agreement_dict["alpha"] = t.alpha()
 
             worker_ids = merged_sentence_df["worker_id"].unique()
 
@@ -530,16 +531,23 @@ def inter_annotator_agreement(merged_sentence_df, args):
             worker_items = []
 
             for worker in worker_ids:
+
+                worker_agreement_triples = []
+
+                worker_dict = {"worker_id": worker}
+
                 x_list = []
                 y_list = []
 
                 worker_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] == worker]
-                worker_stories = worker_df["sentence_id"].unique()
+                worker_sentences = worker_df["sentence_id"].unique()
+
+                worker_dict["num_of_stories"] = len(worker_df["story_id"].unique())
 
                 exclude_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] != worker]
                 means_df = exclude_df.groupby("sentence_id", as_index=False).mean()
 
-                for story in worker_stories:
+                for story in worker_sentences:
 
                     if "bin" in coding:
                         mean_col = f"{c}_bin"
@@ -550,23 +558,36 @@ def inter_annotator_agreement(merged_sentence_df, args):
                     worker_value = worker_df.loc[worker_df["sentence_id"] == story][mean_col].values
 
                     if len(mean_value) == 1 and len(worker_value) == 1:
+                        worker_agreement_triples.append((str(worker), str(story), int(worker_value)))
+
+                        worker_agreement_triples.append((str("other"), str(story), int(round(float(mean_value),0))))
 
                         x_list.append(float(worker_value))
                         y_list.append(float(mean_value))
 
                 if len(x_list) >= 2 and len(y_list) == len(x_list):
 
+                    worker_dict["num_of_judgements"] = len(x_list)
+
                     kendall, _ = kendalltau(x_list, y_list)
                     if not numpy.isnan(kendall):
                         kendall_list.append(kendall)
+                        worker_dict["kendall"] = kendall
                     pearson, _ = pearsonr(x_list, y_list)
                     if not numpy.isnan(pearson):
                         pearson_list.append(pearson)
+                        worker_dict["kendall"] = pearson
                     spearman, _ = spearmanr(x_list, y_list)
                     if not numpy.isnan(spearman):
                         spearman_list.append(spearman)
+                        worker_dict["spearman"] = spearman
 
                     worker_items.append(len(x_list))
+
+                    t = AnnotationTask(data=worker_agreement_triples, distance=dist)
+                    worker_dict["alpha"] = t.alpha()
+
+                worker_agreement_list.append(worker_dict)
 
             total_items = float(sum(worker_items))
             probabilities = [p / total_items for p in worker_items]
@@ -580,9 +601,12 @@ def inter_annotator_agreement(merged_sentence_df, args):
             agreement_list.append(agreement_dict)
 
     agreement_df = pandas.DataFrame(data=agreement_list)
-    print(agreement_df)
+
     agreement_df.to_csv(f"{args['output_dir']}/agreement/agreement.csv")
 
+    worker_agreement_df = pandas.DataFrame(data=worker_agreement_list)
+    worker_agreement_df = worker_agreement_df.sort_values(by=["alpha"], ascending=False)
+    worker_agreement_df.to_csv(f"{args['output_dir']}/agreement/worker_agreement.csv")
 
 def plot_annotator_sentences(merged_sentence_df, args):
     print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
@@ -662,7 +686,7 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
 def relative_to_abs_plot(s):
     if s == 1:
-        value = -20
+        value = -25
     elif s == 2:
         value = -5
     elif s == 3:
@@ -670,7 +694,7 @@ def relative_to_abs_plot(s):
     elif s == 4:
         value = 5
     elif s == 5:
-        value = 20
+        value = 25
     else:
         value = 0
     return value
@@ -729,10 +753,9 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
     merged_story_df = merged_story_df.fillna(value=0)
     merged_sentence_df = merged_sentence_df.fillna(value=0)
 
-    #inter_annotator_agreement(merged_sentence_df, args)
+    inter_annotator_agreement(merged_sentence_df, args)
     plot_annotator_sentences(merged_sentence_df, args)
 
-    print(mturk_df["AssignmentStatus"].unique())
 
     merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
     merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
@@ -753,7 +776,7 @@ def calculate_task_time(args, mturk_df):
 
         task_time_taken.append(time_taken)
 
-        if time_taken.seconds / 60.0 < args["min_time"]:
+        if time_taken.seconds < args["min_time"]:
             suspiciously_quick.append(True)
         else:
             suspiciously_quick.append(False)
