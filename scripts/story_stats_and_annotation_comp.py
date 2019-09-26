@@ -481,126 +481,159 @@ def inter_annotator_agreement(merged_sentence_df, args):
     # Calculate inter-annotator agreement.
 
     measure_cols = ["suspense","duration_milliseconds"]
-    merged_sentence_df = map_to_binary_answers(merged_sentence_df,cols=measure_cols)
 
     agreement_list = []
     worker_agreement_list = []
-    for coding in ["norm"]:
-        for c in measure_cols:
+    story_agreement_list = []
 
-            if coding == "bin" and c != "suspense":
-                continue
+    for c in measure_cols:
 
-            agreement_dict = {}
+        agreement_dict = {}
 
-            agreement_dict["coding"] = coding
+        agreement_triples = []
 
-            agreement_triples = []
+        for i, row in merged_sentence_df.iterrows():
+            value = row[c]
 
-            for i, row in merged_sentence_df.iterrows():
-                if coding is "bin":
-                    value = row[f"{c}_bin"]
-                else:
-                    value = row[c]
-                if coding == "binary":
-                    if value in [1,2]:
-                        value = 1
-                    elif value == [3]:
-                        value = 2
-                    elif value in [4,5]:
-                        value = 3
-                agreement_triples.append((str(row["worker_id"]), str(row["sentence_id"]), int(value)))
+            agreement_triples.append((str(row["worker_id"]), str(row["sentence_id"]), int(value)))
 
-            print(f"Pairs for agreement: {len(agreement_triples)}")
+        print(f"Pairs for agreement: {len(agreement_triples)}")
 
-            if coding == "bin":
-                dist = binary_distance
-            else:
-                dist = interval_distance
+        dist = interval_distance
 
-            t = AnnotationTask(data=agreement_triples, distance=dist)
+        t = AnnotationTask(data=agreement_triples, distance=dist)
 
-            agreement_dict["alpha"] = t.alpha()
+        agreement_dict["alpha"] = t.alpha()
 
-            worker_ids = merged_sentence_df["worker_id"].unique()
+        worker_ids = merged_sentence_df["worker_id"].unique()
 
-            kendall_list = []
-            pearson_list = []
-            spearman_list = []
+        kendall_list = []
+        pearson_list = []
+        spearman_list = []
 
-            worker_items = []
+        worker_items = []
 
-            for worker in worker_ids:
+        for story_id in merged_sentence_df["story_id"].unique():
+            story_agreement_triples = []
 
-                worker_agreement_triples = []
+            story_agreement_dict = {"story_id": story_id}
 
-                worker_dict = {"worker_id": worker}
+            story_agreement_dict["measure"] = c
 
-                x_list = []
-                y_list = []
+            x_list = []
+            y_list = []
 
-                worker_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] == worker]
-                worker_sentences = worker_df["sentence_id"].unique()
+            story_df = merged_sentence_df.loc[merged_sentence_df["story_id"] == story_id]
+            story_sentences = story_df["sentence_id"].unique()
+            story_workers = story_df["worker_id"].unique()
 
-                worker_dict["num_of_stories"] = len(worker_df["story_id"].unique())
+            for worker in story_workers:
 
-                exclude_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] != worker]
-                means_df = exclude_df.groupby("sentence_id", as_index=False).mean()
+                for sentence in story_sentences:
 
-                for story in worker_sentences:
+                    sentence_df = story_df.loc[story_df["sentence_id"] == sentence]
+                    worker_value = sentence_df.loc[sentence_df["worker_id"] == worker][c].values
 
-                    if "bin" in coding:
-                        mean_col = f"{c}_bin"
-                    else:
-                        mean_col = c
+                    story_agreement_dict["num_of_workers"] = len(sentence_df["worker_id"].unique())
 
-                    mean_value = means_df.loc[means_df["sentence_id"] == story][mean_col].values
-                    worker_value = worker_df.loc[worker_df["sentence_id"] == story][mean_col].values
+                    story_agreement_triples.append((str(worker), str(sentence), int(worker_value[0])))
+
+                    exclude_df = sentence_df.loc[sentence_df["worker_id"] != worker]
+                    mean_value = exclude_df.groupby("sentence_id", as_index=False).mean()[c].values
 
                     if len(mean_value) == 1 and len(worker_value) == 1:
-                        worker_agreement_triples.append((str(worker), str(story), int(worker_value)))
-
-                        worker_agreement_triples.append((str("other"), str(story), int(round(float(mean_value),0))))
 
                         x_list.append(float(worker_value))
                         y_list.append(float(mean_value))
 
-                if len(x_list) >= 2 and len(y_list) == len(x_list):
+            if len(x_list) >= 2 and len(y_list) == len(x_list):
 
-                    worker_dict["num_of_judgements"] = len(x_list)
+                story_agreement_dict["num_of_judgements"] = len(x_list)
 
-                    kendall, _ = kendalltau(x_list, y_list)
-                    if not numpy.isnan(kendall):
-                        kendall_list.append(kendall)
-                        worker_dict["kendall"] = kendall
-                    pearson, _ = pearsonr(x_list, y_list)
-                    if not numpy.isnan(pearson):
-                        pearson_list.append(pearson)
-                        worker_dict["pearson"] = pearson
-                    spearman, _ = spearmanr(x_list, y_list)
-                    if not numpy.isnan(spearman):
-                        spearman_list.append(spearman)
-                        worker_dict["spearman"] = spearman
+                kendall, _ = kendalltau(x_list, y_list)
+                if not numpy.isnan(kendall):
+                    story_agreement_dict["kendall"] = kendall
+                pearson, _ = pearsonr(x_list, y_list)
+                if not numpy.isnan(pearson):
+                    story_agreement_dict["pearson"] = pearson
+                spearman, _ = spearmanr(x_list, y_list)
+                if not numpy.isnan(spearman):
+                    story_agreement_dict["spearman"] = spearman
 
-                    worker_items.append(len(x_list))
+            if len(story_agreement_triples) > 0:
+                t = AnnotationTask(data=story_agreement_triples, distance=dist)
+                story_agreement_dict["alpha"] = t.alpha()
 
-                    t = AnnotationTask(data=worker_agreement_triples, distance=dist)
-                    worker_dict["alpha"] = t.alpha()
+            story_agreement_list.append(story_agreement_dict)
 
-                    worker_dict["measure"] = c
+        for worker in worker_ids:
 
-                worker_agreement_list.append(worker_dict)
+            worker_agreement_triples = []
 
-            total_items = float(sum(worker_items))
-            probabilities = [p / total_items for p in worker_items]
+            worker_dict = {"worker_id": worker}
 
-            agreement_dict[f"kendall_1_vs_all"] = sum([i * p for i, p in zip(kendall_list, probabilities)])
-            agreement_dict[f"spearman_1_vs_all"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
-            agreement_dict[f"pearson_1_vs_all"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
+            x_list = []
+            y_list = []
 
-            agreement_dict["measure"] = c
+            worker_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] == worker]
+            worker_sentences = worker_df["sentence_id"].unique()
 
-            agreement_list.append(agreement_dict)
+            worker_dict["num_of_stories"] = len(worker_df["story_id"].unique())
+
+            exclude_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] != worker]
+            means_df = exclude_df.groupby("sentence_id", as_index=False).mean()
+
+            for sentence in worker_sentences:
+
+                mean_col = c
+
+                mean_value = means_df.loc[means_df["sentence_id"] == sentence][mean_col].values
+                worker_value = worker_df.loc[worker_df["sentence_id"] == sentence][mean_col].values
+
+                if len(mean_value) == 1 and len(worker_value) == 1:
+                    worker_agreement_triples.append((str(worker), str(sentence), int(worker_value)))
+
+                    worker_agreement_triples.append((str("other"), str(sentence), int(round(float(mean_value),0))))
+
+                    x_list.append(float(worker_value))
+                    y_list.append(float(mean_value))
+
+            if len(x_list) >= 2 and len(y_list) == len(x_list):
+
+                worker_dict["num_of_judgements"] = len(x_list)
+
+                kendall, _ = kendalltau(x_list, y_list)
+                if not numpy.isnan(kendall):
+                    kendall_list.append(kendall)
+                    worker_dict["kendall"] = kendall
+                pearson, _ = pearsonr(x_list, y_list)
+                if not numpy.isnan(pearson):
+                    pearson_list.append(pearson)
+                    worker_dict["pearson"] = pearson
+                spearman, _ = spearmanr(x_list, y_list)
+                if not numpy.isnan(spearman):
+                    spearman_list.append(spearman)
+                    worker_dict["spearman"] = spearman
+
+                worker_items.append(len(x_list))
+
+                t = AnnotationTask(data=worker_agreement_triples, distance=dist)
+                worker_dict["alpha"] = t.alpha()
+
+                worker_dict["measure"] = c
+
+            worker_agreement_list.append(worker_dict)
+
+        total_items = float(sum(worker_items))
+        probabilities = [p / total_items for p in worker_items]
+
+        agreement_dict[f"kendall_1_vs_all"] = sum([i * p for i, p in zip(kendall_list, probabilities)])
+        agreement_dict[f"spearman_1_vs_all"] = sum([i * p for i, p in zip(spearman_list, probabilities)])
+        agreement_dict[f"pearson_1_vs_all"] = sum([i * p for i, p in zip(pearson_list, probabilities)])
+
+        agreement_dict["measure"] = c
+
+        agreement_list.append(agreement_dict)
 
     agreement_df = pandas.DataFrame(data=agreement_list)
 
@@ -609,6 +642,10 @@ def inter_annotator_agreement(merged_sentence_df, args):
     worker_agreement_df = pandas.DataFrame(data=worker_agreement_list)
     worker_agreement_df = worker_agreement_df.sort_values(by=["alpha"], ascending=False)
     worker_agreement_df.to_csv(f"{args['output_dir']}/agreement/worker_agreement.csv")
+
+    story_agreement_df = pandas.DataFrame(data=story_agreement_list)
+    story_agreement_df = story_agreement_df.sort_values(by=["alpha"], ascending=False)
+    story_agreement_df.to_csv(f"{args['output_dir']}/agreement/story_agreement.csv")
 
 def plot_annotator_sentences(merged_sentence_df, args):
     print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
@@ -708,6 +745,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
     ensure_dir(f"{args['output_dir']}/sentence_annotations_stats/")
 
+    mturk_df = mturk_df.loc[mturk_df["AssignmentStatus"].isin(["Submitted","Approved"])]
 
     mturk_df = calculate_task_time(args, mturk_df)
 
@@ -746,7 +784,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
     story_annotation_df = pandas.DataFrame(data=story_level_data)
     sentence_annotation_df = pandas.DataFrame(data=sentence_level_data)
 
-    merged_story_df = pandas.merge(story_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId', how='outer')
+    merged_story_df = pandas.merge(story_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId', how='inner')
 
 
     merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
