@@ -587,6 +587,8 @@ def inter_annotator_agreement(merged_sentence_df, args):
                     t = AnnotationTask(data=worker_agreement_triples, distance=dist)
                     worker_dict["alpha"] = t.alpha()
 
+                    worker_dict["measure"] = c
+
                 worker_agreement_list.append(worker_dict)
 
             total_items = float(sum(worker_items))
