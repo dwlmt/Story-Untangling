@@ -473,8 +473,10 @@ def genres_per_story(args, annotation_df):
 
     return genre_df
 
-
 def inter_annotator_agreement(merged_sentence_df, args):
+
+    #merged_sentence_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] != "A1IZ4NX41GKU4X"]
+
     print("Calculate Interannotator Agreement")
 
     ensure_dir(f"{args['output_dir']}/agreement/")
@@ -601,6 +603,19 @@ def inter_annotator_agreement(merged_sentence_df, args):
             if len(x_list) >= 2 and len(y_list) == len(x_list):
 
                 worker_dict["num_of_judgements"] = len(x_list)
+
+                diff = [x - y for x, y in zip(x_list, y_list)]
+
+                nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(diff)
+
+                worker_dict[f"diff_mean"] = mean
+                worker_dict[f"diff_var"] = variance
+
+                abs_diff = [abs(x) for x in diff]
+                nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(abs_diff)
+
+                worker_dict[f"abs_diff_mean"] = mean
+                worker_dict[f"abs_diff_var"] = variance
 
                 kendall, _ = kendalltau(x_list, y_list)
                 if not numpy.isnan(kendall):
