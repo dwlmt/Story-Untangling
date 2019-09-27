@@ -541,10 +541,10 @@ def inter_annotator_agreement(merged_sentence_df, args):
                     exclude_df = sentence_df.loc[sentence_df["worker_id"] != worker]
                     mean_value = exclude_df.groupby("sentence_id", as_index=False).mean()[c].values
 
-                    if len(mean_value) == 1 and len(worker_value) == 1:
+                    if len(mean_value) > 0 and len(worker_value) > 0:
 
-                        x_list.append(float(worker_value))
-                        y_list.append(float(mean_value))
+                        x_list.append(float(worker_value[0]))
+                        y_list.append(float(mean_value[0]))
 
             if len(x_list) >= 2 and len(y_list) == len(x_list):
 
@@ -560,7 +560,7 @@ def inter_annotator_agreement(merged_sentence_df, args):
                 if not numpy.isnan(spearman):
                     story_agreement_dict["spearman"] = spearman
 
-            if len(story_agreement_triples) > 0:
+            if len(story_agreement_triples) > 0 and len(set([t[0] for t in story_agreement_triples])) > 1:
                 t = AnnotationTask(data=story_agreement_triples, distance=dist)
                 story_agreement_dict["alpha"] = t.alpha()
 
@@ -788,7 +788,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
 
     merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
-                                   how='outer')
+                                   how='inner')
 
     merged_story_df = merged_story_df.fillna(value=0)
     merged_sentence_df = merged_sentence_df.fillna(value=0)
