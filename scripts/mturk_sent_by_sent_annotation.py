@@ -1,4 +1,5 @@
 import argparse
+import datetime
 
 import boto3
 import pandas
@@ -32,6 +33,11 @@ def create_assignments(args):
         {
             'QualificationTypeId': '2F1QJWKUDD8XADTFD2Q0G6UTO95ALH',
             'Comparator': 'Exists',
+            'ActionsGuarded': 'DiscoverPreviewAndAccept',
+        },
+        {
+            'QualificationTypeId': '3M0XATTAEM8KH2DZ3G7KYLJUFOH59H',
+            'Comparator': 'DoesNotExist',
             'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
         {
@@ -73,13 +79,13 @@ def create_assignments(args):
 
             new_hit = mturk.create_hit(
                 Title=f'Story dramatic tension reading sentence by sentence {row["story_id"]}',
-                Description='Read a short story and record the level of dramatic tension per sentence. Will take 8-10 minutes per hit. Fluent English speakers required. Some violent, sexual or other disturbing content may be present in the stories.',
+                Description='Read a short story and record the level of dramatic tension per sentence. Will take 5-10 minutes per hit. Fluent English speakers required. Some violent, sexual or other disturbing content may be present in the stories.',
                 Keywords='story, narrative, storytelling, annotation, research, nlp, reading',
                 Reward=f'{args["reward"]}',
                 MaxAssignments=args["annotations_per_hit"],
-                LifetimeInSeconds=604800,  # One week
+                LifetimeInSeconds=datetime.timedelta(days=7),  # One week
                 AssignmentDurationInSeconds=3600,  # One hour
-                AutoApprovalDelayInSeconds=259200,  # 3 Days
+                AutoApprovalDelayInSeconds=datetime.timedelta(days=5),  # 5 Days
                 Question=external_question_xml,
                 QualificationRequirements=worker_requirements
             )
