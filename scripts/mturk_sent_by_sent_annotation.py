@@ -30,28 +30,33 @@ def create_assignments(args):
     # TODO: Add Master worker. The code differs from production to sandbox. This code is for prod.
 
     worker_requirements = [
+        # Master worker qualification.
         {
             'QualificationTypeId': '2F1QJWKUDD8XADTFD2Q0G6UTO95ALH',
             'Comparator': 'Exists',
             'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
+        # Restriction on too many annotations.
         {
             'QualificationTypeId': '3M0XATTAEM8KH2DZ3G7KYLJUFOH59H',
             'Comparator': 'DoesNotExist',
             'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
+        # Approval is >= 98%
         {
             'QualificationTypeId': '000000000000000000L0',
             'Comparator': 'GreaterThanOrEqualTo',
             'IntegerValues': [98],
             'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
+        # The user has completed at least 1000 HITs/
         {
             'QualificationTypeId': '00000000000000000040',
             'Comparator': 'GreaterThanOrEqualTo',
             'IntegerValues': [1000],
             'ActionsGuarded': 'DiscoverPreviewAndAccept',
         },
+        # The user is an adult.
         {
             'QualificationTypeId': '00000000000000000060',
             'Comparator': 'EqualTo',
@@ -83,14 +88,12 @@ def create_assignments(args):
                 Keywords='story, narrative, storytelling, annotation, research, nlp, reading',
                 Reward=f'{args["reward"]}',
                 MaxAssignments=args["annotations_per_hit"],
-                LifetimeInSeconds=datetime.timedelta(days=7),  # One week
+                LifetimeInSeconds=604800,  # One week
                 AssignmentDurationInSeconds=3600,  # One hour
-                AutoApprovalDelayInSeconds=datetime.timedelta(days=5),  # 5 Days
+                AutoApprovalDelayInSeconds=432000,  # 5 Days
                 Question=external_question_xml,
                 QualificationRequirements=worker_requirements
             )
-
-            print(new_hit)
 
             hit_ids_data.append({"hit_id": new_hit['HIT']['HITId'], "story_id": row['story_id'], "code": row['code']})
 
