@@ -475,8 +475,6 @@ def genres_per_story(args, annotation_df):
 
 def inter_annotator_agreement(merged_sentence_df, args):
 
-    #merged_sentence_df = merged_sentence_df.loc[merged_sentence_df["worker_id"] != "A1IZ4NX41GKU4X"]
-
     print("Calculate Interannotator Agreement")
 
     ensure_dir(f"{args['output_dir']}/agreement/")
@@ -608,8 +606,8 @@ def inter_annotator_agreement(merged_sentence_df, args):
 
                 nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(diff)
 
-                worker_dict[f"diff_mean"] = mean
-                worker_dict[f"diff_var"] = variance
+                worker_dict["diff_mean"] = mean
+                worker_dict["diff_var"] = variance
 
                 abs_diff = [abs(x) for x in diff]
                 nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(abs_diff)
@@ -665,6 +663,10 @@ def inter_annotator_agreement(merged_sentence_df, args):
 def plot_annotator_sentences(merged_sentence_df, args):
     print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
 
+    ensure_dir(f"{args['output_dir']}/consensus/")
+
+    consensus_data_list = []
+
     story_ids = merged_sentence_df["story_id"].unique()
 
     for story_id in story_ids:
@@ -703,7 +705,8 @@ def plot_annotator_sentences(merged_sentence_df, args):
                     )
                     data.append(trace)
 
-            median_df = story_df.groupby(["sentence_num"], as_index=False)[['suspense']].median()
+            median_df = story_df.groupby(["story_id", "sentence_id", "sentence_num"], as_index=False)[
+                ['suspense']].median().round(0)
 
             value_series = []
             value_series.append(100)
@@ -735,7 +738,15 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
             fig = go.Figure(data=data, layout=layout)
 
+            median_df.rename(columns={'suspense': 'median_judgement'}, inplace=True)
+            median_df["abs_median_judgement"] = value_series
+
+            consensus_data_list.append(median_df)
+
             export_plots(args, f"/annotation_plots/{story_id}", fig)
+
+    consensus_df = pandas.concat(consensus_data_list)
+    consensus_df.to_csv(f"{args['output_dir']}/consensus/consensus.csv")
 
 
 def relative_to_abs_plot(s):
@@ -752,7 +763,6 @@ def relative_to_abs_plot(s):
     else:
         value = 0
     return value
-
 
 def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
@@ -810,7 +820,6 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
     inter_annotator_agreement(merged_sentence_df, args)
     plot_annotator_sentences(merged_sentence_df, args)
-
 
     merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
     merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
