@@ -27,8 +27,6 @@ def create_assignments(args):
     max_assignments = args["max_assignments"]
     ids_and_codes_df = pandas.read_csv(args["annotations_file"])
 
-    # TODO: Add Master worker. The code differs from production to sandbox. This code is for prod.
-
     worker_requirements = [
         # Master worker qualification.
         {
