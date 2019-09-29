@@ -112,8 +112,8 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
 
             scoring = {'accuracy': make_scorer(acc_fun),
                        'precision': make_scorer(prec_fun),
-                       'recall': make_scorer(prec_fun),
-                       'f1_score': make_scorer(prec_fun),
+                       'recall': make_scorer(recall_fun),
+                       'f1_score': make_scorer(f1_fun),
                        'mean_absolute_error': make_scorer(mean_absolute_error)
                        }
 
