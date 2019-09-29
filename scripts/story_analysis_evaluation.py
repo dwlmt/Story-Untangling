@@ -130,9 +130,9 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
             print(feature_col, res)
 
             for key in set(res.keys()).difference({"estimator"}):
-                results_dict[f"{key}"] = numpy.mean(res)
+                results_dict[f"{key}"] = numpy.mean(res[key])
                 results_dict[f"{key}_big_decrease"], results_dict[f"{key}_decrease"], results_dict[f"{key}_same"], \
-                results_dict[f"{key}_increase"], results_dict[f"{key}_big_increase"] = res
+                results_dict[f"{key}_increase"], results_dict[f"{key}_big_increase"] = res[key]
 
             results_data.append(results_dict)
 
