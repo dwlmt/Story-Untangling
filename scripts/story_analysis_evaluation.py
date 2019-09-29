@@ -126,11 +126,8 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
                                  cv=args["folds"],
                                  scoring=scoring,
                                  return_train_score=True,
-                                 return_estimator=True
                                  )
             print(feature_col, res)
-
-            estimator = results_dict["estimator"]
 
             for key in set(res.keys()).difference({"estimator"}):
                 results_dict[f"{key}"] = numpy.mean(res)
