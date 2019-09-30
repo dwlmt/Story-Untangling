@@ -2,13 +2,17 @@
 
 '''
 import argparse
+import collections
 import os
+from collections import OrderedDict
 
 import mord
 import numpy
 import pandas as pd
-from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import cross_validate
+from sklearn import metrics
+from sklearn.model_selection import GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.utils import class_weight
 
 parser = argparse.ArgumentParser(
     description='Run stats from  the prediction output, clustering and stats for the annotations and predictions.')
@@ -39,7 +43,7 @@ model_prediction_columns = ["generated_surprise_word_overlap",
                             'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
                             'corpus_suspense_l1_state', 'corpus_suspense_l2_state']
 
-annotator_prediction_column = "median_judgement"
+annotator_prediction_column = "suspense"
 
 
 def ensure_dir(file_path):
@@ -49,8 +53,18 @@ def ensure_dir(file_path):
         os.makedirs(directory)
 
 
+def flatten(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
 def ordinal_regression_bucketed_evaluation(merged_df, args):
-    merged_df = merged_df.sort_values(by=["story_id", "sentence_num"]).reset_index()
+    merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
 
     merged_df = pd.concat([merged_df, merged_df[1:].reset_index(drop=True).add_suffix("_later")],
                           axis=1)
@@ -61,85 +75,79 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
 
     print(f"Merged rows: {len(merged_df)}")
     # Remove the first line as cannot be judged relatively.
-    merged_df = merged_df.loc[merged_df["median_judgement"] != 0.0]
+    merged_df = merged_df.loc[merged_df["suspense"] != 0.0]
     max_df = merged_df.groupby(by=["story_id"], as_index=False)["sentence_num"].max()
 
     df_all = merged_df.merge(max_df, on=['story_id', 'sentence_num'],
                              how='left', indicator=True)
 
     merged_df = df_all.loc[df_all['_merge'] == "left_only"]
-    print(merged_df.columns)
+
+    train_df = merged_df.loc[merged_df['worker_id'] != 'median']
+    test_df = merged_df.loc[merged_df['worker_id'] == 'median']
+
+    print(f"Evaluated rows - training {len(train_df)}, test {len(test_df)}")
 
     results_data = []
 
-    print(f"Evaluated rows: {len(merged_df)}")
-
-    from sklearn.metrics import make_scorer, accuracy_score, precision_score, recall_score, f1_score
-
-    def acc_fun(target_true, target_fit):
-        target_fit = numpy.round(target_fit)
-        target_fit.astype('int')
-        return accuracy_score(target_true, target_fit)
-
-    def prec_fun(target_true, target_fit):
-        target_fit = numpy.round(target_fit)
-        target_fit.astype('int')
-        return precision_score(target_true, target_fit, average="macro")
-
-    def recall_fun(target_true, target_fit):
-        target_fit = numpy.round(target_fit)
-        target_fit.astype('int')
-        return recall_score(target_true, target_fit, average="macro")
-
-    def f1_fun(target_true, target_fit):
-        target_fit = numpy.round(target_fit)
-        target_fit.astype('int')
-        return f1_score(target_true, target_fit, average="macro")
-
     for col in model_prediction_columns:
-        for feature_col in [f"{col}_diff", f"{col}"]:
-
-            results_dict = {}
+        for feature_col in [f"{col}_diff", f"{col}_later"]:
+            results_dict = OrderedDict()
             results_dict["feature"] = feature_col
 
-            features = merged_df[feature_col].to_numpy()
-            features = features.reshape(-1, 1)
+            train_features = features(feature_col, train_df)
+            train_target = train_df[annotator_prediction_column].astype(int).to_numpy()
 
-            # scaler = StandardScaler(copy=True, with_mean=True, with_std=True)
-            # features = scaler.fit_transform(features)
+            class_weights = class_weight.compute_class_weight('balanced',
+                                                              numpy.unique(train_target),
+                                                              train_target)
 
-            target = merged_df[annotator_prediction_column].astype(int).to_numpy()
+            sample_weights = [class_weights[x - 1] for x in train_target]
 
-            scoring = {'accuracy': make_scorer(acc_fun),
-                       'precision': make_scorer(prec_fun),
-                       'recall': make_scorer(recall_fun),
-                       'f1_score': make_scorer(f1_fun),
-                       'mean_absolute_error': make_scorer(mean_absolute_error)
-                       }
+            print("Class Weights", class_weights)
 
-            model = mord.LAD(max_iter=10000)
-            model.fit(features, target)
+            test_features = features(feature_col, test_df)
+            test_target = test_df[annotator_prediction_column].astype(int).to_numpy()
 
-            res = cross_validate(model,
-                                 features,
-                                 target,
-                                 cv=args["folds"],
-                                 scoring=scoring,
-                                 return_train_score=True,
-                                 )
-            print(feature_col, res)
+            model = mord.LogisticIT(alpha=0.0)
 
-            for key in set(res.keys()).difference({"estimator"}):
-                results_dict[f"{key}"] = numpy.mean(res[key])
-                results_dict[f"{key}_big_decrease"], results_dict[f"{key}_decrease"], results_dict[f"{key}_same"], \
-                results_dict[f"{key}_increase"], results_dict[f"{key}_big_increase"] = res[key]
+            params = {}
 
-            results_data.append(results_dict)
+            pipeline = Pipeline([  # ('column', StandardScaler()),
+                ('model', model)])
+
+            print('Estimator: ', model)
+            grid = GridSearchCV(pipeline, params,
+                                scoring='neg_mean_absolute_error',
+                                n_jobs=1, cv=args["folds"])
+            grid.fit(train_features, train_target, model__sample_weight=sample_weights)
+            pred = grid.best_estimator_.predict(train_features)
+            classification_report = metrics.classification_report(train_target, numpy.round(pred).astype(int),
+                                                                  output_dict=True)
+            results_dict["train_results"] = classification_report
+
+            results_dict["test_results"] = classification_report
+
+            pred = grid.best_estimator_.predict(test_features)
+            classification_report = metrics.classification_report(test_target, numpy.round(pred).astype(int),
+                                                                  output_dict=True)
+
+            print(classification_report)
+
+            results_dict["test_results"] = classification_report
+
+            results_data.append(flatten(results_dict))
 
     results_df = pd.DataFrame(data=results_data)
     print(results_df)
 
     results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/results.csv")
+
+
+def features(feature_col, train_df):
+    train_features = train_df[feature_col].to_numpy()
+    train_features = train_features.reshape(-1, 1)
+    return train_features
 
 
 def evaluate_stories(args):
