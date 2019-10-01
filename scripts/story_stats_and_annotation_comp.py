@@ -665,7 +665,7 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
     ensure_dir(f"{args['output_dir']}/consensus/")
 
-    consensus_data_list = []
+    judgement_data_list = []
 
     story_ids = merged_sentence_df["story_id"].unique()
 
@@ -684,6 +684,9 @@ def plot_annotator_sentences(merged_sentence_df, args):
             for worker_id in worker_ids:
 
                 worker_df = story_df.loc[story_df["worker_id"] == worker_id]
+
+                sel_col_df = worker_df[['story_id', 'sentence_id', 'sentence_num', 'worker_id', 'suspense']]
+                judgement_data_list.append(sel_col_df)
 
                 if len(worker_df) > 0:
 
@@ -707,6 +710,8 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
             median_df = story_df.groupby(["story_id", "sentence_id", "sentence_num"], as_index=False)[
                 ['suspense']].median().round(0)
+
+            median_df["worker_id"] = "median"
 
             value_series = []
             value_series.append(100)
@@ -738,15 +743,14 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
             fig = go.Figure(data=data, layout=layout)
 
-            median_df.rename(columns={'suspense': 'median_judgement'}, inplace=True)
-            median_df["abs_median_judgement"] = value_series
-
-            consensus_data_list.append(median_df)
+            judgement_data_list.append(median_df)
 
             export_plots(args, f"/annotation_plots/{story_id}", fig)
 
-    consensus_df = pandas.concat(consensus_data_list)
-    consensus_df.to_csv(f"{args['output_dir']}/consensus/consensus.csv")
+    for c in judgement_data_list:
+        print(c.columns)
+    judgement_df = pandas.concat(judgement_data_list)
+    judgement_df.to_csv(f"{args['output_dir']}/consensus/judgement.csv")
 
 
 def relative_to_abs_plot(s):

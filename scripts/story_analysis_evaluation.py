@@ -5,13 +5,17 @@ import argparse
 import collections
 import os
 from collections import OrderedDict
+from itertools import combinations
 
 import mord
 import numpy
+import pandas
 import pandas as pd
+from nltk import interval_distance, AnnotationTask
 from sklearn import metrics
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.utils import class_weight
 
 parser = argparse.ArgumentParser(
@@ -45,7 +49,6 @@ model_prediction_columns = ["generated_surprise_word_overlap",
 
 annotator_prediction_column = "suspense"
 
-
 def ensure_dir(file_path):
     directory = os.path.dirname(file_path)
     if not os.path.exists(directory):
@@ -64,11 +67,15 @@ def flatten(d, parent_key='', sep='_'):
     return dict(items)
 
 def ordinal_regression_bucketed_evaluation(merged_df, args):
-    merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
 
+    merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
     merged_df = pd.concat([merged_df, merged_df[1:].reset_index(drop=True).add_suffix("_later")],
                           axis=1)
+    merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
+
     merged_df = merged_df.loc[merged_df["story_id"] == merged_df["story_id_later"]]
+    merged_df = merged_df.loc[merged_df["worker_id"] == merged_df["worker_id_later"]]
+    merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
 
     for col in model_prediction_columns:
         merged_df[f"{col}_diff"] = merged_df[f"{col}_later"] - merged_df[col]
@@ -84,6 +91,18 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
     merged_df = df_all.loc[df_all['_merge'] == "left_only"]
 
     train_df = merged_df.loc[merged_df['worker_id'] != 'median']
+
+    mean_triples = []
+    agreement_data = []
+    average_df = merged_df.groupby("sentence_id_y", as_index=False).mean()
+
+    for i, row in average_df.iterrows():
+        mean_triples.append(("mean", str(row["sentence_id_y"]), row["suspense"]))
+    for i, row in train_df.iterrows():
+        agreement_data.append(
+            {"worker_id": str(row["worker_id"]), "sentence_id": str(row["sentence_id_y"]), "value": row["suspense"],
+             "type": "human"})
+
     test_df = merged_df.loc[merged_df['worker_id'] == 'median']
 
     print(f"Evaluated rows - training {len(train_df)}, test {len(test_df)}")
@@ -91,7 +110,7 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
     results_data = []
 
     for col in model_prediction_columns:
-        for feature_col in [f"{col}_diff", f"{col}_later"]:
+        for feature_col in [f"{col}_diff", f"{col}"]:
             results_dict = OrderedDict()
             results_dict["feature"] = feature_col
 
@@ -101,6 +120,8 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
             class_weights = class_weight.compute_class_weight('balanced',
                                                               numpy.unique(train_target),
                                                               train_target)
+
+            # class_weights = [max(0.5, min(c, 10.0)) for c in class_weights]
 
             sample_weights = [class_weights[x - 1] for x in train_target]
 
@@ -113,7 +134,7 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
 
             params = {}
 
-            pipeline = Pipeline([  # ('column', StandardScaler()),
+            pipeline = Pipeline([('column', StandardScaler()),
                 ('model', model)])
 
             print('Estimator: ', model)
@@ -129,19 +150,70 @@ def ordinal_regression_bucketed_evaluation(merged_df, args):
             results_dict["test_results"] = classification_report
 
             pred = grid.best_estimator_.predict(test_features)
+
+            print(pred)
             classification_report = metrics.classification_report(test_target, numpy.round(pred).astype(int),
                                                                   output_dict=True)
 
-            print(classification_report)
+            agreement_triples = []
+
+            for pred, median, sentence in zip(pred, test_target, test_df["sentence_id_x"]):
+                agreement_triples.append((str("model"), str(sentence), pred))
+                mean_triples.append((str("model"), str(sentence), pred))
+                agreement_triples.append((str("median"), str(sentence), median))
+
+                agreement_data.append({"worker_id": str(feature_col), "sentence_id": str(sentence),
+                                       "value": pred, "type": "model"})
+
+            agreement(agreement_triples, "median", results_dict)
+            #agreement(mean_triples, "mean", results_dict)
 
             results_dict["test_results"] = classification_report
 
+            print(results_dict)
             results_data.append(flatten(results_dict))
 
     results_df = pd.DataFrame(data=results_data)
-    print(results_df)
-
     results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/results.csv")
+
+    agreement_df = pandas.DataFrame(data=agreement_data)
+    cross_pairwise_agreements = []
+    for (worker, other_worker) in combinations(agreement_df["worker_id"].unique(), 2):
+        worker_df = agreement_df.loc[agreement_df["worker_id"] == worker]
+
+        other_worker_df = agreement_df.loc[agreement_df["worker_id"] == other_worker]
+
+        triples = []
+
+        agreement_dict = {}
+        agreement_dict["worker_id"] = worker
+        agreement_dict["type"] = worker_df["type"].values[0]
+
+        agreement_dict["worker_id_2"] = other_worker
+        agreement_dict["type_2"] = other_worker_df["type"].values[0]
+
+        combined_df = pandas.merge(worker_df, other_worker_df, on="sentence_id", how="inner")
+
+        if len(combined_df) > 0:
+
+            for i, row in combined_df.iterrows():
+                triples.append(("worker", row["sentence_id"], row["value_x"]))
+                triples.append(("other", row["sentence_id"], row["value_y"]))
+
+            agreement_dict["num_prediction_points"] = len(combined_df)
+
+            agreement(triples, "agreement", agreement_dict)
+            cross_pairwise_agreements.append(agreement_dict)
+
+    cross_pairwise_agreements_df = pd.DataFrame(data=cross_pairwise_agreements)
+    cross_pairwise_agreements_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/pairwise_agreements.csv")
+
+
+def agreement(agreement_triples, m, results_dict):
+    if len(agreement_triples) > 2 and len(set([t[0] for t in agreement_triples])) > 1:
+        t = AnnotationTask(data=agreement_triples, distance=interval_distance)
+        results_dict[f"{m}_alpha"] = t.alpha()
+        results_dict[f"{m}_agreement"] = t.avg_Ao()
 
 
 def features(feature_col, train_df):
