@@ -674,6 +674,9 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
         story_df = merged_sentence_df.loc[merged_sentence_df["story_id"] == story_id]
 
+        story_df = story_df.groupby(['story_id', 'sentence_id', 'sentence_num', 'worker_id'],
+                                    as_index=False).first()
+
         if len(story_df) > 0:
             print(story_df)
 
@@ -710,8 +713,11 @@ def plot_annotator_sentences(merged_sentence_df, args):
 
             median_df = story_df.groupby(["story_id", "sentence_id", "sentence_num"], as_index=False)[
                 ['suspense']].median().round(0)
-
             median_df["worker_id"] = "median"
+
+            mean_df = story_df.groupby(["story_id", "sentence_id", "sentence_num"], as_index=False)[
+                ['suspense']].mean()
+            mean_df["worker_id"] = "mean"
 
             value_series = []
             value_series.append(100)
@@ -744,6 +750,7 @@ def plot_annotator_sentences(merged_sentence_df, args):
             fig = go.Figure(data=data, layout=layout)
 
             judgement_data_list.append(median_df)
+            judgement_data_list.append(mean_df)
 
             export_plots(args, f"/annotation_plots/{story_id}", fig)
 
