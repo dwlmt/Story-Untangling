@@ -94,7 +94,7 @@ def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
     for col in model_prediction_columns:
         for feature_col in [f"{col}_diff", f"{col}"]:
             results_dict = OrderedDict()
-            results_dict["feature"] = feature_col
+            results_dict["measure"] = feature_col
 
             train_features = features(feature_col, train_df)
             train_target = train_df[annotator_prediction_column].astype(int).to_numpy()
