@@ -118,22 +118,23 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_splitad"
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_splitaa"
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = True
 
-        self.levels_to_rollout = 1
+        self.levels_to_rollout = 2
         self.generate_per_branch = 100
         self.sample_per_level_branch = 100
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
 
-        self.global_beam_size = 10
 
+        self.global_beam_size = 10
         self.sample_top_k_words = 50
+        self.windowing = False
 
         self.min_sentence_length = 3
         self.max_generated_sentence_length = 300
@@ -839,35 +840,37 @@ class UncertainReaderGenPredictor(Predictor):
 
             window_variable_node = Node(name=f"{k}", parent=window_stats_node, type="window")
 
-            for o, mn in [((0, 0, 1), f"avg"), ((0, 0, 2), f"avg_2"), ((1, 0, 0), f"reg"),
-                          ((2, 0, 0), f"reg_2"), ((1, 1, 2), f"arima"), ((2, 1, 1), f"arima_reg")]:
+            if self.windowing:
+
+                for o, mn in [((0, 0, 1), f"avg"), ((0, 0, 2), f"avg_2"), ((1, 0, 0), f"reg"),
+                              ((2, 0, 0), f"reg_2"), ((1, 1, 2), f"arima"), ((2, 1, 1), f"arima_reg")]:
+                    try:
+                        pred = ARIMA(v_array, order=o).fit()
+                        predictions = pred.predict(start=0, end=len(v_array))
+                        window_node = Node(name=f"{mn}", parent=window_variable_node)
+                        for i, value in enumerate(predictions):
+                            AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+                    except:
+                        pass
+
                 try:
-                    pred = ARIMA(v_array, order=o).fit()
-                    predictions = pred.predict(start=0, end=len(v_array))
-                    window_node = Node(name=f"{mn}", parent=window_variable_node)
+                    window_node = Node(name="exp", parent=window_variable_node)
+                    exponential = SimpleExpSmoothing(v_array).fit()
+                    predictions = exponential.predict(start=0, end=len(v_array))
                     for i, value in enumerate(predictions):
                         AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
                 except:
                     pass
 
-            try:
-                window_node = Node(name="exp", parent=window_variable_node)
-                exponential = SimpleExpSmoothing(v_array).fit()
-                predictions = exponential.predict(start=0, end=len(v_array))
-                for i, value in enumerate(predictions):
-                    AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
-            except:
-                pass
+                try:
+                    window_node = Node(name="holt", parent=window_variable_node)
+                    holt = Holt(v_array).fit()
+                    predictions = holt.predict(start=0, end=len(v_array))
 
-            try:
-                window_node = Node(name="holt", parent=window_variable_node)
-                holt = Holt(v_array).fit()
-                predictions = holt.predict(start=0, end=len(v_array))
-
-                for i, value in enumerate(predictions):
-                    AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
-            except:
-                pass
+                    for i, value in enumerate(predictions):
+                        AnyNode(parent=window_node, position=i, story_id=story_id, mean=value)
+                except:
+                    pass
 
     def _calc_state_based_suspense(self, root, type="generated"):
         # Use to keep results
