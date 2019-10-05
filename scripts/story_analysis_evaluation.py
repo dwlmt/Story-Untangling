@@ -12,6 +12,9 @@ import more_itertools
 import numpy
 import pandas
 import pandas as pd
+import plotly
+import plotly.graph_objs as go
+import plotly.io as pio
 import torch
 from nltk import interval_distance, AnnotationTask
 from scipy.stats import kendalltau, pearsonr, spearmanr
@@ -206,8 +209,8 @@ def features(feature_col, train_df):
 
 class RelativeToAbsoluteModel(torch.nn.Module):
 
-    def __init__(self, origin_weight=1.0, big_decrease=0.8, decrease=0.9, same=1.0, increase=1.1, big_increase=1.2,
-                 epsilon=1.0):
+    def __init__(self, origin_weight=0.0, big_decrease=-0.2, decrease=-0.1, same=0.0, increase=0.1, big_increase=0.2,
+                 epsilon=0.01):
         super(RelativeToAbsoluteModel, self).__init__()
         self.origin = torch.nn.Linear(1, 1, bias=False)
         self.big_decrease = torch.nn.Linear(1, 1, bias=False)
@@ -244,7 +247,7 @@ class RelativeToAbsoluteModel(torch.nn.Module):
                 change_value = self.decrease(torch.tensor([1.0])).clamp(
                     min=self.big_decrease(torch.tensor([1.0])).item() + self.epsilon, max=0.0 - self.epsilon)
             elif cat == 3:
-                change_value = self.big_decrease(torch.tensor([1.0])).clamp(
+                change_value = self.same(torch.tensor([1.0])).clamp(
                     min=self.decrease(torch.tensor([1.0])).item() + self.epsilon,
                     max=self.increase(torch.tensor([1.0])).item() - self.epsilon)
             elif cat == 4:
@@ -305,9 +308,9 @@ def contineous_evaluation(annotator_df, position_df, args):
                         meta_dict["measure"] = col
 
                         if epoch == 0:
-                            results_dict["training"] = "fixed"
+                            meta_dict["training"] = "fixed"
                         else:
-                            results_dict["training"] = "fitted"
+                            meta_dict["training"] = "fitted"
 
                         story_meta.append(meta_dict)
 
@@ -349,6 +352,7 @@ def contineous_evaluation(annotator_df, position_df, args):
 
                 model_predictions_all = []
                 annotations_all = []
+                story_meta = []
 
                 results_dict = OrderedDict()
                 results_dict["feature"] = col
@@ -356,8 +360,6 @@ def contineous_evaluation(annotator_df, position_df, args):
                 results_dict["dataset"] = "test"
 
                 for story_id in story_ids:
-
-                    story_meta = []
 
                     story_df = test_df.loc[test_df["story_id"] == story_id]
                     worker_ids = story_df["worker_id"].unique()
@@ -370,6 +372,7 @@ def contineous_evaluation(annotator_df, position_df, args):
                             meta_dict["type"] = "train"
                             meta_dict["story_id"] = story_id
                             meta_dict["worker_id"] = worker_id
+                            results_dict["training"] = t
 
                             suspense = torch.tensor(worker_df["suspense"].tolist()).int()
                             model_predictions = torch.tensor(worker_df[f"{col}_scaled"].tolist())
@@ -433,6 +436,128 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
             predictions_flattened, annotations_flattened)
 
 
+def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, model=RelativeToAbsoluteModel()):
+    print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
+
+    colors = plotly.colors.DEFAULT_PLOTLY_COLORS
+
+    story_ids = merged_sentence_df["story_id"].unique()
+
+    position_story_ids = position_df["story_id"].unique()
+
+    story_ids = set(story_ids).intersection(set(position_story_ids))
+
+    with torch.no_grad():
+
+        for story_id in story_ids:
+            print(story_id)
+
+            position_story_df = position_df.loc[position_df["story_id"] == story_id]
+            sentence_nums = position_story_df["sentence_num"].tolist()
+            sentence_text = position_story_df["sentence_text"].tolist()
+            text = sentence_text  # [f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in range(len(sentence_nums))],
+
+            plot_data = []
+
+            story_df = merged_sentence_df.loc[merged_sentence_df["story_id"] == story_id]
+            story_df = story_df.groupby(['story_id', 'sentence_id', 'sentence_num', 'worker_id'],
+                                        as_index=False).first()
+
+            if len(story_df) > 0:
+                print(story_df)
+
+                worker_ids = set(story_df["worker_id"].unique())
+
+                for worker_id in worker_ids:
+
+                    if worker_id == "mean":
+                        continue
+
+                    worker_df = story_df.loc[story_df["worker_id"] == worker_id]
+
+                    sel_col_df = worker_df[['story_id', 'sentence_id', 'sentence_num', 'worker_id', 'suspense']]
+
+                    if len(worker_df) > 0:
+
+                        worker_df = worker_df.sort_values(by=["sentence_num"])
+
+                        suspense = torch.tensor(worker_df["suspense"].tolist()).int()
+
+                        measure_values = model(suspense).tolist()
+
+                        dash = "dash"
+                        if worker_id == "median":
+                            dash = "dash"
+
+                        trace = go.Scatter(
+                            x=worker_df["sentence_num"],
+                            y=measure_values,
+                            mode='lines+markers',
+                            name=f"{worker_id}",
+                            text=text,
+                            line=dict(color=colors[0], dash=dash)
+                        )
+                        plot_data.append(trace)
+
+                plot_data.append(trace)
+
+            story_df = position_df.loc[position_df["story_id"] == story_id]
+
+            if len(story_df) > 0:
+                print(story_df)
+
+                for col in model_prediction_columns:
+
+                    dash = "solid"
+                    if "corpus" in col:
+                        dash = "dash"
+
+                    measure_values = torch.tensor(position_df[f"{col}_scaled"].tolist())
+
+                    measure_offset = 0.0 - measure_values[0]
+                    measure_values = [m + measure_offset for m in measure_values]
+
+                    color_lookup = 1
+                    if "suspense" in col:
+                        color_lookup += 5
+
+                    if "entropy" in col:
+                        color_lookup += 1
+                    elif "l1" in col:
+                        color_lookup += 2
+                    elif "l2" in col:
+                        color_lookup += 3
+
+                    trace = go.Scatter(
+                        x=worker_df["sentence_num"],
+                        y=measure_values,
+                        mode='lines+markers',
+                        name=f"{col}",
+                        text=text,
+                        line=dict(color=colors[color_lookup], dash=dash)
+                    )
+                    plot_data.append(trace)
+
+            if len(plot_data) > 0:
+                layout = go.Layout(
+                    title=f'Model and Annotation plots {story_id}',
+                    hovermode='closest',
+                    xaxis=dict(
+                        # title='Position',
+                    ),
+                    yaxis=dict(
+                        title=f"Suspense",
+                    ),
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h")
+                )
+
+                fig = go.Figure(data=plot_data, layout=layout)
+
+                export_plots(args, f"/model_annotation_plots/{story_id}", fig)
+
+
 def evaluate_stories(args):
     print(f"Evaluate stories: {args}")
 
@@ -447,8 +572,19 @@ def evaluate_stories(args):
     if "vector_stats" in args and len(args["vector_stats"]) > 0:
         vector_df = pd.read_csv(args["vector_stats"])
 
+    scale_prediction_columns(position_df)
+
+    plot_annotator_and_model_predictions(position_df, annotator_df, args)
     contineous_evaluation(position_df, annotator_df, args)
     ordinal_regression_bucketed_evaluation(position_df, annotator_df, args)
+
+
+def scale_prediction_columns(position_df):
+    for col in model_prediction_columns:
+        print(col)
+        scaler = StandardScaler()
+        scaled_col = numpy.squeeze(scaler.fit_transform(position_df[col].to_numpy().reshape(-1, 1)), axis=1).tolist()
+        position_df[f"{col}_scaled"] = scaled_col
 
 
 def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=False):
@@ -466,11 +602,6 @@ def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=Fal
     print(f"Merged rows: {len(merged_df)}")
     # Remove the first line as cannot be judged relatively.
 
-    for col in model_prediction_columns:
-        scaler = StandardScaler()
-        scaled_col = numpy.squeeze(scaler.fit_transform(merged_df[col].to_numpy().reshape(-1, 1)), axis=1).tolist()
-        merged_df[f"{col}_scaled"] = scaled_col
-
         # if not keep_first_sentence:
     if keep_first_sentence:
         merged_df = merged_df.loc[(merged_df["suspense"] != 0.0) | (merged_df["sentence_num"] == 0)]
@@ -484,6 +615,18 @@ def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=Fal
     train_df = merged_df.loc[merged_df['worker_id'] != 'median']
     test_df = merged_df.loc[merged_df['worker_id'] == 'median']
     return merged_df, test_df, train_df
+
+
+def export_plots(args, file, fig):
+    ensure_dir(f"{args['output_dir']}/{file}")
+    if not args["no_html_plots"]:
+        file_path = f"{args['output_dir']}/{file}.html"
+        print(f"Save plot: {file_path}")
+        pio.write_html(fig, file_path)
+    if not args["no_pdf_plots"]:
+        file_path = f"{args['output_dir']}/{file}.pdf"
+        print(f"Save plot pdf: {file_path}")
+        pio.write_image(fig, file_path)
 
 
 evaluate_stories(vars(args))
