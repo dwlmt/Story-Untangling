@@ -485,7 +485,7 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
 
                         measure_values = model(suspense).tolist()
 
-                        dash = "dash"
+                        dash = "solid"
                         if worker_id == "median":
                             dash = "dash"
 
