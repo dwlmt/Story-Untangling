@@ -128,6 +128,7 @@ dependencies:
     - editdistance==0.5.3
     - en-core-web-md==2.1.0
     - en-core-web-sm==2.1.0
+    - fastcache==1.1.0
     - firebase-admin==3.0.0
     - flaky==3.6.1
     - flask==1.1.1
