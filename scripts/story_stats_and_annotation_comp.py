@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objs as go
 import plotly.io as pio
 import scipy
+import statsmodels.api as sm
 from jsonlines import jsonlines
 from nltk import AnnotationTask, interval_distance, binary_distance
 from scipy.signal import find_peaks
@@ -560,6 +561,8 @@ def inter_annotator_agreement(merged_sentence_df, args):
                 if not numpy.isnan(spearman):
                     story_agreement_dict["spearman"] = spearman
 
+                summary_statistics(x_list, c, story_agreement_dict)
+
             if len(story_agreement_triples) > 0 and len(set([t[0] for t in story_agreement_triples])) > 1:
                 t = AnnotationTask(data=story_agreement_triples, distance=dist)
                 story_agreement_dict["alpha"] = t.alpha()
@@ -632,6 +635,8 @@ def inter_annotator_agreement(merged_sentence_df, args):
 
                 t = AnnotationTask(data=worker_agreement_triples, distance=dist)
                 worker_dict["alpha"] = t.alpha()
+
+                summary_statistics(x_list, c, worker_dict)
 
                 worker_dict["measure"] = c
 
@@ -806,13 +811,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
             stat_data = [s[stats_column] for s in document["sentence_annotations"]]
 
-            nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(stat_data)
-
-            story_dict[f"{stats_column}_num"] = nobs
-            story_dict[f"{stats_column}_min"], story_dict[f"{stats_column}_max"]  = minmax
-            story_dict[f"{stats_column}_var"] = variance
-            story_dict[f"{stats_column}_skew"] = skew
-            story_dict[f"{stats_column}_kurt"] = kurtosis
+            summary_statistics(stat_data, stats_column, story_dict)
 
         print(story_dict)
         story_level_data.append(story_dict)
@@ -834,6 +833,28 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
     merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
     merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
+
+
+def summary_statistics(stat_data, stats_column, story_dict):
+    nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(stat_data)
+    story_dict[f"{stats_column}_num"] = nobs
+    story_dict[f"{stats_column}_min"], story_dict[f"{stats_column}_max"] = minmax
+    story_dict[f"{stats_column}_var"] = variance
+    story_dict[f"{stats_column}_skew"] = skew
+    story_dict[f"{stats_column}_kurt"] = kurtosis
+
+    percentiles = numpy.percentile(stat_data, [0.25, 0.50, 0.75])
+    story_dict[f"{stats_column}_perc_25"] = percentiles[0]
+    story_dict[f"{stats_column}_perc_50"] = percentiles[1]
+    story_dict[f"{stats_column}_perc_75"] = percentiles[2]
+
+    if stats_column == "suspense":
+        stats, ref_dict = sm.tools.categorical(numpy.asarray(stat_data), dictnames=True, drop=True)
+        stats_summed = numpy.sum(stats, axis=0)
+
+        for k, v in ref_dict.items():
+            story_dict[f"{stats_column}_cat_{v}"] = stats_summed[k]
+
 
 
 def calculate_task_time(args, mturk_df):
