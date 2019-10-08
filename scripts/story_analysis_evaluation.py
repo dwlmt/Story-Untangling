@@ -267,7 +267,8 @@ class RelativeToAbsoluteModel(torch.nn.Module):
 def contineous_evaluation(annotator_df, position_df, args):
     ''' Maps the relative judgements from the annotations to an absolute scale and
     '''
-    merged_df, test_df, train_df = prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=True)
+    merged_df, test_df, train_df = prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=True,
+                                                             keep_median=True)
 
     results_data = []
     story_data = []
@@ -283,7 +284,7 @@ def contineous_evaluation(annotator_df, position_df, args):
             results_dict = OrderedDict()
             results_dict["measure"] = col
             results_dict["training"] = "fitted"
-            results_dict["dataset"] = "train"
+            # results_dict["dataset"] = "train"
 
             model_predictions_all = []
             annotations_all = []
@@ -303,7 +304,7 @@ def contineous_evaluation(annotator_df, position_df, args):
 
                     if len(worker_df) > 0:
 
-                        meta_dict["dataset"] = "train"
+                        #meta_dict["dataset"] = "train"
                         meta_dict["story_id"] = story_id
                         meta_dict["worker_id"] = worker_id
                         meta_dict["measure"] = col
@@ -342,57 +343,6 @@ def contineous_evaluation(annotator_df, position_df, args):
                     story_data.append(story_meta)
 
                 abs_evaluate_predictions(annotations_all, model_predictions_all, results_dict)
-
-                print(results_dict)
-
-                results_data.append(results_dict)
-
-        for t, model in {"fitted": fitting_model, "fixed": RelativeToAbsoluteModel()}.items():
-            with torch.no_grad():
-
-                model_predictions_all = []
-                annotations_all = []
-                story_meta = []
-
-                results_dict = OrderedDict()
-                results_dict["measure"] = col
-                results_dict["training"] = t
-                results_dict["dataset"] = "test"
-
-                for story_id in story_ids:
-
-                    meta_dict = {}
-
-                    story_df = test_df.loc[test_df["story_id"] == story_id]
-                    worker_ids = story_df["worker_id"].unique()
-                    for worker_id in worker_ids:
-
-                        worker_df = test_df.loc[test_df["worker_id"] == worker_id]
-
-                        if len(worker_df) > 0:
-
-                            meta_dict["type"] = "train"
-                            meta_dict["story_id"] = story_id
-                            meta_dict["worker_id"] = worker_id
-                            meta_dict["training"] = t
-
-                            suspense = torch.tensor(worker_df["suspense"].tolist()).int()
-                            model_predictions = torch.tensor(worker_df[f"{col}_scaled"].tolist())
-
-                            abs_suspense = model(suspense)
-
-                            if abs_suspense.size(0) != model_predictions.size(0):
-                                continue
-
-                            story_meta.append(meta_dict)
-                            model_predictions_all.append(model_predictions.tolist())
-                            annotations_all.append(abs_suspense.tolist())
-
-                abs_evaluate_predictions(annotations_all, model_predictions_all, results_dict)
-
-                for story_meta, predictions, annotations in zip(story_meta, model_predictions_all, annotations_all):
-                    abs_evaluate_predictions(predictions, annotations, story_meta)
-                    story_data.append(story_meta)
 
                 print(results_dict)
 
@@ -605,7 +555,7 @@ def scale_prediction_columns(position_df):
         position_df[f"{col}_scaled"] = scaled_col
 
 
-def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=False):
+def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=False, keep_median=False):
     merged_df = pd.merge(position_df, annotator_df, left_on=["story_id", "sentence_num"],
                          right_on=["story_id", "sentence_num"], how="inner")
     merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
@@ -630,7 +580,10 @@ def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=Fal
     df_all = merged_df.merge(max_df, on=['story_id', 'sentence_num'],
                              how='left', indicator=True)
     merged_df = df_all.loc[df_all['_merge'] == "left_only"]
-    train_df = merged_df.loc[merged_df['worker_id'] != 'median']
+    if not keep_median:
+        train_df = merged_df.loc[merged_df['worker_id'] != 'median']
+    else:
+        train_df = merged_df
     test_df = merged_df.loc[merged_df['worker_id'] == 'median']
     return merged_df, test_df, train_df
 
@@ -645,6 +598,5 @@ def export_plots(args, file, fig):
         file_path = f"{args['output_dir']}/{file}.pdf"
         print(f"Save plot pdf: {file_path}")
         pio.write_image(fig, file_path)
-
 
 evaluate_stories(vars(args))
