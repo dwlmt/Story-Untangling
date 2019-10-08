@@ -551,15 +551,19 @@ def inter_annotator_agreement(merged_sentence_df, args):
 
                 story_agreement_dict["num_of_judgements"] = len(x_list)
 
-                kendall, _ = kendalltau(x_list, y_list)
+                kendall, kendall_p_value = kendalltau(x_list, y_list)
                 if not numpy.isnan(kendall):
                     story_agreement_dict["kendall"] = kendall
-                pearson, _ = pearsonr(x_list, y_list)
+                    story_agreement_dict["kendall_p_value"] = kendall_p_value
+                pearson, pearson_p_value = pearsonr(x_list, y_list)
                 if not numpy.isnan(pearson):
                     story_agreement_dict["pearson"] = pearson
-                spearman, _ = spearmanr(x_list, y_list)
+                    story_agreement_dict["pearson_p_value"] = pearson_p_value
+                spearman, spearman_p_value = spearmanr(x_list, y_list)
                 if not numpy.isnan(spearman):
                     story_agreement_dict["spearman"] = spearman
+                    story_agreement_dict["spearman"] = spearman_p_value
+
 
                 summary_statistics(x_list, c, story_agreement_dict)
 
@@ -618,18 +622,22 @@ def inter_annotator_agreement(merged_sentence_df, args):
                 worker_dict[f"abs_diff_mean"] = mean
                 worker_dict[f"abs_diff_var"] = variance
 
-                kendall, _ = kendalltau(x_list, y_list)
+                kendall, kendall_p_value = kendalltau(x_list, y_list)
                 if not numpy.isnan(kendall):
                     kendall_list.append(kendall)
                     worker_dict["kendall"] = kendall
-                pearson, _ = pearsonr(x_list, y_list)
+
+                pearson, pearson_p_value = pearsonr(x_list, y_list)
                 if not numpy.isnan(pearson):
                     pearson_list.append(pearson)
                     worker_dict["pearson"] = pearson
-                spearman, _ = spearmanr(x_list, y_list)
+                    worker_dict["pearson_p_value"] = pearson_p_value
+                spearman, spearman_p_value = spearmanr(x_list, y_list)
                 if not numpy.isnan(spearman):
                     spearman_list.append(spearman)
                     worker_dict["spearman"] = spearman
+                    worker_dict["spearman_p_value"] = spearman_p_value
+
 
                 worker_items.append(len(x_list))
 
@@ -843,10 +851,9 @@ def summary_statistics(stat_data, stats_column, story_dict):
     story_dict[f"{stats_column}_skew"] = skew
     story_dict[f"{stats_column}_kurt"] = kurtosis
 
-    percentiles = numpy.percentile(stat_data, [0.25, 0.50, 0.75])
-    story_dict[f"{stats_column}_perc_25"] = percentiles[0]
-    story_dict[f"{stats_column}_perc_50"] = percentiles[1]
-    story_dict[f"{stats_column}_perc_75"] = percentiles[2]
+    story_dict[f"{stats_column}_perc_25"] = numpy.percentile(stat_data, 0.25)
+    story_dict[f"{stats_column}_perc_50"] = numpy.percentile(stat_data, 0.50)
+    story_dict[f"{stats_column}_perc_75"] = numpy.percentile(stat_data, 0.75)
 
     if stats_column == "suspense":
         stats, ref_dict = sm.tools.categorical(numpy.asarray(stat_data), dictnames=True, drop=True)

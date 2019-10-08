@@ -23,7 +23,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import class_weight
-from statsmodels.tsa.stattools import coint
+from statsmodels.tsa.stattools import coint, ccf
 
 parser = argparse.ArgumentParser(
     description='Run stats from  the prediction output, clustering and stats for the annotations and predictions.')
@@ -270,6 +270,7 @@ def contineous_evaluation(annotator_df, position_df, args):
     merged_df, test_df, train_df = prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=True)
 
     results_data = []
+    story_data = []
     for col in model_prediction_columns:
 
         fitting_model = RelativeToAbsoluteModel()
@@ -336,7 +337,6 @@ def contineous_evaluation(annotator_df, position_df, args):
                 if epoch == 0:
                     results_dict["training"] = "fixed"
 
-                story_data = []
                 for story_meta, predictions, annotations in zip(story_meta, model_predictions_all, annotations_all):
                     abs_evaluate_predictions(predictions, annotations, story_meta)
                     story_data.append(story_meta)
@@ -355,11 +355,13 @@ def contineous_evaluation(annotator_df, position_df, args):
                 story_meta = []
 
                 results_dict = OrderedDict()
-                results_dict["feature"] = col
+                results_dict["measure"] = col
                 results_dict["training"] = t
                 results_dict["dataset"] = "test"
 
                 for story_id in story_ids:
+
+                    meta_dict = {}
 
                     story_df = test_df.loc[test_df["story_id"] == story_id]
                     worker_ids = story_df["worker_id"].unique()
@@ -372,7 +374,7 @@ def contineous_evaluation(annotator_df, position_df, args):
                             meta_dict["type"] = "train"
                             meta_dict["story_id"] = story_id
                             meta_dict["worker_id"] = worker_id
-                            results_dict["training"] = t
+                            meta_dict["training"] = t
 
                             suspense = torch.tensor(worker_df["suspense"].tolist()).int()
                             model_predictions = torch.tensor(worker_df[f"{col}_scaled"].tolist())
@@ -383,7 +385,6 @@ def contineous_evaluation(annotator_df, position_df, args):
                                 continue
 
                             story_meta.append(meta_dict)
-
                             model_predictions_all.append(model_predictions.tolist())
                             annotations_all.append(abs_suspense.tolist())
 
@@ -416,17 +417,34 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
             annotations_flattened):
 
         if any(isinstance(el, list) for el in predictions):
+
             coint_t_list = []
+            cross_means = []
             for pred, ann in zip(predictions, annotations):
                 coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred), numpy.asarray(ann),
                                                                           autolag=None)
-                # print("Cointegration", coint_t, coint_t_p_value, coint_t_critical_values)
+                print("Cointegration", coint_t, coint_t_p_value, coint_t_critical_values)
                 coint_t_list.append(coint_t)
+
+                cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
+                print("Cross Correlation", numpy.asarray(pred), numpy.asarray(ann), cross_correlation)
+                cross_mean = numpy.mean(cross_correlation)
+                cross_means.append(cross_mean)
+
             results_dict[f"cointegration"] = sum(coint_t_list) / float(len(annotations))
+            results_dict[f"cross_correlation"] = sum(cross_means) / float(len(annotations))
+
         else:
             coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(predictions),
                                                                       numpy.asarray(annotations), autolag=None)
             results_dict[f"cointegration"] = coint_t
+            results_dict[f"cointegration_p_value"] = coint_t_p_value
+            results_dict[f"cointegration_critical_values"] = coint_t_critical_values
+
+            cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
+            print("Cross Correlation", predictions, annotations, cross_correlation)
+            results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
+            results_dict[f"cross_correlation_values"] = cross_correlation
 
         results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions_flattened,
                                                                               annotations_flattened)
