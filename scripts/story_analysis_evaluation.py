@@ -34,7 +34,7 @@ parser.add_argument('--output-dir', required=True, type=str, help="CSV containin
 parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument("--folds", default=5, type=int, help="Folds in the cross validation.")
-parser.add_argument("--epochs", default=100, type=int, help="Number of Epochs for model fitting.")
+parser.add_argument("--epochs", default=150, type=int, help="Number of Epochs for model fitting.")
 
 args = parser.parse_args()
 
@@ -269,6 +269,8 @@ def contineous_evaluation(annotator_df, position_df, args):
     '''
     merged_df, test_df, train_df = prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=True,
                                                              keep_median=True)
+
+    train_df = train_df.loc[merged_df['worker_id'] != 'mean']
 
     results_data = []
     story_data = []
