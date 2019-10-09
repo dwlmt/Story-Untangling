@@ -273,9 +273,63 @@ def contineous_evaluation(annotator_df, position_df, args):
 
     train_df = train_df.loc[merged_df['worker_id'] != 'mean']
 
+
     results_data = []
     story_data = []
+    worker_story_data = []
+    worker_results_data = []
+
+    prediction_story_data = []
+    prediction_results_data = []
+
+    for col, col_2 in combinations(model_prediction_columns, 2):
+
+        comparison_one_all = []
+        comparison_two_all = []
+        story_meta = []
+
+        results_dict = OrderedDict()
+        results_dict["training"] = "fixed"
+        results_dict["measure"] = col
+        results_dict["measure_2"] = col_2
+
+        story_ids = train_df["story_id"].unique()
+
+        for story_id in story_ids:
+
+            story_df = train_df.loc[train_df["story_id"] == story_id]
+
+            meta_dict = {}
+
+            meta_dict["story_id"] = story_id
+            meta_dict["measure"] = col
+            meta_dict["measure_2"] = col_2
+            meta_dict["training"] = "fixed"
+
+            model_predictions = torch.tensor(story_df[f"{col}_scaled"].tolist())
+            model_predictions_2 = torch.tensor(story_df[f"{col_2}_scaled"].tolist())
+
+            if len(model_predictions) > 0 and len(model_predictions_2) > 0:
+
+                comparison_one_all.append(model_predictions)
+                comparison_two_all.append(model_predictions_2)
+
+                story_meta.append(meta_dict)
+
+        for story_meta, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
+            abs_evaluate_predictions(predictions, annotations, story_meta)
+            prediction_story_data.append(story_meta)
+
+        abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
+
+        print(results_dict)
+
+        prediction_results_data.append(results_dict)
+
+
     for col in model_prediction_columns:
+
+        base_model = RelativeToAbsoluteModel()
 
         fitting_model = RelativeToAbsoluteModel()
 
@@ -289,8 +343,8 @@ def contineous_evaluation(annotator_df, position_df, args):
             results_dict["training"] = "fitted"
             # results_dict["dataset"] = "train"
 
-            model_predictions_all = []
-            annotations_all = []
+            comparison_one_all = []
+            comparison_two_all = []
             story_meta = []
 
             story_ids = train_df["story_id"].unique()
@@ -317,8 +371,6 @@ def contineous_evaluation(annotator_df, position_df, args):
                         else:
                             meta_dict["training"] = "fitted"
 
-                        story_meta.append(meta_dict)
-
                         suspense = torch.tensor(worker_df["suspense"].tolist()).int()
                         model_predictions = torch.tensor(worker_df[f"{col}_scaled"].tolist())
 
@@ -327,8 +379,8 @@ def contineous_evaluation(annotator_df, position_df, args):
                         if abs_suspense.size(0) != model_predictions.size(0):
                             continue
 
-                        model_predictions_all.append(model_predictions.tolist())
-                        annotations_all.append(abs_suspense.tolist())
+                        comparison_one_all.append(abs_suspense.tolist())
+                        comparison_two_all.append(model_predictions.tolist())
                         story_meta.append(meta_dict)
 
                         loss = criterion(abs_suspense, model_predictions)
@@ -342,25 +394,87 @@ def contineous_evaluation(annotator_df, position_df, args):
                 if epoch == 0:
                     results_dict["training"] = "fixed"
 
-                for story_meta, predictions, annotations in zip(story_meta, model_predictions_all, annotations_all):
+                for story_meta, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
                     abs_evaluate_predictions(predictions, annotations, story_meta)
                     story_data.append(story_meta)
 
-                abs_evaluate_predictions(annotations_all, model_predictions_all, results_dict)
+                abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
 
                 print(results_dict)
 
                 results_data.append(results_dict)
 
+        comparison_one_all = []
+        comparison_two_all = []
+        story_meta = []
+
+        results_dict = OrderedDict()
+        results_dict["measure"] = col
+        results_dict["training"] = "fixed"
+
+        for story_id in story_ids:
+
+            story_df = train_df.loc[train_df["story_id"] == story_id]
+            worker_ids = story_df["worker_id"].unique()
+            for worker_id, worker_id_2 in combinations(worker_ids, 2):
+                with torch.no_grad():
+
+                    meta_dict = {}
+
+                    worker_df = story_df.loc[story_df["worker_id"] == worker_id]
+
+                    worker_df_2 = story_df.loc[story_df["worker_id"] == worker_id_2]
+
+                    if len(worker_df) > 0 and len(worker_df_2) > 0:
+
+                        # meta_dict["dataset"] = "train"
+                        meta_dict["worker_id"] = worker_id
+                        meta_dict["worker_id_2"] = worker_id_2
+                        meta_dict["measure"] = col
+
+                        meta_dict["training"] = "fixed"
+
+                        suspense = torch.tensor(worker_df["suspense"].tolist()).int()
+                        abs_suspense = base_model(suspense)
+
+                        suspense_2 = torch.tensor(worker_df_2["suspense"].tolist()).int()
+                        abs_suspense_2 = base_model(suspense)
+                        if abs_suspense.size(0) != abs_suspense_2.size(0) :
+                            continue
+
+                        comparison_one_all.append(abs_suspense.tolist())
+                        comparison_two_all.append(abs_suspense_2.tolist())
+                        story_meta.append(meta_dict)
+
+            for story_meta, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
+                abs_evaluate_predictions(predictions, annotations, story_meta)
+                worker_story_data.append(story_meta)
+
+            abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
+
+            worker_results_data.append(results_dict)
+
+
     results_df = pandas.DataFrame(data=results_data)
-    results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/rel_to_abs_predictions.csv")
+    results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/rel_to_abs.csv")
 
     story_results_df = pandas.DataFrame(data=story_data)
-    story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/rel_to_abs_story_predictions.csv")
+    story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/rel_to_abs_story.csv")
+
+    worker_results_df = pandas.DataFrame(data=worker_results_data)
+    worker_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_rel_to_abs.csv")
+
+    worker_story_results_df = pandas.DataFrame(data=worker_story_data)
+    worker_story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_rel_to_abs_storycsv")
+
+    preidiction_results_df = pandas.DataFrame(data=prediction_results_data)
+    worker_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/preidction_rel_to_abs.csv")
+
+    worker_story_results_df = pandas.DataFrame(data=worker_story_data)
+    worker_story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/prediction_rel_to_abs_story.csv")
 
 
 def abs_evaluate_predictions(annotations, predictions, results_dict):
-    print(annotations, predictions, results_dict)
     if any(isinstance(el, list) for el in predictions):
         predictions_flattened = list(more_itertools.flatten(predictions))
         annotations_flattened = list(more_itertools.flatten(annotations))
@@ -380,6 +494,7 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
             spearman_list = []
             similarity_list = []
             pearson_list = []
+            l1_distance_list = []
             l2_distance_list = []
 
             for pred, ann in zip(predictions, annotations):
@@ -402,14 +517,16 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
                 spearman_list.append(spearman)
 
                 l2_distance_list.append(distance.euclidean(pred, ann))
+                l1_distance_list.append(distance.cityblock(predictions_flattened, annotations_flattened))
 
-            results_dict[f"pred_to_ann_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
-            results_dict[f"ann_to_pred_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
+            results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
+            results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
             results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
             results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
             results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
             results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
             results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
+            results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
 
         else:
             coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations_flattened),
@@ -442,6 +559,9 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
                 predictions_flattened, annotations_flattened)
 
             results_dict["l2_distance"] = distance.euclidean(predictions_flattened, annotations_flattened)
+            results_dict["l1_distance"] = distance.cityblock(predictions_flattened, annotations_flattened)
+
+    print(results_dict)
 
 
 def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, model=RelativeToAbsoluteModel()):
