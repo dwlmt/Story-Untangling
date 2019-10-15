@@ -17,7 +17,7 @@
     "dataset_path": "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/movie_plot_summaries/",
     "use_existing_cached_db": true,
     "cuda_device": [
-      3
+      0
     ],
     "story_chunking": 50,
     "lazy": true
@@ -84,11 +84,11 @@
   "trainer": {
     //"type" : "apex",
     "num_epochs": 50,
-    //"validation_metric": "+accuracy_combined",
+    "validation_metric": "+accuracy_combined",
     "patience": 3,
     "shuffle": false,
     "cuda_device": [
-      3
+      0
     ],
     "grad_clipping": 5.0,
     "model_save_interval": 3600.0,

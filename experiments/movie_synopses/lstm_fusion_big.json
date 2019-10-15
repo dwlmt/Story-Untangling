@@ -85,7 +85,7 @@
   "trainer": {
     //"type" : "apex",
     "num_epochs": 50,
-    //"validation_metric": "+accuracy_combined",
+    "validation_metric": "+accuracy_combined",
     "patience": 3,
     "shuffle": false,
     "cuda_device": [
