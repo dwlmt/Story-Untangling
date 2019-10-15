@@ -34,9 +34,6 @@ parser.add_argument('--batch-stats', required=False, type=str, help="CSV of the 
 parser.add_argument('--position-stats', required=False, type=str, help="CSV of the prediction position stats.")
 parser.add_argument('--window-stats', required=False, type=str, help="CSV of the window stats.")
 parser.add_argument('--vector-stats', required=False, type=str, help="CSV containing the vector output.")
-parser.add_argument('--mturk-sentence-annotations', required=False, type=str, help="CSV export from Mechanical Turk.")
-parser.add_argument('--firebase-sentence-annotations', required=False, type=str,
-                    help="JSONL export of sentence annotations from Firebase.")
 parser.add_argument('--output-dir', required=True, type=str, help="CSV containing the vector output.")
 parser.add_argument('--smoothing', required=False, type=str, nargs='*',
                     default=['exp', 'holt', 'avg', 'avg_2', 'reg', 'reg_2', 'arima'],
