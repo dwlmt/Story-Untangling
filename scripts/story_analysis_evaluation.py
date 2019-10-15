@@ -1,4 +1,4 @@
-''' Create Analysis Charts for Stories in bulk based on the preidction output and cluster analysis.
+''' Create Analysis Charts for Stories in bulk based on the prediction output and cluster analysis.
 
 '''
 import collections
@@ -36,6 +36,7 @@ parser.add_argument("--no-html-plots", default=False, action="store_true", help=
 parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument("--folds", default=5, type=int, help="Folds in the cross validation.")
 parser.add_argument("--epochs", default=150, type=int, help="Number of Epochs for model fitting.")
+parser.add_argument("--exclude-worker-ids", type=str, nargs="*", help="Workers to exclude form the annotations.")
 
 args = parser.parse_args()
 
@@ -78,20 +79,16 @@ def flatten(d, parent_key='', sep='_'):
 
 
 def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
-    merged_df, test_df, train_df = prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=False)
+    train_df = prepare_dataset(annotator_df, position_df, keep_first_sentence=False)
 
-    mean_triples = []
     agreement_data = []
-    average_df = merged_df.groupby("sentence_id_y", as_index=False).mean()
 
-    for i, row in average_df.iterrows():
-        mean_triples.append(("mean", str(row["sentence_id_y"]), row["suspense"]))
     for i, row in train_df.iterrows():
         agreement_data.append(
             {"worker_id": str(row["worker_id"]), "sentence_id": str(row["sentence_id_y"]), "value": row["suspense"],
              "type": "human"})
 
-    print(f"Evaluated rows - training {len(train_df)}, test {len(test_df)}")
+    print(f"Evaluated rows - training {len(train_df)}, test {len(train_df)}")
 
     results_data = []
 
@@ -103,8 +100,7 @@ def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
             train_features = features(feature_col, train_df)
             train_target = train_df[annotator_prediction_column].astype(int).to_numpy()
 
-            class_weights = class_weight.compute_class_weight('balanced',
-                                                              numpy.unique(train_target),
+            class_weights = class_weight.compute_class_weight('balanced', numpy.unique(train_target),
                                                               train_target)
 
             # class_weights = [max(0.5, min(c, 10.0)) for c in class_weights]
@@ -113,57 +109,66 @@ def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
 
             print("Class Weights", class_weights)
 
-            test_features = features(feature_col, test_df)
-            test_target = test_df[annotator_prediction_column].astype(int).to_numpy()
-
             model = mord.LogisticIT(alpha=0.0)
 
             params = {}
 
-            pipeline = Pipeline([('column', StandardScaler()),
-                                 ('model', model)])
+            pipeline = Pipeline([('model', model)])
 
             print('Estimator: ', model)
             grid = GridSearchCV(pipeline, params,
                                 scoring='neg_mean_absolute_error',
                                 n_jobs=1, cv=args["folds"])
-            grid.fit(train_features, train_target, model__sample_weight=sample_weights)
+            grid.fit(train_features, train_target) #model__sample_weight=sample_weights)
             pred = grid.best_estimator_.predict(train_features)
             classification_report = metrics.classification_report(train_target, numpy.round(pred).astype(int),
                                                                   output_dict=True)
             results_dict["train_results"] = classification_report
 
-            results_dict["test_results"] = classification_report
+            agreement_triples = []
+            for pred, target_value, sentence in zip(pred, train_target, train_df["sentence_id_x"]):
 
-            pred = grid.best_estimator_.predict(test_features)
+                agreement_triples.append((str("model"), str(array_to_first_value(sentence)), pred))
+                agreement_triples.append((str("target"), str(array_to_first_value(sentence)), array_to_first_value(target_value)))
 
-            print(pred)
-            classification_report = metrics.classification_report(test_target, numpy.round(pred).astype(int),
-                                                                  output_dict=True)
+                agreement_data.append({"worker_id": f"{feature_col}_std", "sentence_id": str(sentence),
+                                       "value": pred, "type": "model_fitted"})
+
+            agreement(agreement_triples, "regression", results_dict)
+
+            results_data.append(flatten(results_dict))
 
             agreement_triples = []
+            results_dict = OrderedDict()
+            results_dict["measure"] = feature_col
+            for pred, target_value, sentence in zip(train_features, train_target, train_df["sentence_id_x"]):
 
-            for pred, median, sentence in zip(pred, test_target, test_df["sentence_id_x"]):
-                agreement_triples.append((str("model"), str(sentence), pred))
-                mean_triples.append((str("model"), str(sentence), pred))
-                agreement_triples.append((str("median"), str(sentence), median))
+                if pred >= 2.0:
+                    mapped_pred = 5
+                elif pred >= 1.0:
+                    mapped_pred = 4
+                elif pred < -2.0:
+                    mapped_pred = 1
+                elif pred <= -1.0:
+                    mapped_pred = 2
+                else:
+                    mapped_pred = 3
 
-                agreement_data.append({"worker_id": str(feature_col), "sentence_id": str(sentence),
-                                       "value": pred, "type": "model"})
+                agreement_triples.append((str("model"), str(array_to_first_value(sentence)), array_to_first_value(mapped_pred)))
+                agreement_triples.append((str("target"), str(array_to_first_value(sentence)), array_to_first_value(target_value)))
 
-            agreement(agreement_triples, "median", results_dict)
-            # agreement(mean_triples, "mean", results_dict)
+                agreement_data.append({"worker_id": f"{feature_col}_std", "sentence_id": str(sentence),
+                                       "value": pred, "type": "model_std"})
 
-            results_dict["test_results"] = classification_report
+            agreement(agreement_triples, "regression", results_dict)
 
-            print(results_dict)
             results_data.append(flatten(results_dict))
 
     results_df = pd.DataFrame(data=results_data)
-    results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/results.csv")
+    results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/categorical_results.csv")
 
     agreement_df = pandas.DataFrame(data=agreement_data)
-    cross_pairwise_agreements = []
+    worker_pairwise_agreements = []
     for (worker, other_worker) in combinations(agreement_df["worker_id"].unique(), 2):
         worker_df = agreement_df.loc[agreement_df["worker_id"] == worker]
 
@@ -183,19 +188,30 @@ def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
         if len(combined_df) > 0:
 
             for i, row in combined_df.iterrows():
-                triples.append(("worker", row["sentence_id"], row["value_x"]))
-                triples.append(("other", row["sentence_id"], row["value_y"]))
+                triples.append(("worker", str(array_to_first_value(row["sentence_id"])), array_to_first_value(row["value_x"])))
+                triples.append(("other", str(array_to_first_value(row["sentence_id"])), array_to_first_value(row["value_y"])))
 
             agreement_dict["num_prediction_points"] = len(combined_df)
 
             agreement(triples, "agreement", agreement_dict)
-            cross_pairwise_agreements.append(agreement_dict)
+            worker_pairwise_agreements.append(agreement_dict)
 
-    cross_pairwise_agreements_df = pd.DataFrame(data=cross_pairwise_agreements)
-    cross_pairwise_agreements_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/pairwise_agreements.csv")
+    cross_pairwise_agreements_df = pd.DataFrame(data=worker_pairwise_agreements)
+    cross_pairwise_agreements_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_pairwise_agreements.csv")
+
+def array_to_first_value(target_value):
+    changed_value = target_value
+    if isinstance(target_value, (numpy.ndarray, numpy.generic,  torch.Tensor, pandas.Series)):
+        changed_value = target_value.tolist()
+
+    if isinstance(changed_value, list):
+        changed_value = changed_value[0]
+
+    return changed_value
 
 
 def agreement(agreement_triples, m, results_dict):
+    print(agreement_triples)
     if len(agreement_triples) > 2 and len(set([t[0] for t in agreement_triples])) > 1:
         t = AnnotationTask(data=agreement_triples, distance=interval_distance)
         results_dict[f"{m}_alpha"] = t.alpha()
@@ -203,7 +219,7 @@ def agreement(agreement_triples, m, results_dict):
 
 
 def features(feature_col, train_df):
-    train_features = train_df[feature_col].to_numpy()
+    train_features = train_df[f"{feature_col}_scaled"].to_numpy()
     train_features = train_features.reshape(-1, 1)
     return train_features
 
@@ -268,16 +284,9 @@ class RelativeToAbsoluteModel(torch.nn.Module):
 def contineous_evaluation(annotator_df, position_df, args):
     ''' Maps the relative judgements from the annotations to an absolute scale and
     '''
-    merged_df, test_df, train_df = prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=True,
-                                                             keep_median=True)
+    train_df = prepare_dataset(annotator_df, position_df, keep_first_sentence=True)
 
-    train_df = train_df.loc[merged_df['worker_id'] != 'mean']
-
-
-    results_data = []
-    story_data = []
-    worker_story_data = []
-    worker_results_data = []
+    train_df = train_df.loc[train_df['worker_id'] != 'mean']
 
     prediction_story_data = []
     prediction_results_data = []
@@ -306,8 +315,8 @@ def contineous_evaluation(annotator_df, position_df, args):
             meta_dict["measure_2"] = col_2
             meta_dict["training"] = "fixed"
 
-            model_predictions = torch.tensor(story_df[f"{col}_scaled"].tolist())
-            model_predictions_2 = torch.tensor(story_df[f"{col_2}_scaled"].tolist())
+            model_predictions = story_df[f"{col}_scaled"].tolist()
+            model_predictions_2 = story_df[f"{col_2}_scaled"].tolist()
 
             if len(model_predictions) > 0 and len(model_predictions_2) > 0:
 
@@ -316,20 +325,27 @@ def contineous_evaluation(annotator_df, position_df, args):
 
                 story_meta.append(meta_dict)
 
-        for story_meta, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
-            abs_evaluate_predictions(predictions, annotations, story_meta)
-            prediction_story_data.append(story_meta)
+        for story_meta_dict, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
+            abs_evaluate_predictions(predictions, annotations, story_meta_dict)
+            prediction_story_data.append(story_meta_dict)
 
-        abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
+        abs_evaluate_predictions(comparison_one_all, comparison_two_all, results_dict)
 
         print(results_dict)
 
         prediction_results_data.append(results_dict)
 
+    prediction_results_df = pandas.DataFrame(data=prediction_results_data)
+    prediction_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/prediction_rel_to_abs.csv")
+
+    prediction_story_results_df = pandas.DataFrame(data=prediction_story_data)
+    prediction_story_results_df.to_csv(
+        f"{args['output_dir']}/sentence_model_evaluation/prediction_rel_to_abs_story.csv")
+
+    results_data = []
+    story_data = []
 
     for col in model_prediction_columns:
-
-        base_model = RelativeToAbsoluteModel()
 
         fitting_model = RelativeToAbsoluteModel()
 
@@ -376,9 +392,6 @@ def contineous_evaluation(annotator_df, position_df, args):
 
                         abs_suspense = fitting_model(suspense)
 
-                        if abs_suspense.size(0) != model_predictions.size(0):
-                            continue
-
                         comparison_one_all.append(abs_suspense.tolist())
                         comparison_two_all.append(model_predictions.tolist())
                         story_meta.append(meta_dict)
@@ -394,178 +407,179 @@ def contineous_evaluation(annotator_df, position_df, args):
                 if epoch == 0:
                     results_dict["training"] = "fixed"
 
-                for story_meta, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
-                    abs_evaluate_predictions(predictions, annotations, story_meta)
-                    story_data.append(story_meta)
+                for story_meta_dict, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
+                    abs_evaluate_predictions(predictions, annotations, story_meta_dict)
+                    story_data.append(story_meta_dict)
 
-                abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
+                abs_evaluate_predictions(comparison_one_all, comparison_two_all, results_dict)
 
                 print(results_dict)
 
                 results_data.append(results_dict)
-
-        comparison_one_all = []
-        comparison_two_all = []
-        story_meta = []
-
-        results_dict = OrderedDict()
-        results_dict["measure"] = col
-        results_dict["training"] = "fixed"
-
-        for story_id in story_ids:
-
-            story_df = train_df.loc[train_df["story_id"] == story_id]
-            worker_ids = story_df["worker_id"].unique()
-            for worker_id, worker_id_2 in combinations(worker_ids, 2):
-                with torch.no_grad():
-
-                    meta_dict = {}
-
-                    worker_df = story_df.loc[story_df["worker_id"] == worker_id]
-
-                    worker_df_2 = story_df.loc[story_df["worker_id"] == worker_id_2]
-
-                    if len(worker_df) > 0 and len(worker_df_2) > 0:
-
-                        # meta_dict["dataset"] = "train"
-                        meta_dict["worker_id"] = worker_id
-                        meta_dict["worker_id_2"] = worker_id_2
-                        meta_dict["measure"] = col
-
-                        meta_dict["training"] = "fixed"
-
-                        suspense = torch.tensor(worker_df["suspense"].tolist()).int()
-                        abs_suspense = base_model(suspense)
-
-                        suspense_2 = torch.tensor(worker_df_2["suspense"].tolist()).int()
-                        abs_suspense_2 = base_model(suspense)
-                        if abs_suspense.size(0) != abs_suspense_2.size(0) :
-                            continue
-
-                        comparison_one_all.append(abs_suspense.tolist())
-                        comparison_two_all.append(abs_suspense_2.tolist())
-                        story_meta.append(meta_dict)
-
-            for story_meta, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
-                abs_evaluate_predictions(predictions, annotations, story_meta)
-                worker_story_data.append(story_meta)
-
-            abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
-
-            worker_results_data.append(results_dict)
-
-
     results_df = pandas.DataFrame(data=results_data)
-    results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/rel_to_abs.csv")
+    results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/model_to_ann_rel_to_abs.csv")
 
     story_results_df = pandas.DataFrame(data=story_data)
-    story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/rel_to_abs_story.csv")
+    story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/model_to_ann_rel_to_abs_story.csv")
+
+    worker_story_data = []
+    worker_results_data = []
+
+    base_model = RelativeToAbsoluteModel()
+    comparison_one_all = []
+    comparison_two_all = []
+    story_meta = []
+
+    results_dict = OrderedDict()
+
+    for story_id in story_ids:
+
+        story_df = train_df.loc[train_df["story_id"] == story_id]
+        worker_ids = story_df["worker_id"].unique()
+        for worker_id, worker_id_2 in combinations(worker_ids, 2):
+            with torch.no_grad():
+
+                meta_dict = {}
+
+                worker_df = story_df.loc[story_df["worker_id"] == worker_id]
+
+                worker_df_2 = story_df.loc[story_df["worker_id"] == worker_id_2]
+
+                if len(worker_df) > 0 and len(worker_df_2) > 0:
+
+                    # meta_dict["dataset"] = "train"
+                    meta_dict["worker_id"] = worker_id
+                    meta_dict["worker_id_2"] = worker_id_2
+                    meta_dict["measure"] = col
+
+                    meta_dict["training"] = "fixed"
+
+                    suspense = torch.tensor(worker_df["suspense"].tolist()).int()
+                    abs_suspense = base_model(suspense)
+
+                    suspense_2 = torch.tensor(worker_df_2["suspense"].tolist()).int()
+                    abs_suspense_2 = base_model(suspense_2)
+
+                    comparison_one_all.append(abs_suspense.tolist())
+                    comparison_two_all.append(abs_suspense_2.tolist())
+                    story_meta.append(meta_dict)
+
+        for story_meta_dict, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
+            abs_evaluate_predictions(predictions, annotations, story_meta_dict)
+            worker_story_data.append(story_meta_dict)
+
+        abs_evaluate_predictions(comparison_two_all, comparison_one_all, results_dict)
+
+        worker_results_data.append(results_dict)
 
     worker_results_df = pandas.DataFrame(data=worker_results_data)
     worker_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_rel_to_abs.csv")
 
     worker_story_results_df = pandas.DataFrame(data=worker_story_data)
-    worker_story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_rel_to_abs_storycsv")
-
-    preidiction_results_df = pandas.DataFrame(data=prediction_results_data)
-    worker_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/preidction_rel_to_abs.csv")
-
-    worker_story_results_df = pandas.DataFrame(data=worker_story_data)
-    worker_story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/prediction_rel_to_abs_story.csv")
+    worker_story_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_rel_to_abs_story.csv")
 
 
 def abs_evaluate_predictions(annotations, predictions, results_dict):
+
     if any(isinstance(el, list) for el in predictions):
-        predictions_flattened = list(more_itertools.flatten(predictions))
-        annotations_flattened = list(more_itertools.flatten(annotations))
+
+        coint_pred_to_ann = []
+        coint_ann_to_pred = []
+        cross_correlation_list = []
+        kendall_list = []
+        spearman_list = []
+        pearson_list = []
+        l1_distance_list = []
+        l2_distance_list = []
+
+        for pred, ann in zip(predictions, annotations):
+            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
+                                                                      numpy.asarray(pred), autolag=None)
+            coint_ann_to_pred.append(coint_t)
+
+            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred),
+                                                                      numpy.asarray(ann), autolag=None)
+            coint_pred_to_ann.append(coint_t)
+
+            cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
+            cross_correlation_list.append(numpy.mean(cross_correlation))
+
+            pearson, _ = pearsonr(predictions, annotations)
+            pearson_list.append(pearson)
+            kendall, _ = kendalltau(predictions, annotations, nan_policy="omit")
+            kendall_list.append(kendall)
+            spearman, _ = spearmanr(predictions, annotations)
+            spearman_list.append(spearman)
+
+            l2_distance_list.append(distance.euclidean(pred, ann))
+            l1_distance_list.append(distance.cityblock(pred, ann))
+
+        results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
+        results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
+        results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
+        results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
+        results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
+        results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
+        results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
+        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
+
     else:
-        predictions_flattened = predictions
-        annotations_flattened = annotations
 
-    if len(predictions_flattened) > 0 and len(annotations_flattened) > 0 and len(predictions_flattened) == len(
-            annotations_flattened):
+        predictions_flattened = []
+        annotations_flattened = []
 
-        if any(isinstance(el, list) for el in predictions):
-
-            coint_pred_to_ann = []
-            coint_ann_to_pred = []
-            cross_correlation_list = []
-            kendall_list = []
-            spearman_list = []
-            similarity_list = []
-            pearson_list = []
-            l1_distance_list = []
-            l2_distance_list = []
-
-            for pred, ann in zip(predictions, annotations):
-                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
-                                                                          numpy.asarray(pred), autolag=None)
-                coint_ann_to_pred.append(coint_t)
-
-                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred),
-                                                                          numpy.asarray(ann), autolag=None)
-                coint_pred_to_ann.append(coint_t)
-
-                cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
-                cross_correlation_list.append(numpy.mean(cross_correlation))
-
-                pearson, _ = pearsonr(predictions_flattened, annotations_flattened)
-                pearson_list.append(pearson)
-                kendall, _ = kendalltau(predictions_flattened, annotations_flattened, nan_policy="omit")
-                kendall_list.append(kendall)
-                spearman, _ = spearmanr(predictions_flattened, annotations_flattened)
-                spearman_list.append(spearman)
-
-                l2_distance_list.append(distance.euclidean(pred, ann))
-                l1_distance_list.append(distance.cityblock(predictions_flattened, annotations_flattened))
-
-            results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
-            results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
-            results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
-            results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
-            results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
-            results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
-            results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
-            results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
-
+        if isinstance(predictions, list):
+            if any(isinstance(el, list) for el in predictions):
+                predictions_flattened = list(more_itertools.flatten(predictions))
+                annotations_flattened = list(more_itertools.flatten(annotations))
+            elif any(isinstance(el, (numpy.ndarray, numpy.generic)) for el in predictions):
+                predictions_flattened = numpy.vstack(predictions)
+                annotations_flattened = numpy.vstack(annotations)
+            elif any(isinstance(el, torch.Tensor) for el in predictions):
+                predictions_flattened = torch.cat(predictions).tolist()
+                annotations_flattened = torch.cat(annotations).tolist()
         else:
-            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations_flattened),
-                                                                      numpy.asarray(predictions_flattened),
-                                                                      autolag=None)
-            results_dict[f"ann_to_pred_cointegration"] = coint_t
-            results_dict[f"ann_to_pred_cointegration_p_value"] = coint_t_p_value
-            results_dict[f"ann_to_pred_cointegration_critical_1"], results_dict[
-                f"ann_to_pred_cointegration_critical_5"], \
-            results_dict[f"ann_to_pred_cointegration_critical_10"] = coint_t_critical_values
+            predictions_flattened = predictions
+            annotations_flattened = annotations
 
-            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(predictions_flattened),
-                                                                      numpy.asarray(annotations_flattened),
-                                                                      autolag=None)
-            results_dict[f"pred_to_ann_cointegration"] = coint_t
-            results_dict[f"pred_to_ann_cointegration_p_value"] = coint_t_p_value
-            results_dict[f"pred_to_ann_cointegration_critical_1"], results_dict[
-                f"pred_to_ann_cointegration_critical_5"], results_dict[
-                f"pred_to_ann_cointegration_critical_10"] = coint_t_critical_values
+        coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations_flattened),
+                                                                  numpy.asarray(predictions_flattened),
+                                                                  autolag=None)
+        results_dict[f"ann_to_pred_cointegration"] = coint_t
+        results_dict[f"ann_to_pred_cointegration_p_value"] = coint_t_p_value
+        results_dict[f"ann_to_pred_cointegration_critical_1"], results_dict[
+            f"ann_to_pred_cointegration_critical_5"], \
+        results_dict[f"ann_to_pred_cointegration_critical_10"] = coint_t_critical_values
 
-            cross_correlation = ccf(numpy.asarray(predictions_flattened), numpy.asarray(annotations_flattened))
-            print("Cross Correlation", predictions, annotations, cross_correlation)
-            results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
+        coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(predictions_flattened),
+                                                                  numpy.asarray(annotations_flattened),
+                                                                  autolag=None)
+        results_dict[f"pred_to_ann_cointegration"] = coint_t
+        results_dict[f"pred_to_ann_cointegration_p_value"] = coint_t_p_value
+        results_dict[f"pred_to_ann_cointegration_critical_1"], results_dict[
+            f"pred_to_ann_cointegration_critical_5"], results_dict[
+            f"pred_to_ann_cointegration_critical_10"] = coint_t_critical_values
 
-            results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions_flattened,
-                                                                                  annotations_flattened)
-            results_dict[f"kendall"], results_dict[f"kendall_p_value"] = kendalltau(
-                predictions_flattened, annotations_flattened, nan_policy="omit")
-            results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
-                predictions_flattened, annotations_flattened)
+        cross_correlation = ccf(numpy.asarray(predictions_flattened), numpy.asarray(annotations_flattened))
+        results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
 
-            results_dict["l2_distance"] = distance.euclidean(predictions_flattened, annotations_flattened)
-            results_dict["l1_distance"] = distance.cityblock(predictions_flattened, annotations_flattened)
+        results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions_flattened,
+                                                                              annotations_flattened)
+        results_dict[f"kendall"], results_dict[f"kendall_p_value"] = kendalltau(
+            predictions_flattened, annotations_flattened, nan_policy="omit")
+        results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
+            predictions_flattened, annotations_flattened)
+
+        results_dict["l2_distance"] = distance.euclidean(predictions_flattened, annotations_flattened)
+        results_dict["l1_distance"] = distance.cityblock(predictions_flattened, annotations_flattened)
 
     print(results_dict)
 
 
 def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, model=RelativeToAbsoluteModel()):
     print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
+
+    position_df = scale_prediction_columns(position_df)
 
     colors = plotly.colors.DEFAULT_PLOTLY_COLORS
 
@@ -685,7 +699,6 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
 
                 export_plots(args, f"/model_annotation_plots/{story_id}", fig)
 
-
 def evaluate_stories(args):
     print(f"Evaluate stories: {args}")
 
@@ -694,28 +707,30 @@ def evaluate_stories(args):
     position_df = pd.read_csv(args["position_stats"])
     print(f"Position rows : {len(position_df)}")
     annotator_df = pd.read_csv(args["annotator_targets"])
+
+    if args["exclude_worker_ids"] is not None and len(args["exclude_worker_ids"]) > 0:
+        annotator_df = annotator_df[~annotator_df["worker_id"].isin(args["exclude_worker_ids"])]
+
     print(f"Annotator rows: {len(annotator_df)}")
 
     vector_df = None
     if "vector_stats" in args and len(args["vector_stats"]) > 0:
         vector_df = pd.read_csv(args["vector_stats"])
 
-    scale_prediction_columns(position_df)
-
     plot_annotator_and_model_predictions(position_df, annotator_df, args)
     contineous_evaluation(position_df, annotator_df, args)
     ordinal_regression_bucketed_evaluation(position_df, annotator_df, args)
 
-
 def scale_prediction_columns(position_df):
     for col in model_prediction_columns:
-        print(col)
-        scaler = StandardScaler()
-        scaled_col = numpy.squeeze(scaler.fit_transform(position_df[col].to_numpy().reshape(-1, 1)), axis=1).tolist()
-        position_df[f"{col}_scaled"] = scaled_col
+        for feature_col in [f"{col}_diff", f"{col}"]:
+            scaler = StandardScaler()
+            scaled_col = numpy.squeeze(scaler.fit_transform(position_df[feature_col].to_numpy().reshape(-1, 1)), axis=1).tolist()
+            position_df[f"{feature_col}_scaled"] = scaled_col
+    return position_df
 
 
-def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=False, keep_median=False):
+def prepare_dataset(annotator_df, position_df, keep_first_sentence=False):
     merged_df = pd.merge(position_df, annotator_df, left_on=["story_id", "sentence_num"],
                          right_on=["story_id", "sentence_num"], how="inner")
     merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
@@ -727,6 +742,8 @@ def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=Fal
     merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
     for col in model_prediction_columns:
         merged_df[f"{col}_diff"] = merged_df[f"{col}_later"] - merged_df[col]
+
+    merged_df = scale_prediction_columns(merged_df)
     print(f"Merged rows: {len(merged_df)}")
     # Remove the first line as cannot be judged relatively.
 
@@ -740,12 +757,8 @@ def prepare_test_and_train_df(annotator_df, position_df, keep_first_sentence=Fal
     df_all = merged_df.merge(max_df, on=['story_id', 'sentence_num'],
                              how='left', indicator=True)
     merged_df = df_all.loc[df_all['_merge'] == "left_only"]
-    if not keep_median:
-        train_df = merged_df.loc[merged_df['worker_id'] != 'median']
-    else:
-        train_df = merged_df
-    test_df = merged_df.loc[merged_df['worker_id'] == 'median']
-    return merged_df, test_df, train_df
+
+    return merged_df
 
 
 def export_plots(args, file, fig):
