@@ -392,16 +392,18 @@ def contineous_evaluation(annotator_df, position_df, args):
 
                         abs_suspense = fitting_model(suspense)
 
-                        comparison_one_all.append(abs_suspense.tolist())
-                        comparison_two_all.append(model_predictions.tolist())
-                        story_meta.append(meta_dict)
+                        if len(model_predictions) > 0 and len(abs_suspense) > 0:
 
-                        loss = criterion(abs_suspense, model_predictions)
+                            comparison_one_all.append(abs_suspense.tolist())
+                            comparison_two_all.append(model_predictions.tolist())
+                            story_meta.append(meta_dict)
 
-                        if epoch > 0:
-                            optimizer.zero_grad()
-                            loss.backward()
-                            optimizer.step()
+                            loss = criterion(abs_suspense, model_predictions)
+
+                            if epoch > 0:
+                                optimizer.zero_grad()
+                                loss.backward()
+                                optimizer.step()
 
             if epoch == 0 or epoch == args["epochs"] - 1:
                 if epoch == 0:
@@ -460,9 +462,11 @@ def contineous_evaluation(annotator_df, position_df, args):
                     suspense_2 = torch.tensor(worker_df_2["suspense"].tolist()).int()
                     abs_suspense_2 = base_model(suspense_2)
 
-                    comparison_one_all.append(abs_suspense.tolist())
-                    comparison_two_all.append(abs_suspense_2.tolist())
-                    story_meta.append(meta_dict)
+                    if len(abs_suspense) > 0 and len(abs_suspense_2) > 0:
+
+                        comparison_one_all.append(abs_suspense.tolist())
+                        comparison_two_all.append(abs_suspense_2.tolist())
+                        story_meta.append(meta_dict)
 
         for story_meta_dict, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
             abs_evaluate_predictions(predictions, annotations, story_meta_dict)
@@ -724,6 +728,10 @@ def evaluate_stories(args):
 def scale_prediction_columns(position_df):
     for col in model_prediction_columns:
         for feature_col in [f"{col}_diff", f"{col}"]:
+
+            if feature_col not in position_df.columns:
+                continue
+
             scaler = StandardScaler()
             scaled_col = numpy.squeeze(scaler.fit_transform(position_df[feature_col].to_numpy().reshape(-1, 1)), axis=1).tolist()
             position_df[f"{feature_col}_scaled"] = scaled_col
