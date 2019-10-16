@@ -318,20 +318,20 @@ def contineous_evaluation(annotator_df, position_df, args):
             model_predictions = story_df[f"{col}_scaled"].tolist()
             model_predictions_2 = story_df[f"{col_2}_scaled"].tolist()
 
-            if len(model_predictions) > 0 and len(model_predictions_2) > 0:
+            if len(model_predictions) == 0 or len(model_predictions_2) == 0:
+                continue
 
-                comparison_one_all.append(model_predictions)
-                comparison_two_all.append(model_predictions_2)
+            comparison_one_all.append(model_predictions)
+            comparison_two_all.append(model_predictions_2)
 
-                story_meta.append(meta_dict)
+            story_meta.append(meta_dict)
 
         for story_meta_dict, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
+            print(story_meta_dict, predictions, annotations)
             abs_evaluate_predictions(predictions, annotations, story_meta_dict)
             prediction_story_data.append(story_meta_dict)
 
         abs_evaluate_predictions(comparison_one_all, comparison_two_all, results_dict)
-
-        print(results_dict)
 
         prediction_results_data.append(results_dict)
 
@@ -392,18 +392,19 @@ def contineous_evaluation(annotator_df, position_df, args):
 
                         abs_suspense = fitting_model(suspense)
 
-                        if len(model_predictions) > 0 and len(abs_suspense) > 0:
+                        if len(model_predictions) == 0 or len(abs_suspense) == 0:
+                            continue
 
-                            comparison_one_all.append(abs_suspense.tolist())
-                            comparison_two_all.append(model_predictions.tolist())
-                            story_meta.append(meta_dict)
+                        comparison_one_all.append(abs_suspense.tolist())
+                        comparison_two_all.append(model_predictions.tolist())
+                        story_meta.append(meta_dict)
 
-                            loss = criterion(abs_suspense, model_predictions)
+                        loss = criterion(abs_suspense, model_predictions)
 
-                            if epoch > 0:
-                                optimizer.zero_grad()
-                                loss.backward()
-                                optimizer.step()
+                        if epoch > 0:
+                            optimizer.zero_grad()
+                            loss.backward()
+                            optimizer.step()
 
             if epoch == 0 or epoch == args["epochs"] - 1:
                 if epoch == 0:
@@ -462,11 +463,12 @@ def contineous_evaluation(annotator_df, position_df, args):
                     suspense_2 = torch.tensor(worker_df_2["suspense"].tolist()).int()
                     abs_suspense_2 = base_model(suspense_2)
 
-                    if len(abs_suspense) > 0 and len(abs_suspense_2) > 0:
+                    if len(abs_suspense) == 0 or len(abs_suspense_2) == 0:
+                        continue
 
-                        comparison_one_all.append(abs_suspense.tolist())
-                        comparison_two_all.append(abs_suspense_2.tolist())
-                        story_meta.append(meta_dict)
+                    comparison_one_all.append(abs_suspense.tolist())
+                    comparison_two_all.append(abs_suspense_2.tolist())
+                    story_meta.append(meta_dict)
 
         for story_meta_dict, predictions, annotations in zip(story_meta, comparison_one_all, comparison_two_all):
             abs_evaluate_predictions(predictions, annotations, story_meta_dict)
@@ -484,100 +486,85 @@ def contineous_evaluation(annotator_df, position_df, args):
 
 
 def abs_evaluate_predictions(annotations, predictions, results_dict):
+    try:
+        if any(isinstance(el, list) for el in annotations):
+    
+            coint_pred_to_ann = []
+            coint_ann_to_pred = []
+            cross_correlation_list = []
+            kendall_list = []
+            spearman_list = []
+            pearson_list = []
+            l1_distance_list = []
+            l2_distance_list = []
 
-    if any(isinstance(el, list) for el in predictions):
+            for pred, ann in zip(predictions, annotations):
+                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
+                                                                          numpy.asarray(pred), autolag=None)
+                coint_ann_to_pred.append(coint_t)
 
-        coint_pred_to_ann = []
-        coint_ann_to_pred = []
-        cross_correlation_list = []
-        kendall_list = []
-        spearman_list = []
-        pearson_list = []
-        l1_distance_list = []
-        l2_distance_list = []
+                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred),
+                                                                          numpy.asarray(ann), autolag=None)
+                coint_pred_to_ann.append(coint_t)
 
-        for pred, ann in zip(predictions, annotations):
-            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
-                                                                      numpy.asarray(pred), autolag=None)
-            coint_ann_to_pred.append(coint_t)
+                cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
+                cross_correlation_list.append(numpy.mean(cross_correlation))
 
-            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred),
-                                                                      numpy.asarray(ann), autolag=None)
-            coint_pred_to_ann.append(coint_t)
+                pearson, _ = pearsonr(pred, ann)
+                pearson_list.append(pearson)
+                kendall, _ = kendalltau(pred, ann, nan_policy="omit")
+                kendall_list.append(kendall)
+                spearman, _ = spearmanr(pred, ann)
+                spearman_list.append(spearman)
 
-            cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
-            cross_correlation_list.append(numpy.mean(cross_correlation))
+                l2_distance_list.append(distance.euclidean(pred, ann))
+                l1_distance_list.append(distance.cityblock(pred, ann))
 
-            pearson, _ = pearsonr(predictions, annotations)
-            pearson_list.append(pearson)
-            kendall, _ = kendalltau(predictions, annotations, nan_policy="omit")
-            kendall_list.append(kendall)
-            spearman, _ = spearmanr(predictions, annotations)
-            spearman_list.append(spearman)
+            results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
+            results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
+            results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
+            results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
+            results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
+            results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
+            results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
+            results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
 
-            l2_distance_list.append(distance.euclidean(pred, ann))
-            l1_distance_list.append(distance.cityblock(pred, ann))
-
-        results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
-        results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
-        results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
-        results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
-        results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
-        results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
-        results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
-        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
-
-    else:
-
-        predictions_flattened = []
-        annotations_flattened = []
-
-        if isinstance(predictions, list):
-            if any(isinstance(el, list) for el in predictions):
-                predictions_flattened = list(more_itertools.flatten(predictions))
-                annotations_flattened = list(more_itertools.flatten(annotations))
-            elif any(isinstance(el, (numpy.ndarray, numpy.generic)) for el in predictions):
-                predictions_flattened = numpy.vstack(predictions)
-                annotations_flattened = numpy.vstack(annotations)
-            elif any(isinstance(el, torch.Tensor) for el in predictions):
-                predictions_flattened = torch.cat(predictions).tolist()
-                annotations_flattened = torch.cat(annotations).tolist()
         else:
-            predictions_flattened = predictions
-            annotations_flattened = annotations
 
-        coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations_flattened),
-                                                                  numpy.asarray(predictions_flattened),
-                                                                  autolag=None)
-        results_dict[f"ann_to_pred_cointegration"] = coint_t
-        results_dict[f"ann_to_pred_cointegration_p_value"] = coint_t_p_value
-        results_dict[f"ann_to_pred_cointegration_critical_1"], results_dict[
-            f"ann_to_pred_cointegration_critical_5"], \
-        results_dict[f"ann_to_pred_cointegration_critical_10"] = coint_t_critical_values
+            print(annotations, predictions)
+            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations),
+                                                                      numpy.asarray(predictions),
+                                                                      autolag=None)
+            results_dict[f"ann_to_pred_cointegration"] = coint_t
+            results_dict[f"ann_to_pred_cointegration_p_value"] = coint_t_p_value
+            results_dict[f"ann_to_pred_cointegration_critical_1"], results_dict[
+                f"ann_to_pred_cointegration_critical_5"], \
+            results_dict[f"ann_to_pred_cointegration_critical_10"] = coint_t_critical_values
 
-        coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(predictions_flattened),
-                                                                  numpy.asarray(annotations_flattened),
-                                                                  autolag=None)
-        results_dict[f"pred_to_ann_cointegration"] = coint_t
-        results_dict[f"pred_to_ann_cointegration_p_value"] = coint_t_p_value
-        results_dict[f"pred_to_ann_cointegration_critical_1"], results_dict[
-            f"pred_to_ann_cointegration_critical_5"], results_dict[
-            f"pred_to_ann_cointegration_critical_10"] = coint_t_critical_values
+            coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(predictions),
+                                                                      numpy.asarray(annotations),
+                                                                      autolag=None)
+            results_dict[f"pred_to_ann_cointegration"] = coint_t
+            results_dict[f"pred_to_ann_cointegration_p_value"] = coint_t_p_value
+            results_dict[f"pred_to_ann_cointegration_critical_1"], results_dict[
+                f"pred_to_ann_cointegration_critical_5"], results_dict[
+                f"pred_to_ann_cointegration_critical_10"] = coint_t_critical_values
 
-        cross_correlation = ccf(numpy.asarray(predictions_flattened), numpy.asarray(annotations_flattened))
-        results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
+            cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
+            results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
 
-        results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions_flattened,
-                                                                              annotations_flattened)
-        results_dict[f"kendall"], results_dict[f"kendall_p_value"] = kendalltau(
-            predictions_flattened, annotations_flattened, nan_policy="omit")
-        results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
-            predictions_flattened, annotations_flattened)
+            results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions,
+                                                                                  annotations)
+            results_dict[f"kendall"], results_dict[f"kendall_p_value"] = kendalltau(
+                predictions, annotations, nan_policy="omit")
+            results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
+                predictions, annotations)
 
-        results_dict["l2_distance"] = distance.euclidean(predictions_flattened, annotations_flattened)
-        results_dict["l1_distance"] = distance.cityblock(predictions_flattened, annotations_flattened)
+            results_dict["l2_distance"] = distance.euclidean(predictions, annotations)
+            results_dict["l1_distance"] = distance.cityblock(predictions, annotations)
 
-    print(results_dict)
+    except Exception as ex:
+        print(ex)
 
 
 def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, model=RelativeToAbsoluteModel()):
