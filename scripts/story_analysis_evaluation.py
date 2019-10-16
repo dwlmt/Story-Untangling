@@ -399,12 +399,13 @@ def contineous_evaluation(annotator_df, position_df, args):
                         comparison_two_all.append(model_predictions.tolist())
                         story_meta.append(meta_dict)
 
-                        loss = criterion(abs_suspense, model_predictions)
+                        if abs_suspense.size(0) == model_predictions.size(0):
+                            loss = criterion(abs_suspense, model_predictions)
 
-                        if epoch > 0:
-                            optimizer.zero_grad()
-                            loss.backward()
-                            optimizer.step()
+                            if epoch > 0:
+                                optimizer.zero_grad()
+                                loss.backward()
+                                optimizer.step()
 
             if epoch == 0 or epoch == args["epochs"] - 1:
                 if epoch == 0:
