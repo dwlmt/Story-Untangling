@@ -488,7 +488,7 @@ def contineous_evaluation(annotator_df, position_df, args):
 def abs_evaluate_predictions(annotations, predictions, results_dict):
     try:
         if any(isinstance(el, list) for el in annotations):
-    
+
             coint_pred_to_ann = []
             coint_ann_to_pred = []
             cross_correlation_list = []
