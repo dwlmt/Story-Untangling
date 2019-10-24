@@ -1,5 +1,6 @@
 import logging
 import random
+from itertools import islice
 from typing import Dict, Any, List, Optional, Tuple
 
 import torch
@@ -181,6 +182,20 @@ class UncertainReader(Model):
                 for top_n in self._accuracy_top_k:
                     self._metrics[f"disc_accuracy_{i}_{top_n}"] = CategoricalAccuracy(top_k=top_n)
 
+                for r in range(1, 21):
+
+                    for top_n in self._accuracy_top_k:
+                        self._metrics[f"disc_accuracy_rel_{i}_{top_n}_{r}"] = CategoricalAccuracy(top_k=top_n)
+
+                    self._metrics[f"disc_correct_rel_prob_avg_{i}_{r}"] = Average()
+
+                for r in range(0, 100):
+
+                    for top_n in self._accuracy_top_k:
+                        self._metrics[f"disc_accuracy_abs_{i}_{top_n}_{r}"] = CategoricalAccuracy(top_k=top_n)
+
+                    self._metrics[f"disc_correct_abs_prob_avg_{i}_{r}"] =  Average()
+
                 # self._metrics[f"entropy_{i}"] = Entropy()
 
                 self._metrics[f"disc_correct_dot_product_avg_{i}"] = Average()
@@ -271,7 +286,7 @@ class UncertainReader(Model):
 
             if self._disc_loss or (self._flip_loss and flip):
                 disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
-                                                                                 target_encoded_stories)
+                                                                                 target_encoded_stories, metadata)
                 output_dict = {**output_dict, **disc_output_dict}
                 loss += (disc_loss * self._disc_loss_weight)
 
@@ -375,8 +390,13 @@ class UncertainReader(Model):
 
         return loss, output_dict
 
-    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_stories,
+    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_stories, metadata,
                                       sentence_loss=False):
+
+        print(metadata)
+        sentence_nums = metadata[0]["sentence_nums"]
+        split_sentences = list(iter(lambda: list(islice([r for r in range(0, len(sentence_nums))], 20)), ()))
+
         output_dict = {}
         loss = torch.tensor(0.0).to(encoded_stories.device)
 
@@ -451,9 +471,30 @@ class UncertainReader(Model):
                                                        i:, ]
                     batch_encoded_stories_correct = encoded_stories_flat[:encoded_stories_flat.shape[0] - i, :]
 
+
                     for top_k in self._accuracy_top_k:
                         self._metrics[f"disc_accuracy_{i}_{top_k}"](scores_softmax, target_classes)
                         self._metrics["accuracy_combined"](self._metrics[f"disc_accuracy_{i}_{top_k}"].get_metric())
+
+                        for j, sent_num in enumerate(sentence_nums):
+                            key = f"disc_accuracy_abs_{i}_{top_k}_{sent_num}"
+                            if key in self._metrics:
+                                self._metrics[key](scores_softmax[j].item(), target_classes[j].item())
+
+                        for j in split_sentences:
+                            key = f"disc_accuracy_rel_{j}_{top_k}_{sent_num}"
+                            index_tensor = torch.LongTensor(j).detach()
+                            self._metrics[key](torch.index_select(scores_softmax, 0, index_tensor),
+                                               torch.index_select(target_classes, 0, index_tensor))
+
+                    for j, sent_num in enumerate(sentence_nums):
+                        key = f"disc_correct_abs_prob_avg_{j}"
+                        if key in self._metrics:
+                            self._metrics[key](correct_probs[j].item())
+
+                    for j in split_sentences:
+                        index_tensor = torch.LongTensor(j).detach()
+                        self._metrics[f"disc_correct_rel_prob_avg{j}"](torch.index_select(correct_probs, 0, index_tensor)).mean().item()
 
                     self.similarity_metrics(batch_encoded_stories_correct, target_encoded_sentences_correct, i,
                                             output_dict)

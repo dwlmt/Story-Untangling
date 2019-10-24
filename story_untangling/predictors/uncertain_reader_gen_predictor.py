@@ -109,6 +109,12 @@ def only_position_nodes(node):
         return False
 
 
+def time_discount(sentence_num, number_of_sentences):
+    ''' Time for adjustment that can be made. Dummy at the moment as the stats still aren't calculated.
+    '''
+    proportion_of_story = float(sentence_num) / float(number_of_sentences)
+    return 1.0
+
 @Predictor.register("uncertain_reader_gen_predictor")
 class UncertainReaderGenPredictor(Predictor):
     """
@@ -124,7 +130,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = False
 
-        self.levels_to_rollout = 2
+        self.levels_to_rollout = 1
         self.generate_per_branch = 100
         self.sample_per_level_branch = 100
 
@@ -249,23 +255,26 @@ class UncertainReaderGenPredictor(Predictor):
         if len(child_list) == 0:
             return
 
-        child_story_tensors, log_probs, logits, parent_story_tensor, probs = self.calculate_embedding_probs_and_logits(
+        child_story_tensors, parent_story_tensor, logits, log_probs, probs,  logits_ex_gold, log_probs_ex_gold, probs_ex_gold = self.calculate_embedding_probs_and_logits(
             child_list, root)
 
         cutoff_prob = self.calc_probability_cutoff(probs)
 
         if len(child_list) > 0 and logits.nelement() > 0 and probs.nelement() > 0 and log_probs.nelement() > 0:
-            for i, (c, l, p, lb) in enumerate(zip(child_list, logits, probs, log_probs)):
-                c.logit = l
-                c.prob = p
-                c.log_prob = lb
+            for i, (child, logits, prob, log_prob, prob_ex_gold, log_prob_ex_gold) in enumerate(zip(child_list, logits, probs, log_probs, probs_ex_gold, log_probs_ex_gold)):
+                child.logit = logits
+                child.prob = prob
+                child.log_prob = log_prob
 
-                calc_prob = c.prob
+                child.prob_ex_gold = prob_ex_gold
+                child.log_prob_ex_gold = log_prob_ex_gold
 
-                if c.gold:
+                calc_prob = child.prob
+
+                if child.gold:
                     pass
                 elif calc_prob < cutoff_prob:
-                    c.parent = None
+                    child.parent = None
                     root.children = root.children[: i] + root.children[i + 1:]
 
             self._calculate_distances(child_list, parent_story_tensor, child_story_tensors)
@@ -306,6 +315,12 @@ class UncertainReaderGenPredictor(Predictor):
         return cutoff_prob
 
     def calculate_embedding_probs_and_logits(self, child_list, root):
+
+        gold_index = 0
+        for i, c in enumerate(child_list):
+            if c.gold == True:
+                gold_index = i
+
         parent_story_tensor = root.story_tensor
         parent_story_tensor = torch.unsqueeze(parent_story_tensor, dim=0).to(self._device)
         story_tensors_list = [s.story_tensor for s in child_list]
@@ -339,14 +354,21 @@ class UncertainReaderGenPredictor(Predictor):
         logits = self._model.calculate_logits(parent_story_tensor_fwd,
                                               child_story_tensors_fwd)
 
-        probs = self._softmax(logits / self._discrimination_temperature)
+        logits_exclude_gold = logits.detach().clone()
+        logits_exclude_gold[0, gold_index] = 0.0 # Zero rather than remove to keep the dims the same.
 
+        log_probs, logits, probs = self.logits_to_probs(logits)
+        log_probs_ex_gold, logits_ex_gold, probs_ex_gold = self.logits_to_probs(logits_exclude_gold)
+
+        return child_story_tensors, parent_story_tensor, logits, log_probs, probs, logits_ex_gold, log_probs_ex_gold, probs_ex_gold
+
+    def logits_to_probs(self, logits):
+        probs = self._softmax(logits / self._discrimination_temperature)
         log_probs = torch.log(probs)
         logits = torch.squeeze(logits)
-
         probs = torch.squeeze(probs)
         log_probs = torch.squeeze(log_probs)
-        return child_story_tensors, log_probs, logits, parent_story_tensor, probs
+        return log_probs, logits, probs
 
     def _run_feedforward(self, child_story_tensors, parent_story_tensor):
         if self._model._story_feedforward is not None:
@@ -423,6 +445,7 @@ class UncertainReaderGenPredictor(Predictor):
             position_node = AnyNode(name=f"{position}", story_id=story_id,
                                     sentence_id=sentence_id,
                                     sentence_num=sentence_num,
+                                    number_of_sentences=metadata[0]["number_of_sentences"],
                                     sentence_text=sentence_text,
                                     sentiment=sentiment,
                                     vader_sentiment=vader_sent,
@@ -449,11 +472,11 @@ class UncertainReaderGenPredictor(Predictor):
 
                 # Calculate suspense across the tree and merge into the base.
                 if self.generate_per_branch > 0:
-                    metrics = self._calc_state_based_suspense(base_generated, type="generated")
+                    metrics = self._calc_state_based_suspense(base_generated, position_node, type="generated")
                     position_node.__dict__ = {**position_node.__dict__, **metrics}
 
                 if self.sample_per_level_branch > 0:
-                    metrics = self._calc_state_based_suspense(base_corpus, type="corpus")
+                    metrics = self._calc_state_based_suspense(base_corpus, position_node, type="corpus")
                     position_node.__dict__ = {**position_node.__dict__, **metrics}
 
         self._calc_summary_stats(root)
@@ -781,27 +804,41 @@ class UncertainReaderGenPredictor(Predictor):
             type = "generated"
             stats_source_dict = {**stats_source_dict, **{f"{type}_surprise_word_overlap": [],
                                                          f"{type}_surprise_simple_embedding": [],
-                                                         f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
-                                                         f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
+                                                         f"{type}_suspense_l1": [],
+                                                         f"{type}_suspense_l2": [],
                                                          f"{type}_suspense_l1_state": [],
                                                          f"{type}_suspense_l2_state": [],
+                                                         f"{type}_suspense_entropy": [],
+                                                         f"{type}_suspense_l1_ex_gold": [],
+                                                         f"{type}_suspense_l2_ex_gold": [],
+                                                         f"{type}_suspense_l1_state_ex_gold": [],
+                                                         f"{type}_suspense_l2_state_ex_gold": [],
+                                                         f"{type}_suspense_entropy_ex_gold": [],
                                                          f"{type}_surprise_l1_state": [],
                                                          f"{type}_surprise_l2_state": [],
-                                                         f"{type}_suspense_entropy": [],
-                                                         f"{type}_surprise_entropy": []}}
+                                                         f"{type}_surprise_entropy": [],
+                                                         f"{type}_surprise_l1": [],
+                                                         f"{type}_surprise_l2": []}}
 
         if self.sample_per_level_branch > 0:
             type = "corpus"
             stats_source_dict = {**stats_source_dict, **{f"{type}_surprise_word_overlap": [],
                                                          f"{type}_surprise_simple_embedding": [],
-                                                         f"{type}_suspense_l1": [], f"{type}_suspense_l2": [],
-                                                         f"{type}_surprise_l1": [], f"{type}_surprise_l2": [],
+                                                         f"{type}_suspense_l1": [],
+                                                         f"{type}_suspense_l2": [],
                                                          f"{type}_suspense_l1_state": [],
                                                          f"{type}_suspense_l2_state": [],
+                                                         f"{type}_suspense_entropy": [],
+                                                         f"{type}_suspense_l1_ex_gold": [],
+                                                         f"{type}_suspense_l2_ex_gold": [],
+                                                         f"{type}_suspense_l1_state_ex_gold": [],
+                                                         f"{type}_suspense_l2_state_ex_gold": [],
+                                                         f"{type}_suspense_entropy_ex_gold": [],
                                                          f"{type}_surprise_l1_state": [],
                                                          f"{type}_surprise_l2_state": [],
-                                                         f"{type}_suspense_entropy": [],
-                                                         f"{type}_surprise_entropy": []}}
+                                                         f"{type}_surprise_entropy": [],
+                                                         f"{type}_surprise_l1": [],
+                                                         f"{type}_surprise_l2": []}}
 
         story_id = -1
         for n in PreOrderIter(root, only_position_nodes):
@@ -870,7 +907,7 @@ class UncertainReaderGenPredictor(Predictor):
                 except:
                     pass
 
-    def _calc_state_based_suspense(self, root, type="generated"):
+    def _calc_state_based_suspense(self, root, position_node, type="generated"):
         # Use to keep results
         metrics_dict = {}
 
@@ -881,17 +918,21 @@ class UncertainReaderGenPredictor(Predictor):
         suspense_l2_culm = 0.0
         surprise_l1_culm = 0.0
         surprise_l2_culm = 0.0
-
         suspense_l1_culm_state = 0.0
         suspense_l2_culm_state = 0.0
         surprise_l1_culm_state = 0.0
         surprise_l2_culm_state = 0.0
 
+        suspense_l1_culm_ex_gold = 0.0
+        suspense_l2_culm_ex_gold = 0.0
+        suspense_l1_culm_state_ex_gold = 0.0
+        suspense_l2_culm_state_ex_gold = 0.0
+
         suspense_entropy = 0.0
+        suspense_entropy_ex_gold = 0.0
 
         steps_counter = 0
 
-        surprise_entropy = 0.0
         surprise_entropy_culm = 0.0
         # Iterate and add chain probabilities through the tree structure.
         for i, node_group in enumerate(LevelOrderGroupIter(root, only_state_nodes), start=0):
@@ -946,23 +987,27 @@ class UncertainReaderGenPredictor(Predictor):
             steps_counter += 1
 
             probs = torch.stack([n.chain_prob for n in node_group]).to(self._device)
+            probs_ex_gold = torch.stack([n.chain_prob_ex_gold for n in node_group]).to(self._device)
 
             sentiments_list = [n.sentiment for n in node_group if hasattr(n, 'sentiment')]
 
             sentiments = torch.tensor(sentiments_list).to(self._device)
 
-            distribution = Categorical(probs)
-
-            suspense_entropy = distribution.entropy().cpu().item()
-            metrics_dict[f"{type}_suspense_entropy_{i}"] = suspense_entropy
+            metrics_dict[f"{type}_suspense_entropy_{i}"]  =  Categorical(probs).entropy().cpu().item()
+            metrics_dict[f"{type}_suspense_entropy_ex_gold_{i}"]  =  Categorical(probs_ex_gold).entropy().cpu().item()
 
             parent_l1 = torch.stack([n.parent_distance_l1 for n in node_group]).to(self._device)
             parent_l2 = torch.stack([n.parent_distance_l2 for n in node_group]).to(self._device)
 
-            l1_probs = parent_l1 * probs
-            l2_probs = parent_l2 * probs
-            l1_probs_state = parent_l1 * sentiments * probs
-            l2_probs_state = parent_l2 * sentiments * probs
+            l1_probs = parent_l1 * probs * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+            l2_probs = parent_l2 * probs * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+            l1_probs_state = parent_l1 * sentiments * probs * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+            l2_probs_state = parent_l2 * sentiments * probs * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+
+            l1_probs_ex_gold = parent_l1 * probs_ex_gold * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+            l2_probs_ex_gold = parent_l2 * probs_ex_gold * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+            l1_probs_state_ex_gold = parent_l1 * sentiments * probs_ex_gold * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
+            l2_probs_state_ex_gold = parent_l2 * sentiments * probs_ex_gold * time_discount(sentence_num=position_node.sentence_num, number_of_sentences=position_node.number_of_sentences)
 
             suspense_l1_culm, suspense_l1_stat = self._culm_stat(l1_probs, suspense_l1_culm)
             metrics_dict[f"{type}_suspense_l1_{i}"] = suspense_l1_stat
@@ -976,8 +1021,21 @@ class UncertainReaderGenPredictor(Predictor):
             suspense_l2_culm_state, suspense_l2_stat_state = self._culm_stat(l2_probs_state, suspense_l2_culm_state)
             metrics_dict[f"{type}_suspense_l2_state_{i}"] = suspense_l2_stat_state
 
+            suspense_l1_culm_ex_gold, suspense_l1_stat_ex_gold = self._culm_stat(l1_probs_ex_gold, suspense_l1_culm_ex_gold)
+            metrics_dict[f"{type}_suspense_l1_ex_gold{i}"] = suspense_l1_stat_ex_gold
+
+            suspense_l2_culm_ex_gold, suspense_l2_stat_ex_gold = self._culm_stat(l2_probs_ex_gold, suspense_l2_culm_ex_gold)
+            metrics_dict[f"{type}_suspense_l2_ex_gold{i}"] = suspense_l2_stat_ex_gold
+
+            suspense_l1_culm_state_ex_gold, suspense_l1_stat_state_ex_gold = self._culm_stat(l1_probs_state_ex_gold, suspense_l1_culm_state_ex_gold)
+            metrics_dict[f"{type}_suspense_l1_state_ex_gold_{i}"] = suspense_l1_stat_state_ex_gold
+
+            suspense_l2_culm_state_ex_gold, suspense_l2_stat_state_ex_gold = self._culm_stat(l2_probs_state_ex_gold, suspense_l2_culm_state_ex_gold)
+            metrics_dict[f"{type}_suspense_l2_state_ex_gold_{i}"] = suspense_l2_stat_state_ex_gold
+
         # Use the last value for the main suspense.
         metrics_dict[f"{type}_suspense_entropy"] = suspense_entropy
+        metrics_dict[f"{type}_suspense_entropy_ex_gold"] = suspense_entropy_ex_gold
         metrics_dict[f"{type}_surprise_entropy"] = surprise_entropy_culm
 
         # print("Calculated", surprise_word_overlap_culm, surprise_simple_embedding_culm)
@@ -986,12 +1044,17 @@ class UncertainReaderGenPredictor(Predictor):
 
         metrics_dict[f"{type}_suspense_l1"] = suspense_l1_culm
         metrics_dict[f"{type}_suspense_l2"] = suspense_l2_culm
+        metrics_dict[f"{type}_suspense_l1_ex_gold"] = suspense_l1_culm_ex_gold
+        metrics_dict[f"{type}_suspense_l2_ex_gold"] = suspense_l2_culm_ex_gold
 
         metrics_dict[f"{type}_surprise_l1"] = surprise_l1_culm
         metrics_dict[f"{type}_surprise_l2"] = surprise_l2_culm
 
         metrics_dict[f"{type}_suspense_l1_state"] = suspense_l1_culm_state
         metrics_dict[f"{type}_suspense_l2_state"] = suspense_l2_culm_state
+
+        metrics_dict[f"{type}_suspense_l1_state_ex_gold"] = suspense_l1_culm_state_ex_gold
+        metrics_dict[f"{type}_suspense_l2_state_ex_gold"] = suspense_l2_culm_state_ex_gold
 
         metrics_dict[f"{type}_surprise_l1_state"] = surprise_l1_culm_state
         metrics_dict[f"{type}_surprise_l2_state"] = surprise_l2_culm_state
@@ -1017,9 +1080,15 @@ class UncertainReaderGenPredictor(Predictor):
             node.chain_prob = node.prob
             node.chain_log_prob = node.log_prob
 
+            node.chain_prob_ex_gold = node.prob_ex_gold
+            node.chain_log_prob_ex_gold = node.log_prob_ex_gold
+
             if node.parent is not None and hasattr(node.parent, "chain_prob"):
                 node.chain_prob *= node.parent.chain_prob
                 node.chain_log_prob += node.parent.chain_log_prob
+
+                node.chain_prob_ex_gold *= node.parent.chain_prob_ex_gold
+                node.chain_log_prob_ex_gold += node.parent.chain_log_prob_ex_gold
 
     def generate_sentence(self, position, indexed_tokens, encoded_story):
 
