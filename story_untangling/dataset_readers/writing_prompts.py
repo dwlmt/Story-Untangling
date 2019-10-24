@@ -11,7 +11,8 @@ from allennlp.data.dataset_readers.dataset_reader import DatasetReader
 from allennlp.data.fields import TextField, MetadataField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
-from allennlp.data.tokenizers import Tokenizer, WordTokenizer
+from allennlp.data.tokenizers import Tokenizer
+from allennlp.data.tokenizers.word_tokenizer import WordTokenizer
 from overrides import overrides
 
 from story_untangling.dataset_readers.dataset_features import create_dataset_db, negative_sentence_sampler

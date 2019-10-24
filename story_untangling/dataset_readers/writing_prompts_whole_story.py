@@ -16,7 +16,8 @@ from allennlp.data.fields import TextField, MetadataField, ListField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
-from allennlp.data.tokenizers import Tokenizer, WordTokenizer
+from allennlp.data.tokenizers import Tokenizer
+from allennlp.data.tokenizers.word_tokenizer import WordTokenizer
 from nostril import nonsense
 from overrides import overrides
 from spacy.lang.en import STOP_WORDS
@@ -146,8 +147,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         batch_num = 0
 
-        # tensors = self.block_memory()
-        # self.unblock_memory(tensors)
+        #tensors = self.block_memory()
+        #self.unblock_memory(tensors)
 
         dataset_db = self.create_cached_dataset(file_path)
 
