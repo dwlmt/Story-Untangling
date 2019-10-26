@@ -483,6 +483,9 @@ class UncertainReaderGenPredictor(Predictor):
                     metrics = self._calc_state_based_suspense(base_corpus, position_node, type="corpus")
                     position_node.__dict__ = {**position_node.__dict__, **metrics}
 
+                for node in PreOrderIter(position_node, only_probability_nodes):
+                    self.convert_node(node)
+
         self._calc_summary_stats(root)
 
         return root
@@ -560,7 +563,7 @@ class UncertainReaderGenPredictor(Predictor):
                     self._calculate_disc_probabilities(parent)
                     self._calc_chain_probs(parent)
 
-                    self.convert_node(parent)
+                    self.del_tensors_on_node(parent)
 
                 new_parents.extend(list(parent.children))
 
@@ -575,7 +578,7 @@ class UncertainReaderGenPredictor(Predictor):
                 #print("Retained: ", [(p.chain_prob, p.prob, p.gold, p.sentence_text) for p in parents])
 
             for node in PreOrderIter(base_correct, only_tensor_nodes):
-                self.convert_node(node)
+                self.del_tensors_on_node(node)
 
             return base_correct
 
@@ -646,7 +649,7 @@ class UncertainReaderGenPredictor(Predictor):
                     self._calculate_disc_probabilities(parent)
                     self._calc_chain_probs(parent)
 
-                    self.convert_node(parent)
+                    self.del_tensors_on_node(parent)
 
                     new_parents.extend(list(parent.children))
 
@@ -661,7 +664,7 @@ class UncertainReaderGenPredictor(Predictor):
                 #print("Retained: ", [(p.chain_prob, p.prob, p.gold, p.sentence_text) for p in parents])
 
             for node in PreOrderIter(base_correct, only_tensor_nodes):
-                self.convert_node(node)
+                self.del_tensors_on_node(node)
 
             return base_correct
 
