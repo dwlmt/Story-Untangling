@@ -195,7 +195,7 @@ dependencies:
     - pyasn1==0.4.7
     - pyasn1-modules==0.2.7
     - pydictionary==1.5.2
-    - pyenchant==2.0.0
+    #- pyenchant==2.0.0
     - pyfasttext==0.4.6
     - pygments==2.4.2
     - pytest==5.2.2

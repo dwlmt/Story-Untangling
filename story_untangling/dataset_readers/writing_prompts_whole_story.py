@@ -4,7 +4,6 @@ import textwrap
 from typing import Dict, List, Union, Any
 
 import dataset
-import enchant
 
 import more_itertools
 import nltk
@@ -134,8 +133,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             self._tried_tokens.add(t)
 
         self._py_dictionary = PyDictionary()
-        self._enchant_dict_us = enchant.Dict("en_US")
-        self._enchant_dict_uk = enchant.Dict("en_UK")
 
         self._seen_datasets = set()
 
@@ -366,10 +363,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         def lookup_tokens(token_text):
 
             add_token = False
-            if self._enchant_dict_us.check(token_text) or self._enchant_dict_uk.check(token_text):
-                print("Enchant Dictionary", token_text)
-                add_token = True
-            elif self._py_dictionary.meaning(token_text) != None:
+            if self._py_dictionary.meaning(token_text) != None:
                 print("Py Dictionary", token_text)
                 add_token = True
             else:
