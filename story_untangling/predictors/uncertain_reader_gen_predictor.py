@@ -130,7 +130,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.story_ids_to_predict = set(story_id_df['story_id'])
         self.only_annotation_stories = True
 
-        self.levels_to_rollout = 1
+        self.levels_to_rollout = 2
         self.generate_per_branch = 100
         self.sample_per_level_branch = 100
 
@@ -759,12 +759,12 @@ class UncertainReaderGenPredictor(Predictor):
 
                 sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
 
-                created_node = AnyNode(gold=False, story_tensor=encoded_story.detach(),
-                                       sentence_tensor=encoded_sentence.detach(),
+                created_node = AnyNode(gold=False, story_tensor=encoded_story.cpu().detach(),
+                                       sentence_tensor=encoded_sentence.cpu().detach(),
                                        token_ids=token_ids,
                                        level=level,
-                                       embedded_text_tensor=embedded_text_tensor.detach(),
-                                       embedded_text_mask=embedded_text_mask.detach(),
+                                       embedded_text_tensor=embedded_text_tensor.cpu().detach(),
+                                       embedded_text_mask=embedded_text_mask.cpu().detach(),
                                        sentence_text=sentence_text,
                                        sentence_length=sentence_length, type="corpus",
                                        story_id=story_id, sentence_id=sentence_id, sentence_num=sentence_num,
@@ -1202,11 +1202,11 @@ class UncertainReaderGenPredictor(Predictor):
                 sentiment, vader, textblob = self._calc_simple_sentiment(sentence_text)
 
                 created_node = AnyNode(gold=False,
-                                       story_tensor=encoded_story.detach(),
+                                       story_tensor=encoded_story.cpu().detach(),
                                        sentence_tensor=encoded_sentence.detach(),
-                                       embedded_text_tensor=embedded_text_tensor.detach(),
-                                       embedded_text_mask=embedded_text_mask.detach(),
-                                       indexed_tokens=indexed_tokens.detach(),
+                                       embedded_text_tensor=embedded_text_tensor.cpu().detach(),
+                                       embedded_text_mask=embedded_text_mask.cpu().detach(),
+                                       indexed_tokens=indexed_tokens.cpu().detach(),
                                        token_ids=gen_sentence,
                                        level=level,
                                        sentence_text=sentence_text,
