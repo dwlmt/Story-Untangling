@@ -17,6 +17,7 @@ import plotly.io as pio
 # These are the default plotly colours.
 from scipy.signal import find_peaks
 from scipy.stats import kendalltau, spearmanr, pearsonr
+from sklearn.preprocessing import StandardScaler
 
 colors = ['rgb(31, 119, 180)', 'rgb(255, 127, 14)',
           'rgb(44, 160, 44)', 'rgb(214, 39, 40)',
@@ -125,7 +126,7 @@ def analyse_vector_stats(args):
 
 def create_cluster_examples(args):
 
-    if "vector_stats" not in args or len(args["vector_stats"] == 0):
+    if args["vectors_stats"] is None or len(args["vector_stats"]) == 0:
         return
 
     metadata_fields = ["story_id", 'sentence_num', 'sentence_id', "sentence_text", "transition_text"]
@@ -186,7 +187,7 @@ def create_cluster_examples(args):
 
 def create_cluster_scatters(args):
 
-    if "vector_stats" not in args or len(args["vector_stats"] == 0):
+    if  args["vectors_stats"] is None  or len(args["vector_stats"]) == 0:
         return
 
     vector_df = pd.read_csv(args["vector_stats"])
@@ -314,7 +315,7 @@ def create_cluster_scatters(args):
 
 def create_sentiment_plots(args):
 
-    if "position_stats" not in args or len(args["position_stats"] == 0):
+    if  args["position_stats"] is None or len(args["position_stats"]) == 0:
         return
 
     ensure_dir(f"{args['output_dir']}/sentiment_plots/")
@@ -376,22 +377,7 @@ def create_sentiment_plots(args):
             print(f"Save plot pdf: {file_path}")
             pio.write_image(fig, file_path)
 
-
-def create_story_plots(args):
-    if "position_stats" not in args or len(args["position_stats"] == 0):
-        return
-
-    ensure_dir(f"{args['output_dir']}/prediction_plots/")
-
-    turning_points_df = None
-    if "turning_points_csv" in args and args["turning_points_csv"] is not None:
-        turning_points_df = pd.read_csv(args["turning_points_csv"])
-        turning_points_df = turning_points_df.fillna(value=0.0)
-
-    position_df = pd.read_csv(args["position_stats"])
-    position_df = position_df.fillna(value=0.0)
-
-    prediction_columns = ["generated_surprise_word_overlap",
+prediction_columns = ["generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
                           'generated_surprise_l1', 'generated_surprise_l2'
         , 'generated_suspense_l1', 'generated_suspense_l2',
@@ -407,6 +393,34 @@ def create_story_plots(args):
                           'generated_suspense_l1_state', 'generated_suspense_l2_state',
                           'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
                           'corpus_suspense_l1_state', 'corpus_suspense_l2_state']
+
+def scale_prediction_columns(position_df):
+    for col in prediction_columns:
+
+        if col not in position_df.columns:
+            continue
+
+        scaler = StandardScaler()
+        scaled_col = numpy.squeeze(scaler.fit_transform(position_df[col].to_numpy().reshape(-1, 1)), axis=1).tolist()
+        position_df[f"{col}_scaled"] = scaled_col
+    return position_df
+
+def create_story_plots(args):
+    if  args["position_stats"] is None or len(args["position_stats"]) == 0:
+        return
+
+    ensure_dir(f"{args['output_dir']}/prediction_plots/")
+
+    turning_points_df = None
+    if "turning_points_csv" in args and args["turning_points_csv"] is not None:
+        turning_points_df = pd.read_csv(args["turning_points_csv"])
+        turning_points_df = turning_points_df.fillna(value=0.0)
+
+    position_df = pd.read_csv(args["position_stats"])
+
+    position_df = scale_prediction_columns(position_df)
+
+    position_df = position_df.fillna(value=0.0)
 
     window_df = pd.read_csv(args["window_stats"])
     window_sizes = window_df["window_size"].unique()
