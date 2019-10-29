@@ -165,6 +165,7 @@ class UncertainReaderGenPredictor(Predictor):
         self.dataset_reader = dataset_reader
         self.dataset_reader._story_chunking = 200  # Allow bigger batching for sampling.
         #self.dataset_reader._marked_sentences = True
+        #self.dataset_reader._dataset_path = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text/"
 
         self.tokenizer = dataset_reader._tokenizer
         self.indexer = dataset_reader._token_indexers["openai_transformer"]
