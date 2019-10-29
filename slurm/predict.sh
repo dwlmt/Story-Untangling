@@ -19,39 +19,46 @@ echo ${dt}
 
 # Env variables
 export STUDENT_ID=${USER}
-export SCRATCH_HOME="/disk/scratch/${STUDENT_ID}"
-export CLUSTER_HOME="/home/${STUDENT_ID}"
-export EXP_ROOT="${CLUSTER_HOME}/suspense/acl20"
 
-export SERIAL_DIR="${SCRATCH_HOME}/suspense_acl20_exps/${EXP_NAME}"
+if [ -d "/disk/scratch1" ]; then
+export SCRATCH_ROOT=/disk/scratch1/s1569885/
+elif [ -d "/disk/scratch2" ]; then
+ export SCRATCH_ROOT=/disk/scratch2/s1569885/
+elif [ -d "/disk/scratch" ]; then
+ export SCRATCH_ROOT=/disk/scratch/s1569885/
+else
+ export SCRATCH_ROOT=/disk/scratch_big/s1569885/
+fi
+
+export SCRATCH_HOME="/${SCRATCH_ROOT}/${STUDENT_ID}"
+export ALLENNLP_CACHE_ROOT="${SCRATCH_HOME}/allennlp_cache_root"
+
+export CLUSTER_HOME="/home/${STUDENT_ID}"
+export EXP_ROOT="${CLUSTER_HOME}/git/Story_Untangling/"
+
+export SERIAL_DIR="${SCRATCH_HOME}/suspense_acl20/${EXP_NAME}"
 
 # Ensure the scratch home exists and CD to the experiment root level.
 mkdir -p "${SCRATCH_HOME}"
 cd "${EXP_ROOT}" # helps AllenNLP behave
 
-# Serialisation Directory for AllenNLP is the experiment folder
-if [[ ! -f ${EXP_CONFIG} ]]; then
-    echo "Config file ${EXP_CONFIG} is invalid, quitting..."
-    exit 1
-fi
 mkdir -p ${SERIAL_DIR}
 
 echo "ALLENNLP Task========"
-allennlp train "${EXP_CONFIG}" \
-    --serialization-dir "${SERIAL_DIR}" \
-    --include-package story_untangling \
 
 allennlp predict --include-package story_untangling \
     --use-dataset-reader \
     --predictor uncertain_reader_gen_predictor \
-    /afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/training_models/movies_finetune/lstm_fusion_big/ \
-    /afs/inf.ed.ac.uk/group/project/comics/TRIPOD_dataset/test.txt --cuda-device 0 \
-    --output-file /afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/prediction_output/tripod/finetuned_models/cosine_100_lstm_test_exc_gold.jsonl \
+     ${CLUSTER_HOME}/stories/WritingPrompts/training_models/full_epoch/lstm_fusion_big/ \
+     ${CLUSTER_HOME}/stories/WritingPrompts/datasets/test_wp.target --cuda-device 0 \
+    --output-file  ${SERIAL_DIR}/${EXP_NAME}_prediction_output.jsonl \
 
 echo "============"
-echo "training finished successfully"
+echo "ALLENNLP Task finished"
 
 rsync -avuzhP "${SERIAL_DIR}" "${EXP_ROOT}/runs/cluster/" # Copy output onto headnode
+
+rm -rf "${SERIAL_DIR}/"
 
 echo "============"
 echo "results synced"
