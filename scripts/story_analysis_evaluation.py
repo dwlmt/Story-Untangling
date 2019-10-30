@@ -41,7 +41,7 @@ parser.add_argument("--cuda-device", default=0, type=int, help="The default CUDA
 
 args = parser.parse_args()
 
-model_prediction_columns = ["generated_surprise_word_overlap",
+model_prediction_columns = ["baseclass", "generated_surprise_word_overlap",
                             "generated_surprise_simple_embedding",
                             'generated_surprise_l1', 'generated_surprise_l2',
                             'generated_suspense_l1', 'generated_suspense_l2',
@@ -271,7 +271,7 @@ def features(feature_col, train_df):
 class RelativeToAbsoluteModel(torch.nn.Module):
 
     def __init__(self, origin_weight=0.0, big_decrease=-0.2, decrease=-0.1, same=0.0, increase=0.1, big_increase=0.2,
-                 epsilon=0.01):
+                 epsilon=0.02):
         super(RelativeToAbsoluteModel, self).__init__()
         self.origin = torch.nn.Linear(1, 1, bias=False)
         self.big_decrease = torch.nn.Linear(1, 1, bias=False)
@@ -628,6 +628,8 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
 
     position_df = scale_prediction_columns(position_df)
 
+    generated_surprise_word_overlap
+
     colors = plotly.colors.DEFAULT_PLOTLY_COLORS
 
     story_ids = merged_sentence_df["story_id"].unique()
@@ -749,8 +751,12 @@ def evaluate_stories(args):
     ensure_dir(f"{args['output_dir']}/sentence_model_evaluation/")
 
     position_df = pd.read_csv(args["position_stats"])
+
+    position_df["baseclass"] = 0.0
+
     print(f"Position rows : {len(position_df)}")
     annotator_df = pd.read_csv(args["annotator_targets"])
+
 
     if args["exclude_worker_ids"] is not None and len(args["exclude_worker_ids"]) > 0:
         annotator_df = annotator_df[~annotator_df["worker_id"].isin(args["exclude_worker_ids"])]
