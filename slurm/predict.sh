@@ -40,7 +40,7 @@ export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
 export SERIAL_DIR="${SCRATCH_HOME}/suspense_acl20/${EXP_NAME}"
 
 # Predictor specific variables.
-export DATASET_READER="/home/s1569885/comics/stories/WritingPrompts/dataset_db/text/"
+export DATASET_PATH="/home/s1569885/comics/stories/WritingPrompts/dataset_db/text/"
 export PREDICTION_STORY_ID_FILE="/home/s1569885/comics/stories/WritingPrompts/annotation_results/raw/story_id_test_1.csv"
 export PREDICTION_ONLY_ANNOTATION_STORIES=TRUE
 export PREDICTION_LEVELS_TO_ROLLOUT=1
