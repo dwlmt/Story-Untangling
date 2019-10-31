@@ -165,7 +165,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         self.dataset_reader = dataset_reader
         self.dataset_reader._story_chunking = 200  # Allow bigger batching for sampling.
-        self.dataset_reader._marked_sentences =  float(os.getenv('PREDICTION_MARKED_SENTENCE', False))
+        self.dataset_reader._marked_sentences =  bool(os.getenv('PREDICTION_MARKED_SENTENCE', False))
 
         if "DATASET_PATH" in os.environ:
             self.dataset_reader._dataset_path = os.getenv('DATASET_PATH')
