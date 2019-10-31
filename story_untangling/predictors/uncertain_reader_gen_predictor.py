@@ -1,4 +1,5 @@
 import copy
+import os
 from collections import OrderedDict
 from itertools import groupby
 
@@ -124,31 +125,31 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_witheld_splitab"
+        story_id_file =  str(os.getenv('PREDICTION_STORY_ID_FILE', "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_witheld_splitaa"))
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
-        self.only_annotation_stories = True
+        self.only_annotation_stories =  bool(os.getenv('PREDICTION_ONLY_ANNOTATION_STORIES', True))
 
-        self.levels_to_rollout = 2
-        self.generate_per_branch = 100
-        self.sample_per_level_branch = 100
+        self.levels_to_rollout = int(os.getenv('PREDICTION_LEVELS_TO_ROLLOUT', 1))
+        self.generate_per_branch = int(os.getenv('PREDICTION_GENERATE_PER_BRANCH', 100))
+        self.sample_per_level_branch = int(os.getenv('PREDICTION_SAMPLE_PER_BRANCH', 100))
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
 
 
-        self.global_beam_size = 10
-        self.sample_top_k_words = 50
-        self.windowing = True
+        self.global_beam_size =  int(os.getenv('PREDICTION_BEAM_SIZE', 10))
+        self.sample_top_k_words =  int(os.getenv('PREDICTION_SAMPLE_TOP_K_WORDS', 50))
+        self.windowing =  bool(os.getenv('PREDICTION_WINDOWING', True))
 
         self.min_sentence_length = 3
         self.max_generated_sentence_length = 300
-        self.context_sentence_to_generate_from = 16
+        self.context_sentence_to_generate_from = 24
 
-        self.sentiment_weighting = 1.0
-        self.sentiment_positive = 1.0
-        self.sentiment_negative = 2.0
+        self.sentiment_weighting =  float(os.getenv('PREDICTION_SENTIMENT_WEIGHTING', 1.0))
+        self.sentiment_positive = float(os.getenv('PREDICTION_SENTIMENT_POSITIVE_WEIGHTING', 1.0))
+        self.sentiment_negative = float(os.getenv('PREDICTION_SENTIMENT_NEGATIVE_WEIGHTING', 2.0))
 
         self._remove_sentence_output = True
 
@@ -164,8 +165,10 @@ class UncertainReaderGenPredictor(Predictor):
 
         self.dataset_reader = dataset_reader
         self.dataset_reader._story_chunking = 200  # Allow bigger batching for sampling.
-        #self.dataset_reader._marked_sentences = True
-        #self.dataset_reader._dataset_path = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/dataset_db/text/"
+        self.dataset_reader._marked_sentences =  float(os.getenv('PREDICTION_MARKED_SENTENCE', False))
+
+        if "DATASET_PATH" in os.environ:
+            self.dataset_reader._dataset_path = os.getenv('DATASET_PATH')
 
         self.tokenizer = dataset_reader._tokenizer
         self.indexer = dataset_reader._token_indexers["openai_transformer"]
