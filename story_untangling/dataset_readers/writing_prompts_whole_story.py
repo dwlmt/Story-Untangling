@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import textwrap
 from typing import Dict, List, Union, Any
 
@@ -114,6 +115,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._ner_model = ner_model
         self._coreference_model = coreference_model
         self._marked_sentences = marked_sentences
+
+        if "DATASET_PATH" in os.environ:
+            self._dataset_path = os.getenv('DATASET_PATH')
 
         self._cuda_device = cuda_device
 

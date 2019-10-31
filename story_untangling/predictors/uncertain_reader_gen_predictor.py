@@ -167,9 +167,6 @@ class UncertainReaderGenPredictor(Predictor):
         self.dataset_reader._story_chunking =  int(os.getenv('PREDICTION_CHUNKING_SIZE', 200))  # Allow bigger batching for sampling.
         self.dataset_reader._marked_sentences =  bool(os.getenv('PREDICTION_MARKED_SENTENCE', False))
 
-        if "DATASET_PATH" in os.environ:
-            self.dataset_reader._dataset_path = os.getenv('DATASET_PATH')
-
         self.tokenizer = dataset_reader._tokenizer
         self.indexer = dataset_reader._token_indexers["openai_transformer"]
 
