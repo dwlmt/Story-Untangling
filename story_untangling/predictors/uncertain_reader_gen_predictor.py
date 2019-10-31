@@ -156,15 +156,15 @@ class UncertainReaderGenPredictor(Predictor):
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
 
-        self._generation_sampling_temperature = 1.0
-        self._discrimination_temperature = 1.0
-        self._cosine = True
+        self._generation_sampling_temperature = float(os.getenv('PREDICTION_GENERATION_SAMPLING_TEMPERATURE', 1.0))
+        self._discrimination_temperature = float(os.getenv('PREDICTION_DISCRIMINATION_SAMPLING_TEMPERATURE', 1.0))
+        self._cosine = bool(os.getenv('PREDICTION_USE_COSINE', True))
 
         self.embedder = model._text_field_embedder._token_embedders["openai_transformer"]
         self.embedder._top_layer_only = True
 
         self.dataset_reader = dataset_reader
-        self.dataset_reader._story_chunking = 200  # Allow bigger batching for sampling.
+        self.dataset_reader._story_chunking =  int(os.getenv('PREDICTION_CHUNKING_SIZE', 200))  # Allow bigger batching for sampling.
         self.dataset_reader._marked_sentences =  bool(os.getenv('PREDICTION_MARKED_SENTENCE', False))
 
         if "DATASET_PATH" in os.environ:
