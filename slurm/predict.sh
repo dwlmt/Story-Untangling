@@ -37,7 +37,8 @@ export NLTK_DATA="${CLUSTER_HOME}/nltk_data/"
 export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
 export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
 
-export SERIAL_DIR="${SCRATCH_HOME}/suspense_acl20/${EXP_NAME}"
+export SERIAL_DIR="${SCRATCH_HOME}/${EXP_NAME}"
+
 
 # Predictor specific variables.
 export DATASET_PATH="/home/s1569885/comics/stories/WritingPrompts/dataset_db/text/"
@@ -67,14 +68,14 @@ allennlp predict --include-package story_untangling \
     --predictor uncertain_reader_gen_predictor \
      ${CLUSTER_HOME}/comics/stories/WritingPrompts/training_models/full_epoch/lstm_fusion_big/ \
      ${CLUSTER_HOME}/comics/stories/WritingPrompts/datasets/test.wp_target --cuda-device 0 \
-    --output-file  ${SERIAL_DIR}/${EXP_NAME}_prediction_output.jsonl \
+    --output-file  ${SERIAL_DIR}/${EXP_NAME}/${EXP_NAME}_prediction_output.jsonl \
 
 echo "============"
 echo "ALLENNLP Task finished"
 
-rsync -avuzhP "${SERIAL_DIR}" "${EXP_ROOT}/runs/cluster/" # Copy output onto headnode
+rsync -avuzhP "${SERIAL_DIR}" "${CLUSTER_HOME}/runs/cluster/" # Copy output onto headnode
 
-rm -rf "${SERIAL_DIR}/"
+rm -rf "${SERIAL_DIR}/${EXP_NAME}"
 
 echo "============"
 echo "results synced"
