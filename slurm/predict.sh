@@ -4,7 +4,6 @@
 #SBATCH -N 1	  # nodes requested
 #SBATCH -n 1	  # tasks requested
 #SBATCH --gres=gpu:1  # use 1 GPU
-#SBATCH --mem=14000  # memory in Mb
 #SBATCH -t 12:00:00  # time requested in hour:minute:seconds
 #SBATCH --cpus-per-task=4  # number of cpus to use - there are 32 on each node.
 
@@ -21,13 +20,13 @@ echo ${dt}
 export STUDENT_ID=${USER}
 
 if [ -d "/disk/scratch1" ]; then
-export SCRATCH_ROOT=/disk/scratch1/s1569885/
+export SCRATCH_ROOT=/disk/scratch1/
 elif [ -d "/disk/scratch2" ]; then
- export SCRATCH_ROOT=/disk/scratch2/s1569885/
+ export SCRATCH_ROOT=/disk/scratch2/
 elif [ -d "/disk/scratch" ]; then
- export SCRATCH_ROOT=/disk/scratch/s1569885/
+ export SCRATCH_ROOT=/disk/scratch/
 else
- export SCRATCH_ROOT=/disk/scratch_big/s1569885/
+ export SCRATCH_ROOT=/disk/scratch_big/
 fi
 
 export SCRATCH_HOME="/${SCRATCH_ROOT}/${STUDENT_ID}"
