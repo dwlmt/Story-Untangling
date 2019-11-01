@@ -125,7 +125,7 @@ class UncertainReaderGenPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file =  str(os.getenv('PREDICTION_STORY_ID_FILE', "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_witheld_splitaa"))
+        story_id_file =  str(os.getenv('PREDICTION_STORY_ID_FILE', "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_splitaa"))
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
@@ -133,7 +133,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         self.levels_to_rollout = int(os.getenv('PREDICTION_LEVELS_TO_ROLLOUT', 1))
         self.generate_per_branch = int(os.getenv('PREDICTION_GENERATE_PER_BRANCH', 100))
-        self.sample_per_level_branch = int(os.getenv('PREDICTION_SAMPLE_PER_BRANCH', 100))
+        self.sample_per_level_branch = int(os.getenv('PREDICTION_SAMPLE_PER_BRANCH',100))
 
         self.max_leaves_to_keep_per_branch = 0
         self.probability_mass_to_keep_per_branch = 0.0
@@ -266,8 +266,8 @@ class UncertainReaderGenPredictor(Predictor):
         cutoff_prob = self.calc_probability_cutoff(probs)
 
         if len(child_list) > 0 and logits.nelement() > 0 and probs.nelement() > 0 and log_probs.nelement() > 0:
-            for i, (child, logits, prob, log_prob, prob_ex_gold, log_prob_ex_gold) in enumerate(zip(child_list, logits, probs, log_probs, probs_ex_gold, log_probs_ex_gold)):
-                child.logit = logits
+            for i, (child, logit, prob, log_prob, prob_ex_gold, log_prob_ex_gold) in enumerate(zip(child_list, logits, probs, log_probs, probs_ex_gold, log_probs_ex_gold)):
+                child.logit = logit
                 child.prob = prob
                 child.log_prob = log_prob
 
