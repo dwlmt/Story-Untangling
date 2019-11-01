@@ -72,6 +72,7 @@ allennlp predict --include-package story_untangling \
 echo "============"
 echo "ALLENNLP Task finished"
 
+mkdir -p "${CLUSTER_HOME}/runs/cluster/"
 rsync -avuzhP "${SERIAL_DIR}" "${CLUSTER_HOME}/runs/cluster/" # Copy output onto headnode
 
 rm -rf "${SERIAL_DIR}/"
