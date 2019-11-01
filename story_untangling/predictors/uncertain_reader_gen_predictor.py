@@ -265,7 +265,14 @@ class UncertainReaderGenPredictor(Predictor):
 
         cutoff_prob = self.calc_probability_cutoff(probs)
 
-        if len(child_list) > 0 and logits.nelement() > 0 and probs.nelement() > 0 and log_probs.nelement() > 0:
+        def is_iterable(maybe_iterable):
+            try:
+                iter(maybe_iterable)
+                return True
+            except TypeError:
+                return False
+
+        if is_iterable(child_list) and is_iterable(logits) and is_iterable(probs) and is_iterable(log_probs) and is_iterable(probs_ex_gold) and is_iterable(log_probs,_ex_gold):
             for i, (child, logit, prob, log_prob, prob_ex_gold, log_prob_ex_gold) in enumerate(zip(child_list, logits, probs, log_probs, probs_ex_gold, log_probs_ex_gold)):
                 child.logit = logit
                 child.prob = prob
