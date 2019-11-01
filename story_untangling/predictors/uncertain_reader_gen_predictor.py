@@ -272,7 +272,7 @@ class UncertainReaderGenPredictor(Predictor):
             except TypeError:
                 return False
 
-        if is_iterable(child_list) and is_iterable(logits) and is_iterable(probs) and is_iterable(log_probs) and is_iterable(probs_ex_gold) and is_iterable(log_probs,_ex_gold):
+        if is_iterable(child_list) and is_iterable(logits) and is_iterable(probs) and is_iterable(log_probs) and is_iterable(probs_ex_gold) and is_iterable(log_probs_ex_gold):
             for i, (child, logit, prob, log_prob, prob_ex_gold, log_prob_ex_gold) in enumerate(zip(child_list, logits, probs, log_probs, probs_ex_gold, log_probs_ex_gold)):
                 child.logit = logit
                 child.prob = prob
