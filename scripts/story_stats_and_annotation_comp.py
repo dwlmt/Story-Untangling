@@ -638,7 +638,6 @@ def inter_annotator_agreement(merged_sentence_df, args):
                     worker_dict["spearman"] = spearman
                     worker_dict["spearman_p_value"] = spearman_p_value
 
-
                 worker_items.append(len(x_list))
 
                 t = AnnotationTask(data=worker_agreement_triples, distance=dist)
