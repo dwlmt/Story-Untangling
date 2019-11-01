@@ -2,7 +2,7 @@
 
 '''
 import collections
-from collections import OrderedDict
+from collections import OrderedDict, Iterable
 from itertools import combinations
 
 import argparse
@@ -35,14 +35,13 @@ parser.add_argument('--output-dir', required=True, type=str, help="CSV containin
 parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument("--folds", default=5, type=int, help="Folds in the cross validation.")
-parser.add_argument("--epochs", default=150, type=int, help="Number of Epochs for model fitting.")
+parser.add_argument("--epochs", default=50, type=int, help="Number of Epochs for model fitting.")
 parser.add_argument("--exclude-worker-ids", type=str, nargs="*", help="Workers to exclude form the annotations.")
 parser.add_argument("--cuda-device", default=0, type=int, help="The default CUDA device.")
 
 args = parser.parse_args()
 
-model_prediction_columns = ["baseclass", "generated_surprise_word_overlap",
-                            "generated_surprise_simple_embedding",
+model_prediction_columns = ["baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
                             'generated_surprise_l1', 'generated_surprise_l2',
                             'generated_suspense_l1', 'generated_suspense_l2',
                             'generated_suspense_entropy',
@@ -56,7 +55,8 @@ model_prediction_columns = ["baseclass", "generated_surprise_word_overlap",
                             'generated_surprise_l1_state', 'generated_surprise_l2_state',
                             'generated_suspense_l1_state', 'generated_suspense_l2_state',
                             'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
-                            'corpus_suspense_l1_state', 'corpus_suspense_l2_state']
+                            'corpus_suspense_l1_state', 'corpus_suspense_l2_state'
+                            ]
 
 annotator_prediction_column = "suspense"
 
@@ -389,9 +389,9 @@ def cont_worker_to_worker(args, train_df):
                 abs_evaluate_predictions(predictions, annotations, story_meta_dict)
                 worker_story_data.append(story_meta_dict)
 
-            abs_evaluate_predictions(comparison_one_all, comparison_two_all, results_dict)
+        abs_evaluate_predictions(comparison_one_all, comparison_two_all, results_dict)
 
-            worker_results_data.append(results_dict)
+        worker_results_data.append(results_dict)
 
         worker_results_df = pandas.DataFrame(data=worker_results_data)
         worker_results_df.to_csv(f"{args['output_dir']}/sentence_model_evaluation/worker_rel_to_abs.csv")
@@ -455,11 +455,11 @@ def cont_model_pred_to_ann(args, train_df):
 
                             abs_suspense = fitting_model(suspense)
 
-                            if len(model_predictions) == 0 or len(abs_suspense) == 0:
+                            if len(model_predictions) == 0 or len(abs_suspense) != len(model_predictions):
                                 continue
 
-                            comparison_one_all.append(abs_suspense.tolist())
-                            comparison_two_all.append(model_predictions.tolist())
+                            comparison_one_all.append(model_predictions.tolist())
+                            comparison_two_all.append(abs_suspense.tolist())
                             story_meta.append(meta_dict)
 
                             if abs_suspense.size(0) == model_predictions.size(0):
@@ -479,6 +479,7 @@ def cont_model_pred_to_ann(args, train_df):
                         abs_evaluate_predictions(predictions, annotations, story_meta_dict)
                         story_data.append(story_meta_dict)
 
+                    #print(comparison_one_all, comparison_two_all, results_dict)
                     abs_evaluate_predictions(comparison_one_all, comparison_two_all, results_dict)
 
                     results_data.append(results_dict)
@@ -542,27 +543,21 @@ def cont_model_predictions(args, train_df):
         f"{args['output_dir']}/sentence_model_evaluation/prediction_rel_to_abs_story.csv")
 
 
-def abs_evaluate_predictions(annotations, predictions, results_dict):
-    try:
-        if any(isinstance(el, list) for el in annotations):
+def abs_evaluate_predictions(predictions, annotations, results_dict):
 
-            coint_pred_to_ann = []
-            coint_ann_to_pred = []
-            cross_correlation_list = []
-            kendall_list = []
-            spearman_list = []
-            pearson_list = []
-            l1_distance_list = []
-            l2_distance_list = []
+    if any(isinstance(el, (list, tuple, Iterable)) for el in annotations):
 
-            for pred, ann in zip(predictions, annotations):
-                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
-                                                                          numpy.asarray(pred), autolag=None)
-                coint_ann_to_pred.append(coint_t)
+        coint_pred_to_ann = []
+        coint_ann_to_pred = []
+        cross_correlation_list = []
+        kendall_list = []
+        spearman_list = []
+        pearson_list = []
+        l1_distance_list = []
+        l2_distance_list = []
 
-                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred),
-                                                                          numpy.asarray(ann), autolag=None)
-                coint_pred_to_ann.append(coint_t)
+        for pred, ann in zip(predictions, annotations):
+            try:
 
                 cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
                 cross_correlation_list.append(numpy.mean(cross_correlation))
@@ -577,17 +572,42 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
                 l2_distance_list.append(distance.euclidean(pred, ann))
                 l1_distance_list.append(distance.cityblock(pred, ann))
 
-            results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
-            results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
-            results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
-            results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
-            results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
-            results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
-            results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
-            results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
+                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
+                                                                          numpy.asarray(pred), autolag=None)
+                coint_ann_to_pred.append(coint_t)
 
-        else:
+                coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(pred),
+                                                                          numpy.asarray(ann), autolag=None)
+                coint_pred_to_ann.append(coint_t)
 
+            except Exception as ex:
+                print(ex)
+
+        results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
+        results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
+        results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
+        results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
+        results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
+        results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
+        results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
+        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
+
+    else:
+
+        cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
+        results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
+
+        results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions,
+                                                                              annotations)
+        results_dict[f"kendall"], results_dict[f"kendall_p_value"] = kendalltau(
+            predictions, annotations, nan_policy="omit")
+        results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
+            predictions, annotations)
+
+        results_dict["l2_distance"] = distance.euclidean(predictions, annotations)
+        results_dict["l1_distance"] = distance.cityblock(predictions, annotations)
+
+        try:
             coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations),
                                                                       numpy.asarray(predictions),
                                                                       autolag=None)
@@ -606,29 +626,15 @@ def abs_evaluate_predictions(annotations, predictions, results_dict):
                 f"pred_to_ann_cointegration_critical_5"], results_dict[
                 f"pred_to_ann_cointegration_critical_10"] = coint_t_critical_values
 
-            cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
-            results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
+        except Exception as ex:
+            print(ex)
 
-            results_dict[f"pearson"], results_dict[f"pearson_p_value"] = pearsonr(predictions,
-                                                                                  annotations)
-            results_dict[f"kendall"], results_dict[f"kendall_p_value"] = kendalltau(
-                predictions, annotations, nan_policy="omit")
-            results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
-                predictions, annotations)
-
-            results_dict["l2_distance"] = distance.euclidean(predictions, annotations)
-            results_dict["l1_distance"] = distance.cityblock(predictions, annotations)
-
-    except Exception as ex:
-        print(ex)
 
 
 def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, model=RelativeToAbsoluteModel()):
     print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
 
     position_df = scale_prediction_columns(position_df)
-
-    generated_surprise_word_overlap
 
     colors = plotly.colors.DEFAULT_PLOTLY_COLORS
 
@@ -757,14 +763,13 @@ def evaluate_stories(args):
     print(f"Position rows : {len(position_df)}")
     annotator_df = pd.read_csv(args["annotator_targets"])
 
-
     if args["exclude_worker_ids"] is not None and len(args["exclude_worker_ids"]) > 0:
         annotator_df = annotator_df[~annotator_df["worker_id"].isin(args["exclude_worker_ids"])]
 
     print(f"Annotator rows: {len(annotator_df)}")
 
     vector_df = None
-    if "vector_stats" in args and len(args["vector_stats"]) > 0:
+    if args["vector_stats"] is not None and len(args["vector_stats"]) > 0:
         vector_df = pd.read_csv(args["vector_stats"])
 
     plot_annotator_and_model_predictions(position_df, annotator_df, args)
@@ -812,7 +817,7 @@ def prepare_dataset(annotator_df, position_df, keep_first_sentence=False):
                              how='left', indicator=True)
     merged_df = df_all.loc[df_all['_merge'] == "left_only"]
 
-    merged_df = merged_df.sort_values(by=["story_id","worker_id","sentence_num"]).reset_index()
+    merged_df = merged_df.sort_values(by=["story_id","worker_id","sentence_num"])#.reset_index()
 
     return merged_df
 
