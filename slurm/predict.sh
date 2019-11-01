@@ -74,7 +74,7 @@ echo "ALLENNLP Task finished"
 
 rsync -avuzhP "${SERIAL_DIR}" "${CLUSTER_HOME}/runs/cluster/" # Copy output onto headnode
 
-rm -rf "${SERIAL_DIR}/${EXP_NAME}"
+rm -rf "${SERIAL_DIR}/"
 
 echo "============"
 echo "results synced"
