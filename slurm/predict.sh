@@ -67,7 +67,7 @@ allennlp predict --include-package story_untangling \
     --predictor uncertain_reader_gen_predictor \
      ${CLUSTER_HOME}/comics/stories/WritingPrompts/training_models/full_epoch/lstm_fusion_big/ \
      ${CLUSTER_HOME}/comics/stories/WritingPrompts/datasets/test.wp_target --cuda-device 0 \
-    --output-file  ${SERIAL_DIR}/${EXP_NAME}/${EXP_NAME}_prediction_output.jsonl \
+    --output-file  ${SERIAL_DIR}/${EXP_NAME}_prediction_output.jsonl \
 
 echo "============"
 echo "ALLENNLP Task finished"
