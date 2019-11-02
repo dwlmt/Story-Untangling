@@ -40,7 +40,7 @@ export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
 export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
 
 echo "My SLURM_ARRAY_TASK_ID: " $SLURM_ARRAY_TASK_ID
-export LINE=`sed "${SLURM_ARRAY_TASK_ID}q;d" ${BATCH_FILE_PATH}`
+export LINE=`sed "${SLURM_ARRAY_TASK_ID}q;d" ${BATCH_FILE_PATH}/${BATCH_FILE_NAME}`
 
 export EXP_NAME="${EXP_BASE_NAME}_${LINE}"
 
