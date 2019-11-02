@@ -36,8 +36,6 @@ export NLTK_DATA="${CLUSTER_HOME}/nltk_data/"
 export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
 export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
 
-export LINE="`sed \"${SLURM_ARRAY_TASK_ID}q;d\" $1`"
-
 echo "My SLURM_ARRAY_TASK_ID: " $SLURM_ARRAY_TASK_ID
 export LINE=`sed "${SLURM_ARRAY_TASK_ID}q;d" ${BATCH_FILE_PATH}`
 
