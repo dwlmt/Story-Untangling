@@ -43,6 +43,7 @@ export EXP_NAME="${EXP_BASE_NAME}_${LINE}"
 
 export SERIAL_DIR="${SCRATCH_HOME}/${EXP_NAME}"
 
+
 # Predictor specific variables.
 export DATASET_PATH="${CLUSTER_HOME}/comics/stories/WritingPrompts/dataset_db/text/"
 export PREDICTION_STORY_ID_FILE="${BATCH_FILE_PATH}/${LINE}"
