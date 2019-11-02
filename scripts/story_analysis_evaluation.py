@@ -559,6 +559,9 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         for pred, ann in zip(predictions, annotations):
             try:
 
+                if len(predictions) != len(annotations):
+                    continue
+
                 cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
                 cross_correlation_list.append(numpy.mean(cross_correlation))
 
@@ -593,6 +596,9 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
 
     else:
+
+        if len(predictions) != len(annotations):
+            return
 
         cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
         results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
