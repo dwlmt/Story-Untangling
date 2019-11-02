@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #SBATCH -o /home/%u/slurm_logs/slurm-%A_%a.out
 #SBATCH -e /home/%u/slurm_logs/slurm-%A_%a.out
-#SBATCH -N 1	  # nodes requested
-#SBATCH -n 1	  # tasks requested
 #SBATCH --gres=gpu:1  # use 1 GPU
 #SBATCH -t 16:00:00  # time requested in hour:minute:seconds
 #SBATCH --cpus-per-task=4  # number of cpus to use - there are 32 on each node.
+
+# Set EXP_BASE_NAME and BATCH_FILE_PATH
 
 set -e # fail fast
 
@@ -36,12 +36,18 @@ export NLTK_DATA="${CLUSTER_HOME}/nltk_data/"
 export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
 export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
 
+export LINE="`sed \"${SLURM_ARRAY_TASK_ID}q;d\" $1`"
+
+echo "My SLURM_ARRAY_TASK_ID: " $SLURM_ARRAY_TASK_ID
+export LINE=`sed "${SLURM_ARRAY_TASK_ID}q;d" ${BATCH_FILE_PATH}`
+
+export EXP_NAME="${EXP_BASE_NAME}_${LINE}"
+
 export SERIAL_DIR="${SCRATCH_HOME}/${EXP_NAME}"
 
-
 # Predictor specific variables.
-export DATASET_PATH="/home/s1569885/comics/stories/WritingPrompts/dataset_db/text/"
-export PREDICTION_STORY_ID_FILE="/home/s1569885/comics/stories/WritingPrompts/annotation_results/raw/story_id_test_1.csv"
+export DATASET_PATH="${CLUSTER_HOME}/comics/stories/WritingPrompts/dataset_db/text/"
+export PREDICTION_STORY_ID_FILE="${BATCH_FILE_PATH}/${LINE}"
 export PREDICTION_ONLY_ANNOTATION_STORIES=TRUE
 export PREDICTION_LEVELS_TO_ROLLOUT=1
 export PREDICTION_GENERATE_PER_BRANCH=100
@@ -53,6 +59,8 @@ export PREDICTION_SENTIMENT_WEIGHTING=1.0
 export PREDICTION_SENTIMENT_POSITIVE_WEIGHTING=1.0
 export PREDICTION_SENTIMENT_NEGATIVE_WEIGHTING=1.0
 export PREDICTION_MARKED_SENTENCE=FALSE
+export MODEL_PATH=comics/stories/WritingPrompts/training_models/full_epoch/lstm_fusion_big/
+export DATASET_SOURCE=/comics/stories/WritingPrompts/datasets/test.wp_target
 
 # Ensure the scratch home exists and CD to the experiment root level.
 mkdir -p "${SCRATCH_HOME}"
@@ -65,8 +73,8 @@ echo "ALLENNLP Task========"
 allennlp predict --include-package story_untangling \
     --use-dataset-reader \
     --predictor uncertain_reader_gen_predictor \
-     ${CLUSTER_HOME}/comics/stories/WritingPrompts/training_models/full_epoch/lstm_fusion_big/ \
-     ${CLUSTER_HOME}/comics/stories/WritingPrompts/datasets/test.wp_target --cuda-device 0 \
+     ${CLUSTER_HOME}/${MODEL_PATH} \
+     ${CLUSTER_HOME}/${DATASET_SOURCE} --cuda-device 0 \
     --output-file  ${SERIAL_DIR}/${EXP_NAME}_prediction_output.jsonl \
 
 echo "============"
