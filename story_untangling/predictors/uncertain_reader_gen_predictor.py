@@ -127,9 +127,9 @@ class UncertainReaderGenPredictor(Predictor):
 
         story_id_file =  str(os.getenv('PREDICTION_STORY_ID_FILE', "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_splitaa"))
 
-        story_id_df = pandas.read_csv(story_id_file)
+        story_id_df = pandas.read_csv(story_id_file, engine='python')
         self.story_ids_to_predict = set(story_id_df['story_id'])
-        self.only_annotation_stories =  bool(os.getenv('PREDICTION_ONLY_ANNOTATION_STORIES', True))
+        self.only_annotation_stories =  bool(os.getenv('PREDICTION_ONLY_ANNOTATION_STORIES', False))
 
         self.levels_to_rollout = int(os.getenv('PREDICTION_LEVELS_TO_ROLLOUT', 1))
         self.generate_per_branch = int(os.getenv('PREDICTION_GENERATE_PER_BRANCH', 100))
@@ -165,7 +165,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         self.dataset_reader = dataset_reader
         self.dataset_reader._story_chunking =  int(os.getenv('PREDICTION_CHUNKING_SIZE', 200))  # Allow bigger batching for sampling.
-        self.dataset_reader._marked_sentences =  bool(os.getenv('PREDICTION_MARKED_SENTENCE', False))
+        self.dataset_reader._marked_sentences =  bool(os.getenv('PREDICTION_MARKED_SENTENCE', True))
 
         self.tokenizer = dataset_reader._tokenizer
         self.indexer = dataset_reader._token_indexers["openai_transformer"]
