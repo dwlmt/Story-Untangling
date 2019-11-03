@@ -4,7 +4,7 @@
 #SBATCH -N 1	  # nodes requested
 #SBATCH -n 1	  # tasks requested
 #SBATCH --gres=gpu:1  # use 1 GPU
-#SBATCH --mem=20GB  # memory in Mb
+#SBATCH --mem=0  # memory in Mb
 #SBATCH --cpus-per-task=4  # number of cpus to use - there are 32 on each node.
 
 set -e # fail fast
