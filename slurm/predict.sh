@@ -19,18 +19,15 @@ echo ${dt}
 # Env variables
 export STUDENT_ID=${USER}
 
-if [ -d /disk/scratch1/ ] && [ -w /disk/scratch1/ ]; then
-export SCRATCH_ROOT=/disk/scratch1/
-elif [ -d /disk/scratch2/ ] && [ -w /disk/scratch2/ ]; then
- export SCRATCH_ROOT=/disk/scratch2/
-elif [ -d /disk/scratch/ ] && [ -w /disk/scratch/ ]; then
- export SCRATCH_ROOT=/disk/scratch/
-elif [ -d /disk/scratch_big/ ] && [ -w /disk/scratch_big/ ]; then
+if [ -d /disk/scratch_big/ ]; then
  export SCRATCH_ROOT=/disk/scratch_big/
-elif [ -d /disk/scratch_fast/ ] && [ -w /disk/scratch_fast/ ];then
- export SCRATCH_ROOT=/disk/scratch_fast/
+elif [ -d /disk/scratch/ ]; then
+ export SCRATCH_ROOT=/disk/scratch/
+elif [ -d /disk/scratch1/ ]; then
+export SCRATCH_ROOT=/disk/scratch1/
+else [ -d /disk/scratch2/ ]
+ export SCRATCH_ROOT=/disk/scratch2/
 fi
-
 
 export SCRATCH_HOME="/${SCRATCH_ROOT}/${STUDENT_ID}"
 
