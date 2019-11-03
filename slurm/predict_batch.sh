@@ -21,14 +21,16 @@ echo ${dt}
 # Env variables
 export STUDENT_ID=${USER}
 
-if [ -d "/disk/scratch1" ]; then
+if [ -d /disk/scratch1/ ] && [ -w /disk/scratch1/ ]; then
 export SCRATCH_ROOT=/disk/scratch1/
-elif [ -d "/disk/scratch2" ]; then
+elif [ -d /disk/scratch2/ ] && [ -w /disk/scratch2/ ]; then
  export SCRATCH_ROOT=/disk/scratch2/
-elif [ -d "/disk/scratch" ]; then
+elif [ -d /disk/scratch/ ] && [ -w /disk/scratch/ ]; then
  export SCRATCH_ROOT=/disk/scratch/
-else
+elif [ -d /disk/scratch_big/ ] && [ -w /disk/scratch_big/ ]; then
  export SCRATCH_ROOT=/disk/scratch_big/
+elif [ -d /disk/scratch_fast/ ] && [ -w /disk/scratch_fast/ ];then
+ export SCRATCH_ROOT=/disk/scratch_fast/
 fi
 
 export SCRATCH_HOME="/${SCRATCH_ROOT}/${STUDENT_ID}"
@@ -67,6 +69,7 @@ export DATASET_SOURCE=/comics/stories/WritingPrompts/datasets/test.wp_target
 mkdir -p "${SCRATCH_HOME}"
 cd "${EXP_ROOT}" # helps AllenNLP behave
 
+rm -rf "${SERIAL_DIR}"
 mkdir -p ${SERIAL_DIR}
 
 echo "ALLENNLP Task========"
