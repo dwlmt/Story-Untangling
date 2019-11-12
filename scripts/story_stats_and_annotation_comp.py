@@ -38,6 +38,7 @@ parser.add_argument('--peak-prominence-weighting', required=False, type=int, def
 parser.add_argument('--peak-width', default=1.0, type=float,
                     help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
 parser.add_argument('--min-time', type=int, default=150, help="Min time in seconds.")
+parser.add_argument('--exclude-worker-ids', type=str, nargs="+", required=True, help="A list of workers to exclude from the task.")
 
 args = parser.parse_args()
 
@@ -932,10 +933,13 @@ def story_stats_correlation(args):
         position_df = pandas.read_csv(args["position_stats"])
         position_df = position_df.fillna(value=0.0)
 
+    print(mturk_df.columns)
+    if args["exclude_worker_ids"] is not None and len(args["exclude_worker_ids"]) > 0:
+        mturk_df = mturk_df[~mturk_df["WorkerId"].isin(args["exclude_worker_ids"])]
+
     if annotation_df is not None:
         genres_per_story_df = genres_per_story(args, annotation_df)
         annotation_correlation(args, annotation_df, genres_per_story_df)
-
 
     if mturk_df is not None and len(firebase_data):
         sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data)
@@ -948,7 +952,6 @@ def story_stats_correlation(args):
         prediction_correlation(args, pred_df)
     if annotation_df is not None and pred_df is not None:
         prediction_annotation_correlation(args, annotation_df, pred_df)
-
 
 def prediction_position_correlation(args, position_df):
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/")
