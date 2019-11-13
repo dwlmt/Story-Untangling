@@ -19,20 +19,23 @@ echo ${dt}
 # Env variables
 export STUDENT_ID=${USER}
 
-declare -a ScratchPathArray=("/disk/scratch_big/" "/disk/scratch/" "/disk/scratch1" "/disk/scratch2/" "/disk/scratch_fast/" "{$CLUSTER_HOME}/scratch")
-export SCRATCH_SPACE_REQUIRED=1000000000 # 1GB
+eclare -a ScratchPathArray=(/disk/scratch/${STUDENT_ID} /disk/scratch_big/${STUDENT_ID} /disk/scratch1/${STUDENT_ID} /disk/scratch2/${STUDENT_ID} /disk/scratch_fast/${STUDENT_ID} ${CLUSTER_HOME}/scratch/${STUDENT_ID})
 
 # Iterate the string array using for loop
 for i in "${ScratchPathArray[@]}"
 do
-   echo $i
-   if [ -w "$i"] && [ `df "$i" | awk 'END{print $4}'` > $SCRATCH_SPACE_REQ ]; then
-      export SCRATCH_ROOT="$i"
+    echo ${i}
+    mkdir -p ${i}
+    if [ -w ${i} ];then
+      echo "WRITABLE"
+      export SCRATCH_HOME=${i}
       break
    fi
 done
 
-export SCRATCH_HOME="/${SCRATCH_ROOT}/${STUDENT_ID}"
+echo ${SCRATCH_HOME}
+
+echo $SCRATCH_HOME
 
 export NLTK_DATA="${CLUSTER_HOME}/nltk_data/"
 export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
@@ -57,7 +60,6 @@ export PREDICTION_SENTIMENT_NEGATIVE_WEIGHTING=2.0
 export PREDICTION_MARKED_SENTENCE=FALSE
 
 # Ensure the scratch home exists and CD to the experiment root level.
-mkdir -p "${SCRATCH_HOME}"
 cd "${EXP_ROOT}" # helps AllenNLP behave
 
 mkdir -p ${SERIAL_DIR}
