@@ -19,21 +19,21 @@ echo ${dt}
 # Env variables
 export STUDENT_ID=${USER}
 
-if [ -d /disk/scratch/ ]; then
- export SCRATCH_ROOT=/disk/scratch/
-elif [ -d /disk/scratch_big/ ]; then
- export SCRATCH_ROOT=/disk/scratch_big/
-elif [ -d /disk/scratch1/ ]; then
-export SCRATCH_ROOT=/disk/scratch1/
-elif [ -d /disk/scratch2/ ]; then
- export SCRATCH_ROOT=/disk/scratch2/
-else
- export SCRATCH_ROOT=/disk/scratch_fast/
-fi
+declare -a ScratchPathArray=("/disk/scratch_big/" "/disk/scratch/" "/disk/scratch1" "/disk/scratch2/" "/disk/scratch_fast/", "{$CLUSTER_HOME}/scratch")
+export SCRATCH_SPACE_REQUIRED=1000000000 # 1GB
+
+# Iterate the string array using for loop
+for i in "${ScratchPathArray[@]}"
+do
+   echo $i
+   if [ -w "$i"] && [ `df "$i" | awk 'END{print $4}'` > $SCRATCH_SPACE_REQ ]; then
+      export SCRATCH_ROOT="$i"
+      break
+   fi
+done
 
 export SCRATCH_HOME="/${SCRATCH_ROOT}/${STUDENT_ID}"
 
-export CLUSTER_HOME="/home/${STUDENT_ID}"
 export NLTK_DATA="${CLUSTER_HOME}/nltk_data/"
 export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
 export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
