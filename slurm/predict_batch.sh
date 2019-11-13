@@ -23,7 +23,7 @@ export STUDENT_ID=${USER}
 
 export CLUSTER_HOME="/home/${STUDENT_ID}"
 
-declare -a ScratchPathArray=("/disk/scratch_big/" "/disk/scratch/" "/disk/scratch1" "/disk/scratch2/" "/disk/scratch_fast/", "{$CLUSTER_HOME}/scratch")
+declare -a ScratchPathArray=("/disk/scratch_big/" "/disk/scratch/" "/disk/scratch1" "/disk/scratch2/" "/disk/scratch_fast/" "{$CLUSTER_HOME}/scratch")
 export SCRATCH_SPACE_REQUIRED=1000000000 # 1GB
 
 # Iterate the string array using for loop
