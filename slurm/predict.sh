@@ -35,8 +35,6 @@ done
 
 echo ${SCRATCH_HOME}
 
-echo $SCRATCH_HOME
-
 export NLTK_DATA="${CLUSTER_HOME}/nltk_data/"
 export EXP_ROOT="${CLUSTER_HOME}/git/Story-Untangling/"
 export ALLENNLP_CACHE_ROOT="${CLUSTER_HOME}/allennlp_cache_root/"
