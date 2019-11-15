@@ -38,7 +38,7 @@ parser.add_argument('--peak-prominence-weighting', required=False, type=int, def
 parser.add_argument('--peak-width', default=1.0, type=float,
                     help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
 parser.add_argument('--min-time', type=int, default=150, help="Min time in seconds.")
-parser.add_argument('--exclude-worker-ids', type=str, nargs="+", required=True, help="A list of workers to exclude from the task.")
+parser.add_argument('--exclude-worker-ids', type=str, nargs="+", required=False, help="A list of workers to exclude from the task.")
 
 args = parser.parse_args()
 

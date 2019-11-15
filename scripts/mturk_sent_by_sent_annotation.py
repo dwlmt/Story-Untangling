@@ -10,7 +10,7 @@ parser.add_argument('--annotations-file', required=True, type=str, help="Link to
 parser.add_argument('--output-file', required=True, type=str, help="The output file with the HIT ids data.")
 parser.add_argument('--task-url', required=True, type=str, help="Link to the online annotations app.")
 parser.add_argument('--max-assignments', required=False, type=int, default=100, help="Max assignments to create.")
-parser.add_argument('--annotations-per-hit', required=False, type=int, default=3,
+parser.add_argument('--annotations-per-hit', required=False, type=int, default=5,
                     help="How many annotations per assignment.")
 parser.add_argument('--reward', required=False, type=float, default=0.55, help="The reward per HIT.")
 parser.add_argument('--access-key-id', required=True, help="AWS Access Key.")
@@ -101,18 +101,20 @@ def create_assignments(args):
 
             total_storys_to_create += annotations_per_hit
 
-            new_hit = mturk.create_hit(
-                Title=f'Story dramatic tension reading sentence by sentence {row["story_id"]}',
-                Description='Read a short story and record the level of dramatic tension per sentence. Will take 5-10 minutes per hit. Please do no more than 25 HITs in this batch else they may be rejected and your approval rate impacted. Fluent English speakers required. Some violent, sexual or other disturbing content may be present in the stories.',
-                Keywords='story, narrative, storytelling, annotation, research, nlp, reading',
-                Reward=f'{args["reward"]}',
-                MaxAssignments=annotations_per_hit,
-                LifetimeInSeconds=1209600,  # Two weeks
-                AssignmentDurationInSeconds=3600,  # One hour
-                AutoApprovalDelayInSeconds=604800,  # 5 Days
-                Question=external_question_xml,
-                QualificationRequirements=worker_requirements
-            )
+            if annotations_per_hit > 0:
+
+                new_hit = mturk.create_hit(
+                    Title=f'Story dramatic tension reading sentence by sentence {row["story_id"]}',
+                    Description='Read a short story and record the level of dramatic tension per sentence. Will take 5-10 minutes per hit. Fluent English speakers required. Some violent, sexual or other disturbing content may be present in the stories.',
+                    Keywords='story, narrative, storytelling, annotation, research, nlp, reading',
+                    Reward=f'{args["reward"]}',
+                    MaxAssignments=annotations_per_hit,
+                    LifetimeInSeconds=1209600,  # Two weeks
+                    AssignmentDurationInSeconds=3600,  # One hour
+                    AutoApprovalDelayInSeconds=604800,  # 5 Days
+                    Question=external_question_xml,
+                    QualificationRequirements=worker_requirements
+                )
 
             hit_ids_data.append({"hit_id": new_hit['HIT']['HITId'], "story_id": row['story_id'], "code": row['code']})
 

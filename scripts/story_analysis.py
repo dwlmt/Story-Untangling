@@ -126,7 +126,7 @@ def analyse_vector_stats(args):
 
 def create_cluster_examples(args):
 
-    if args["vectors_stats"] is None or len(args["vector_stats"]) == 0:
+    if args["vector_stats"] is None or len(args["vector_stats"]) == 0:
         return
 
     metadata_fields = ["story_id", 'sentence_num', 'sentence_id', "sentence_text", "transition_text"]
@@ -187,7 +187,7 @@ def create_cluster_examples(args):
 
 def create_cluster_scatters(args):
 
-    if  args["vectors_stats"] is None  or len(args["vector_stats"]) == 0:
+    if  args["vector_stats"] is None  or len(args["vector_stats"]) == 0:
         return
 
     vector_df = pd.read_csv(args["vector_stats"])
@@ -322,6 +322,7 @@ def create_sentiment_plots(args):
 
     position_df = pd.read_csv(args["position_stats"])
 
+
     for name, group in position_df.groupby("story_id"):
 
         group_df = group.sort_values(by=['sentence_num'])
@@ -380,7 +381,7 @@ def create_sentiment_plots(args):
 prediction_columns = ["generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
                           'generated_surprise_l1', 'generated_surprise_l2'
-        , 'generated_suspense_l1', 'generated_suspense_l2',
+                          , 'generated_suspense_l1', 'generated_suspense_l2',
                           'generated_suspense_entropy',
                           'corpus_suspense_entropy',
                           'generated_surprise_entropy',
@@ -392,17 +393,19 @@ prediction_columns = ["generated_surprise_word_overlap",
                           'generated_surprise_l1_state', 'generated_surprise_l2_state',
                           'generated_suspense_l1_state', 'generated_suspense_l2_state',
                           'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
-                          'corpus_suspense_l1_state', 'corpus_suspense_l2_state']
+                          'corpus_suspense_l1_state', 'corpus_suspense_l2_state',
+                          'textblob_sentiment', 'vader_sentiment', 'sentiment']
 
 def scale_prediction_columns(position_df):
     for col in prediction_columns:
 
-        if col not in position_df.columns:
-            continue
-
         scaler = StandardScaler()
         scaled_col = numpy.squeeze(scaler.fit_transform(position_df[col].to_numpy().reshape(-1, 1)), axis=1).tolist()
         position_df[f"{col}_scaled"] = scaled_col
+        print(position_df[f"{col}_scaled"], scaled_col)
+
+    position_df = position_df.reset_index()
+
     return position_df
 
 def create_story_plots(args):
@@ -420,6 +423,8 @@ def create_story_plots(args):
 
     position_df = scale_prediction_columns(position_df)
 
+    print(position_df.columns)
+
     position_df = position_df.fillna(value=0.0)
 
     window_df = pd.read_csv(args["window_stats"])
@@ -435,17 +440,20 @@ def create_story_plots(args):
 
     segmented_data = []
 
-    for y_axis_group in ['l1', 'l2', 'entropy', 'baseline']:
+    for y_axis_group in ['l1', 'l2', 'entropy', 'baseline','scaled']:
 
         column_list = []
 
         for i, pred in enumerate(prediction_columns):
 
-            if y_axis_group not in pred and y_axis_group != "baseline" or (
+            if  y_axis_group != "scaled" and y_axis_group not in pred and y_axis_group != "baseline" or (
                     y_axis_group is "baseline" and "overlap" not in pred and "embedding" not in pred):
                 continue
 
-            column_list.append(pred)
+            if y_axis_group != "scaled":
+                column_list.append(pred)
+            else:
+                column_list.append(f"{pred}_scaled")
 
         y_axis_map[y_axis_group] = column_list
 
@@ -455,9 +463,13 @@ def create_story_plots(args):
 
         group_df = group.sort_values(by=['sentence_num'])
 
+        print(group_df)
+
         story_win_df = window_df.loc[window_df['story_id'] == story_id]
 
         for y_axis_group, y_axis_columns in y_axis_map.items():
+
+            print(y_axis_columns)
 
             plotted_turning_points = False
 
@@ -468,7 +480,12 @@ def create_story_plots(args):
                 prom_data.extend(group_df[c].tolist())
 
             prom_weighting = args["peak_prominence_weighting"]
-            prominence_threshold = statistics.stdev(prom_data) * prom_weighting
+            if y_axis_group == "scaled":
+                print(prom_data,prom_weighting)
+            if y_axis_group == "scaled":
+                prominence_threshold =  prom_weighting
+            else:
+                prominence_threshold = statistics.stdev(prom_data) * prom_weighting
 
             if args["number_of_peaks"] > 0:
                 prominence_threshold = 0.00001  # Make tiny as is not specified then the metadata is not returned for prominences.
@@ -478,9 +495,16 @@ def create_story_plots(args):
             max_point = 0.0
             for i, pred in enumerate(y_axis_columns):
 
+                #print(pred)
+                #print(group_df[pred])
+
+                pred_data = group_df[pred].tolist()
+                measure_offset = 0.0 - pred_data[0]
+                pred_data = [m + measure_offset for m in pred_data]
+
                 pred_name = pred.replace('suspense', 'susp').replace('surprise', 'surp').replace('corpus',
                                                                                                  'cor').replace(
-                    'generated', 'gen').replace('state', 'st')
+                    'generated', 'gen').replace('state', 'st').replace('_scaled','')
 
                 # Don't plot both corpus and generation surprise as they are the same.
                 if "surprise" in pred:
@@ -500,11 +524,11 @@ def create_story_plots(args):
 
                 trace = go.Scatter(
                     x=group_df['sentence_num'],
-                    y=group_df[pred],
+                    y=pred_data,
                     text=text,
                     mode='lines+markers',
                     line=dict(
-                        color=colors[color_idx]
+                        color=colors[color_idx % len(colors)]
                     ),
                     name=f'{pred_name}',
                 )
@@ -512,7 +536,7 @@ def create_story_plots(args):
 
                 sentence_nums = group_df["sentence_num"].tolist()
                 sentence_text = group_df["sentence_text"].tolist()
-                y = group_df[pred].tolist()
+                y = pred_data
 
                 type = "peak"
                 peak_indices, peaks_meta = find_peaks(y, prominence=prominence_threshold, width=args["peak_width"],
@@ -533,7 +557,7 @@ def create_story_plots(args):
                         y=[y[j] for j in peak_indices],
                         mode='markers',
                         marker=dict(
-                            color=colors[color_idx],
+                            color=colors[color_idx % len(colors)],
                             symbol='star-triangle-up',
                             size=14,
                         ),
@@ -562,7 +586,7 @@ def create_story_plots(args):
                         y=[y[j] for j in peak_indices],
                         mode='markers',
                         marker=dict(
-                            color=colors[color_idx],
+                            color=colors[color_idx % len(colors)],
                             symbol='star-triangle-down',
                             size=14,
                         ),
@@ -655,7 +679,7 @@ def create_story_plots(args):
                             y=[y[j] for j in expected_points_indices],
                             mode='markers',
                             marker=dict(
-                                color=colors[color_idx],
+                                color=colors[color_idx % len(colors)],
                                 symbol='triangle-up',
                                 size=14,
                             ),
@@ -958,6 +982,7 @@ def create_peak_text_and_metadata(peak_indices, peaks_meta, sentence_nums, sente
         text = ""
 
         for j in range(left_base, right_base):
+            j = min(max(j, 0), len(sentence_nums) - 1)
             wrapper = TextWrapper(initial_indent="<br>", width=80)
 
             if j == ind:

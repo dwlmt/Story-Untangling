@@ -35,28 +35,30 @@ parser.add_argument('--output-dir', required=True, type=str, help="CSV containin
 parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument("--folds", default=5, type=int, help="Folds in the cross validation.")
-parser.add_argument("--epochs", default=50, type=int, help="Number of Epochs for model fitting.")
+parser.add_argument("--epochs", default=20, type=int, help="Number of Epochs for model fitting.")
 parser.add_argument("--exclude-worker-ids", type=str, nargs="*", help="Workers to exclude form the annotations.")
 parser.add_argument("--cuda-device", default=0, type=int, help="The default CUDA device.")
 
 args = parser.parse_args()
 
-model_prediction_columns = ["baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
-                            'generated_surprise_l1', 'generated_surprise_l2',
-                            'generated_suspense_l1', 'generated_suspense_l2',
-                            'generated_suspense_entropy',
-                            'corpus_suspense_entropy',
-                            'generated_surprise_entropy',
-                            "corpus_surprise_word_overlap",
-                            "corpus_surprise_simple_embedding",
-                            'corpus_surprise_entropy',
-                            'corpus_surprise_l1', 'corpus_surprise_l2',
-                            'corpus_suspense_l1', 'corpus_suspense_l2',
-                            'generated_surprise_l1_state', 'generated_surprise_l2_state',
-                            'generated_suspense_l1_state', 'generated_suspense_l2_state',
-                            'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
-                            'corpus_suspense_l1_state', 'corpus_suspense_l2_state'
-                            ]
+model_prediction_columns = [
+                        'textblob_sentiment', 'vader_sentiment', 'sentiment',
+                         "baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
+                        'generated_surprise_l1', 'generated_surprise_l2',
+                        'generated_suspense_l1', 'generated_suspense_l2',
+                        'generated_suspense_entropy',
+                        'corpus_suspense_entropy',
+                        'generated_surprise_entropy',
+                        "corpus_surprise_word_overlap",
+                        "corpus_surprise_simple_embedding",
+                        'corpus_surprise_entropy',
+                        'corpus_surprise_l1', 'corpus_surprise_l2',
+                        'corpus_suspense_l1', 'corpus_suspense_l2',
+                        'generated_surprise_l1_state', 'generated_surprise_l2_state',
+                        'generated_suspense_l1_state', 'generated_suspense_l2_state',
+                        'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
+                        'corpus_suspense_l1_state', 'corpus_suspense_l2_state',
+                        ]
 
 annotator_prediction_column = "suspense"
 
@@ -149,7 +151,7 @@ def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
             features_as_numpy = train_df[f"{feature_col}_scaled"].values
             for item, value in proportion_counts.iteritems():
                 total += value
-                category_threshold_dict[item] = numpy.percentile(features_as_numpy, total * 100)
+                category_threshold_dict[item] = numpy.percentile(features_as_numpy, max(min(total * 100,100.0),0))
 
             for k in ["prop","std"]:
 
@@ -255,9 +257,9 @@ def array_to_first_value(target_value):
     return changed_value
 
 
-def agreement(agreement_triples, m, results_dict):
+def agreement(agreement_triples, m, results_dict, distance=interval_distance):
     if len(agreement_triples) > 2 and len(set([t[0] for t in agreement_triples])) > 1:
-        t = AnnotationTask(data=agreement_triples, distance=interval_distance)
+        t = AnnotationTask(data=agreement_triples, distance=distance)
         results_dict[f"{m}_alpha"] = t.alpha()
         results_dict[f"{m}_agreement"] = t.avg_Ao()
 
@@ -270,8 +272,8 @@ def features(feature_col, train_df):
 
 class RelativeToAbsoluteModel(torch.nn.Module):
 
-    def __init__(self, origin_weight=0.0, big_decrease=-0.2, decrease=-0.1, same=0.0, increase=0.1, big_increase=0.2,
-                 epsilon=0.02):
+    def __init__(self, origin_weight=0.0, big_decrease=-0.30, decrease=-0.10, same=0.0, increase=0.10, big_increase=0.30,
+                 epsilon=0.05):
         super(RelativeToAbsoluteModel, self).__init__()
         self.origin = torch.nn.Linear(1, 1, bias=False)
         self.big_decrease = torch.nn.Linear(1, 1, bias=False)
@@ -412,7 +414,7 @@ def cont_model_pred_to_ann(args, train_df):
 
             fitting_model = RelativeToAbsoluteModel()
 
-            criterion = torch.nn.MSELoss()
+            criterion = torch.nn.L1Loss()
             optimizer = torch.optim.SGD(fitting_model.parameters(), lr=0.01)
 
             for epoch in range(args["epochs"]):
@@ -450,13 +452,38 @@ def cont_model_pred_to_ann(args, train_df):
                             else:
                                 meta_dict["training"] = "fitted"
 
-                            suspense = torch.tensor(worker_df["suspense"].tolist()).int()
-                            model_predictions = torch.tensor(worker_df[f"{col}_scaled"].tolist())
+                            suspense_list = worker_df["suspense"].tolist()
+                            measure_values = worker_df[f"{col}_scaled"].tolist()
+                            measure_values_unscaled = worker_df[f"{col}"].tolist()
+
+                            if col != "baseclass":
+                                #print(measure_values, measure_values_unscaled, suspense_list)
+                                measure_values, measure_values_unscaled, suspense_list = zip(*((m, mu, s) for m, mu, s in
+                                                                                               zip(measure_values,
+                                                                                                   measure_values_unscaled,
+                                                                                                   suspense_list) if
+                                                                                               mu > 0.0))
+
+                            suspense = torch.tensor(suspense_list).int()
+                            model_predictions = torch.tensor(measure_values)
+
+
+
+                            #print(suspense, len(suspense), model_predictions, len(model_predictions))
+
+                            measure_offset = 0.0 - model_predictions[0]
+                            model_predictions = torch.tensor([m + measure_offset for m in model_predictions])
 
                             abs_suspense = fitting_model(suspense)
 
                             if len(model_predictions) == 0 or len(abs_suspense) != len(model_predictions):
                                 continue
+
+                            #abs_suspense = abs_suspense[:-1]
+                            abs_suspense = abs_suspense[1:]
+
+                            #model_predictions = model_predictions[:-1]
+                            model_predictions = model_predictions[1:]
 
                             comparison_one_all.append(model_predictions.tolist())
                             comparison_two_all.append(abs_suspense.tolist())
@@ -524,6 +551,9 @@ def cont_model_predictions(args, train_df):
             if len(model_predictions) == 0 or len(model_predictions_2) == 0:
                 continue
 
+            #model_predictions = model_predictions[:-1]
+            #model_predictions_2 = model_predictions_2[:-1]
+
             comparison_one_all.append(model_predictions)
             comparison_two_all.append(model_predictions_2)
 
@@ -555,6 +585,7 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         pearson_list = []
         l1_distance_list = []
         l2_distance_list = []
+        #alpha_list = []
 
         for pred, ann in zip(predictions, annotations):
             try:
@@ -575,6 +606,14 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
                 l2_distance_list.append(distance.euclidean(pred, ann))
                 l1_distance_list.append(distance.cityblock(pred, ann))
 
+                #triples = [("pred", i, p) for i, p in enumerate(pred)]
+                #triples += [("ann", i, p) for i, p in enumerate(ann)]
+
+                #if len(triples) > 2:
+                #    t = AnnotationTask(data=triples, distance=interval_distance)
+                #    alpha_list.append(t.alpha())
+
+
                 coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(ann),
                                                                           numpy.asarray(pred), autolag=None)
                 coint_ann_to_pred.append(coint_t)
@@ -594,6 +633,8 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
         results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
         results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
+        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
+        #results_dict[f"alpha"] = sum(alpha_list) / float(len(annotations))
 
     else:
 
@@ -612,6 +653,13 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
 
         results_dict["l2_distance"] = distance.euclidean(predictions, annotations)
         results_dict["l1_distance"] = distance.cityblock(predictions, annotations)
+
+        #triples = [("pred", i, p) for i, p in enumerate(predictions)]
+        #triples += [("ann", i, p) for i, p in enumerate(annotations)]
+
+        #if len(triples) > 2:
+        #    t = AnnotationTask(data=triples, distance=interval_distance)
+       #     results_dict["alpha"] = t.alpha()
 
         try:
             coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations),
@@ -634,8 +682,6 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
 
         except Exception as ex:
             print(ex)
-
-
 
 def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, model=RelativeToAbsoluteModel()):
     print(f"Plot the annotator sentences to get a visualisation of the peaks in the annotations.")
@@ -676,8 +722,6 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
 
                     worker_df = story_df.loc[story_df["worker_id"] == worker_id]
 
-                    sel_col_df = worker_df[['story_id', 'sentence_id', 'sentence_num', 'worker_id', 'suspense']]
-
                     if len(worker_df) > 0:
 
                         worker_df = worker_df.sort_values(by=["sentence_num"])
@@ -713,9 +757,14 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
                         dash = "dash"
 
                     measure_values = torch.tensor(position_df[f"{col}_scaled"].tolist())
+                    measure_values_unscaled = torch.tensor(position_df[f"{col}"].tolist())
+                    sentence_nums = worker_df["sentence_num"]
 
                     measure_offset = 0.0 - measure_values[0]
                     measure_values = [m + measure_offset for m in measure_values]
+
+                    if col != "baseclass":
+                        measure_values, measure_values_unscaled, sentence_nums = zip(*((m, mu, s) for m, mu, s in zip(measure_values, measure_values_unscaled, sentence_nums) if mu > 0))
 
                     color_lookup = 1
                     if "suspense" in col:
@@ -729,7 +778,7 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
                         color_lookup += 3
 
                     trace = go.Scatter(
-                        x=worker_df["sentence_num"],
+                        x=sentence_nums,
                         y=measure_values,
                         mode='lines+markers',
                         name=f"{col}",
@@ -799,18 +848,17 @@ def prepare_dataset(annotator_df, position_df, keep_first_sentence=False):
     merged_df = pd.merge(position_df, annotator_df, left_on=["story_id", "sentence_num"],
                          right_on=["story_id", "sentence_num"], how="inner")
     merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
+
     merged_df = pd.concat([merged_df, merged_df[1:].reset_index(drop=True).add_suffix("_later")],
                           axis=1)
     merged_df = merged_df.sort_values(by=["worker_id", "story_id", "sentence_num"]).reset_index()
     merged_df = merged_df.loc[merged_df["story_id"] == merged_df["story_id_later"]]
     merged_df = merged_df.loc[merged_df["worker_id"] == merged_df["worker_id_later"]]
-    merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
+
+    #merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
+
     for col in model_prediction_columns:
         merged_df[f"{col}_diff"] = merged_df[f"{col}_later"] - merged_df[col]
-
-    merged_df = scale_prediction_columns(merged_df)
-    print(f"Merged rows: {len(merged_df)}")
-    # Remove the first line as cannot be judged relatively.
 
         # if not keep_first_sentence:
     if keep_first_sentence:
@@ -822,6 +870,9 @@ def prepare_dataset(annotator_df, position_df, keep_first_sentence=False):
     df_all = merged_df.merge(max_df, on=['story_id', 'sentence_num'],
                              how='left', indicator=True)
     merged_df = df_all.loc[df_all['_merge'] == "left_only"]
+
+    merged_df = scale_prediction_columns(merged_df)
+    print(f"Merged rows: {len(merged_df)}")
 
     merged_df = merged_df.sort_values(by=["story_id","worker_id","sentence_num"])#.reset_index()
 

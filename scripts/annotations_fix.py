@@ -36,6 +36,7 @@ def fix_assignments(args):
 
     assignment_df["story_id"] = story_ids
     assignment_df["code"] = codes
+    assignment_df["hit_id"] = assignment_df["HITId"]
 
     assignment_df.to_csv(args["output_file"])
 
