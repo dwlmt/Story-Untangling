@@ -495,11 +495,9 @@ def create_story_plots(args):
             max_point = 0.0
             for i, pred in enumerate(y_axis_columns):
 
-                #print(pred)
-                #print(group_df[pred])
-
+                pred_data = group_df[pred].tolist()
                 if y_axis_group == "scaled":
-                    pred_data = group_df[pred].tolist()
+
                     measure_offset = 0.0 - pred_data[0]
                     pred_data = [m + measure_offset for m in pred_data]
 
