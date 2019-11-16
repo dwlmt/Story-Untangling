@@ -35,7 +35,7 @@ parser.add_argument('--output-dir', required=True, type=str, help="CSV containin
 parser.add_argument("--no-html-plots", default=False, action="store_true", help="Don't save plots to HTML")
 parser.add_argument("--no-pdf-plots", default=False, action="store_true", help="Don't save plots to PDF")
 parser.add_argument("--folds", default=5, type=int, help="Folds in the cross validation.")
-parser.add_argument("--epochs", default=20, type=int, help="Number of Epochs for model fitting.")
+parser.add_argument("--epochs", default=25, type=int, help="Number of Epochs for model fitting.")
 parser.add_argument("--exclude-worker-ids", type=str, nargs="*", help="Workers to exclude form the annotations.")
 parser.add_argument("--cuda-device", default=0, type=int, help="The default CUDA device.")
 
@@ -290,6 +290,9 @@ class RelativeToAbsoluteModel(torch.nn.Module):
         torch.nn.init.constant_(self.increase.weight, increase)
         torch.nn.init.constant_(self.big_increase.weight, big_increase)
 
+        self.origin.requires_grad = False
+        self.same.requires_grad = False
+
         self.epsilon = epsilon
 
     def forward(self, annotation_series):
@@ -305,20 +308,18 @@ class RelativeToAbsoluteModel(torch.nn.Module):
 
             if cat == 1:
                 change_value = self.big_decrease(torch.tensor([1.0])).clamp(
-                    max=min(0.0, self.decrease(torch.tensor([1.0])).item()) - self.epsilon)
+                    max=min(0.0, self.decrease(torch.tensor([1.0])).item())) - self.epsilon
             elif cat == 2:
                 change_value = self.decrease(torch.tensor([1.0])).clamp(
                     min=self.big_decrease(torch.tensor([1.0])).item() + self.epsilon, max=0.0 - self.epsilon)
             elif cat == 3:
-                change_value = self.same(torch.tensor([1.0])).clamp(
-                    min=self.decrease(torch.tensor([1.0])).item() + self.epsilon,
-                    max=self.increase(torch.tensor([1.0])).item() - self.epsilon)
+                change_value = self.same(torch.tensor([1.0]))
             elif cat == 4:
                 change_value = self.increase(torch.tensor([1.0])).clamp(min=0.0 + self.epsilon, max=self.big_increase(
                     torch.tensor([1.0])).item() - self.epsilon)
             elif cat == 5:
                 change_value = self.big_increase(torch.tensor([1.0])).clamp(
-                    min=max(0.0, self.increase(torch.tensor([1.0])).item()) + self.epsilon)
+                    min=max(0.0, self.increase(torch.tensor([1.0])).item())) + self.epsilon
 
             if cat != 0:
                 new_value = last + change_value
@@ -467,8 +468,6 @@ def cont_model_pred_to_ann(args, train_df):
                             suspense = torch.tensor(suspense_list).int()
                             model_predictions = torch.tensor(measure_values)
 
-
-
                             #print(suspense, len(suspense), model_predictions, len(model_predictions))
 
                             measure_offset = 0.0 - model_predictions[0]
@@ -479,12 +478,6 @@ def cont_model_pred_to_ann(args, train_df):
                             if len(model_predictions) == 0 or len(abs_suspense) != len(model_predictions):
                                 continue
 
-                            #abs_suspense = abs_suspense[:-1]
-                            abs_suspense = abs_suspense[1:]
-
-                            #model_predictions = model_predictions[:-1]
-                            model_predictions = model_predictions[1:]
-
                             comparison_one_all.append(model_predictions.tolist())
                             comparison_two_all.append(abs_suspense.tolist())
                             story_meta.append(meta_dict)
@@ -492,7 +485,7 @@ def cont_model_pred_to_ann(args, train_df):
                             if abs_suspense.size(0) == model_predictions.size(0):
                                 loss = criterion(abs_suspense, model_predictions)
 
-                                if epoch > 0:
+                                if epoch > 0 and col != "baseclass":
                                     optimizer.zero_grad()
                                     loss.backward()
                                     optimizer.step()
@@ -590,7 +583,8 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         for pred, ann in zip(predictions, annotations):
             try:
 
-                if len(predictions) != len(annotations):
+                if len(pred) != len(ann):
+                    print("List not equal", results_dict, pred, ann)
                     continue
 
                 cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
@@ -603,8 +597,8 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
                 spearman, _ = spearmanr(pred, ann)
                 spearman_list.append(spearman)
 
-                l2_distance_list.append(distance.euclidean(pred, ann))
-                l1_distance_list.append(distance.cityblock(pred, ann))
+                l2_distance_list.append(distance.euclidean(pred, ann) / len(ann))
+                l1_distance_list.append(distance.cityblock(pred, ann) /len(ann))
 
                 #triples = [("pred", i, p) for i, p in enumerate(pred)]
                 #triples += [("ann", i, p) for i, p in enumerate(ann)]
@@ -625,20 +619,20 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
             except Exception as ex:
                 print(ex)
 
-        results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(annotations))
-        results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(annotations))
-        results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(annotations))
-        results_dict[f"pearson"] = sum(pearson_list) / float(len(annotations))
-        results_dict[f"kendall"] = sum(kendall_list) / float(len(annotations))
-        results_dict[f"spearman"] = sum(spearman_list) / float(len(annotations))
-        results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(annotations))
-        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
-        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(annotations))
+        results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(coint_ann_to_pred))
+        results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(coint_pred_to_ann))
+        results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(cross_correlation_list))
+        results_dict[f"pearson"] = sum(pearson_list) / float(len(pearson_list))
+        results_dict[f"kendall"] = sum(kendall_list) / float(len(kendall_list))
+        results_dict[f"spearman"] = sum(spearman_list) / float(len(spearman_list))
+        results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(l2_distance_list))
+        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(l1_distance_list))
         #results_dict[f"alpha"] = sum(alpha_list) / float(len(annotations))
 
     else:
 
         if len(predictions) != len(annotations):
+            print("List not equal", results_dict, predictions, annotations)
             return
 
         cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
@@ -651,11 +645,14 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         results_dict[f"spearman"], results_dict[f"spearman_p_value"] = spearmanr(
             predictions, annotations)
 
-        results_dict["l2_distance"] = distance.euclidean(predictions, annotations)
-        results_dict["l1_distance"] = distance.cityblock(predictions, annotations)
+        results_dict["l2_distance"] = distance.euclidean(predictions, annotations) / len(annotations)
+        results_dict["l1_distance"] = distance.cityblock(predictions, annotations) / len(annotations)
+
+        print(results_dict, predictions, annotations)
 
         #triples = [("pred", i, p) for i, p in enumerate(predictions)]
         #triples += [("ann", i, p) for i, p in enumerate(annotations)]
+        print(results_dict, predictions, annotations)
 
         #if len(triples) > 2:
         #    t = AnnotationTask(data=triples, distance=interval_distance)
