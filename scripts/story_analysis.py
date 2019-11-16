@@ -674,8 +674,8 @@ def create_story_plots(args):
 
                     if len(expected_points_indices) > 0:
                         trace = go.Scatter(
-                            x=[sentence_nums[j] for j in expected_points_indices],
-                            y=[y[j] for j in expected_points_indices],
+                            x=[sentence_nums[j] for j in expected_points_indices if j < len(sentence_nums)],
+                            y=[y[j] for j in expected_points_indices if j < len(y)],
                             mode='markers',
                             marker=dict(
                                 color=colors[color_idx % len(colors)],
@@ -683,7 +683,7 @@ def create_story_plots(args):
                                 size=14,
                             ),
                             name=f'{pred_name} - {type} constrained',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in expected_points_indices],
+                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in expected_points_indices if j < len(sentence_nums)],
                         )
                         data.append(trace)
 
