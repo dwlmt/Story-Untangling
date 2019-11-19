@@ -66,6 +66,13 @@ parser.add_argument('--turning-point-means', required=False, type=float, nargs="
 parser.add_argument('--turning-point-stds', required=False, type=float, nargs="*",
                     default=[6.72, 11.26, 12.15, 8.40, 4.74],
                     help="If turning points provided then these are the expected positions.")
+parser.add_argument("--export-only", default=False, action="store_true", help="Only for export so remove legend and filter down export parameters.")
+parser.add_argument('--export-columns', required=False, type=str, nargs="*",
+                    default=['generated_surprise_l2', 'generated_suspense_l2',
+                          'generated_surprise_entropy',
+                          'generated_surprise_l2_state',
+                          'generated_suspense_l2_state','sentiment'])
+
 
 args = parser.parse_args()
 
@@ -444,7 +451,11 @@ def create_story_plots(args):
 
         column_list = []
 
-        for i, pred in enumerate(prediction_columns):
+        columns = prediction_columns
+        if args["export_only"]:
+            columns = args["export_columns"]
+
+        for i, pred in enumerate(columns):
 
             if  y_axis_group != "scaled" and y_axis_group not in pred and y_axis_group != "baseline" or (
                     y_axis_group is "baseline" and "overlap" not in pred and "embedding" not in pred):
@@ -477,13 +488,19 @@ def create_story_plots(args):
 
             prom_data = []
             for c in y_axis_columns:
-                prom_data.extend(group_df[c].tolist())
+                p_data = group_df[c]
+                p_data = p_data[:len(p_data) - 1]
+                prom_data.extend(p_data)
 
             prom_weighting = args["peak_prominence_weighting"]
             if y_axis_group == "scaled":
                 print(prom_data,prom_weighting)
+
+            if len(prom_data) == 0:
+                continue
+
             if y_axis_group == "scaled":
-                prominence_threshold =  prom_weighting
+                prominence_threshold = prom_weighting
             else:
                 prominence_threshold = statistics.stdev(prom_data) * prom_weighting
 
@@ -496,6 +513,18 @@ def create_story_plots(args):
             for i, pred in enumerate(y_axis_columns):
 
                 pred_data = group_df[pred].tolist()
+
+                if len(pred_data) == 0:
+                    continue
+
+                sentence_nums = group_df["sentence_num"].tolist()
+                sentence_text = group_df["sentence_text"].tolist()
+
+                if args["export_only"]:
+                   pred_data = pred_data[:len(pred_data) - 1]
+                   sentence_nums = sentence_nums[:len(sentence_nums) - 1]
+                   sentence_text = sentence_text[:len(sentence_text) - 1]
+
                 if y_axis_group == "scaled":
 
                     measure_offset = 0.0 - pred_data[0]
@@ -522,7 +551,7 @@ def create_story_plots(args):
                 max_point = max(max_point, max(group_df[pred]))
 
                 trace = go.Scatter(
-                    x=group_df['sentence_num'],
+                    x=sentence_nums,
                     y=pred_data,
                     text=text,
                     mode='lines+markers',
@@ -533,8 +562,6 @@ def create_story_plots(args):
                 )
                 data.append(trace)
 
-                sentence_nums = group_df["sentence_num"].tolist()
-                sentence_text = group_df["sentence_text"].tolist()
                 y = pred_data
 
                 type = "peak"
@@ -558,7 +585,7 @@ def create_story_plots(args):
                         marker=dict(
                             color=colors[color_idx % len(colors)],
                             symbol='star-triangle-up',
-                            size=14,
+                            size=11,
                         ),
                         name=f'{pred_name} - {type}',
                         text=hover_text
@@ -587,7 +614,7 @@ def create_story_plots(args):
                         marker=dict(
                             color=colors[color_idx % len(colors)],
                             symbol='star-triangle-down',
-                            size=14,
+                            size=11,
                         ),
                         name=f'{pred_name} - {type}',
                         text=hover_text
@@ -680,7 +707,7 @@ def create_story_plots(args):
                             marker=dict(
                                 color=colors[color_idx % len(colors)],
                                 symbol='triangle-up',
-                                size=14,
+                                size=11,
                             ),
                             name=f'{pred_name} - {type} constrained',
                             text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in expected_points_indices if j < len(sentence_nums)],
@@ -697,7 +724,7 @@ def create_story_plots(args):
                             marker=dict(
                                 color="black",
                                 symbol='diamond',
-                                size=14,
+                                size=11,
                             ),
                             name=f'dist baseline',
                             text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in mean_expected if
@@ -706,37 +733,39 @@ def create_story_plots(args):
                         )
                         data.append(trace)
 
-                        trace = go.Scatter(
-                            x=[sentence_nums[p] for p in lower_brackets if p < len(sentence_nums)],
-                            y=[0.0] * len(lower_brackets),
-                            mode='markers',
-                            marker=dict(
-                                color="black",
-                                symbol='triangle-right',
-                                size=14,
-                            ),
-                            name=f'dist baseline lower',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in lower_brackets if
-                                  j < len(sentence_nums)],
+                        if not args["export_only"]:
 
-                        )
-                        data.append(trace)
+                            trace = go.Scatter(
+                                x=[sentence_nums[p] for p in lower_brackets if p < len(sentence_nums)],
+                                y=[0.0] * len(lower_brackets),
+                                mode='markers',
+                                marker=dict(
+                                    color="black",
+                                    symbol='triangle-right',
+                                    size=11,
+                                ),
+                                name=f'dist baseline lower',
+                                text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in lower_brackets if
+                                      j < len(sentence_nums)],
 
-                        trace = go.Scatter(
-                            x=[sentence_nums[p] for p in upper_brackets if p < len(sentence_nums)],
-                            y=[0.0] * len(upper_brackets),
-                            mode='markers',
-                            marker=dict(
-                                color="black",
-                                symbol='triangle-left',
-                                size=14,
-                            ),
-                            name=f'dist baseline upper',
-                            text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in upper_brackets if
-                                  j < len(sentence_nums)],
+                            )
+                            data.append(trace)
 
-                        )
-                        data.append(trace)
+                            trace = go.Scatter(
+                                x=[sentence_nums[p] for p in upper_brackets if p < len(sentence_nums)],
+                                y=[0.0] * len(upper_brackets),
+                                mode='markers',
+                                marker=dict(
+                                    color="black",
+                                    symbol='triangle-left',
+                                    size=11,
+                                ),
+                                name=f'dist baseline upper',
+                                text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in upper_brackets if
+                                      j < len(sentence_nums)],
+
+                            )
+                            data.append(trace)
 
                         trace = go.Scatter(
                             x=[sentence_nums[p] for p in all_points if p < len(sentence_nums)],
@@ -745,7 +774,7 @@ def create_story_plots(args):
                             marker=dict(
                                 color="gold",
                                 symbol='star',
-                                size=14,
+                                size=11,
                             ),
                             name=f'annotated',
                             text=[f"<b>{sentence_nums[j]} - {sentence_text[j]}</b>" for j in all_points if
@@ -782,17 +811,20 @@ def create_story_plots(args):
 
                 color_idx += 1
 
+            title = f'Story {story_id} Prediction Plot'
+            if args["export_only"]:
+                title=None
+
             layout = go.Layout(
-                title=f'Story {story_id} Prediction Plot',
+                title=title,
                 hovermode='closest',
                 xaxis=dict(
-                    # title='Position',
+                    title='Sentence',
                 ),
                 yaxis=dict(
-                    title=f'{y_axis_group}',
+                    title=f'Suspense',
                 ),
-
-                showlegend=True,
+                showlegend=not args["export_only"],
                 legend=dict(
                     orientation="h")
             )
