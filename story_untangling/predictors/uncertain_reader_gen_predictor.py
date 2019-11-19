@@ -1019,8 +1019,11 @@ class UncertainReaderGenPredictor(Predictor):
 
             sentiments = torch.tensor(sentiments_list).to(self._device)
 
-            metrics_dict[f"{type}_suspense_entropy_{i}"]  =  Categorical(probs).entropy().item()
-            metrics_dict[f"{type}_suspense_entropy_ex_gold_{i}"]  =  Categorical(probs_ex_gold).entropy().item()
+            suspense_entropy = Categorical(probs).entropy().item()
+            metrics_dict[f"{type}_suspense_entropy_{i}"]  =  suspense_entropy
+
+            suspense_entropy_ex_gold = Categorical(probs_ex_gold).entropy().item()
+            metrics_dict[f"{type}_suspense_entropy_ex_gold_{i}"]  = suspense_entropy_ex_gold
 
             parent_l1 = torch.stack([n.parent_distance_l1 for n in node_group]).to(self._device)
             parent_l2 = torch.stack([n.parent_distance_l2 for n in node_group]).to(self._device)
