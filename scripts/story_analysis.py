@@ -68,10 +68,9 @@ parser.add_argument('--turning-point-stds', required=False, type=float, nargs="*
                     help="If turning points provided then these are the expected positions.")
 parser.add_argument("--export-only", default=False, action="store_true", help="Only for export so remove legend and filter down export parameters.")
 parser.add_argument('--export-columns', required=False, type=str, nargs="*",
-                    default=['generated_surprise_l2', 'generated_suspense_l2',
-                          'generated_surprise_entropy',
-                          'generated_surprise_l2_state',
-                          'generated_suspense_l2_state','sentiment'])
+                    default=['generated_surprise_l1', 'generated_suspense_l1',
+                          'generated_suspense_entropy_1',
+                          'generated_suspense_l1_state'])
 
 
 args = parser.parse_args()
@@ -385,12 +384,14 @@ def create_sentiment_plots(args):
             print(f"Save plot pdf: {file_path}")
             pio.write_image(fig, file_path)
 
+#prediction_columns = ["generated_suspense_entropy_1","corpus_suspense_entropy_1"]
+
 prediction_columns = ["generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
                           'generated_surprise_l1', 'generated_surprise_l2'
                           , 'generated_suspense_l1', 'generated_suspense_l2',
-                          'generated_suspense_entropy',
-                          'corpus_suspense_entropy',
+                          'generated_suspense_entropy_1',
+                          'corpus_suspense_entropy_1',
                           'generated_surprise_entropy',
                           "corpus_surprise_word_overlap",
                           "corpus_surprise_simple_embedding",
@@ -401,7 +402,13 @@ prediction_columns = ["generated_surprise_word_overlap",
                           'generated_suspense_l1_state', 'generated_suspense_l2_state',
                           'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
                           'corpus_suspense_l1_state', 'corpus_suspense_l2_state',
-                          'textblob_sentiment', 'vader_sentiment', 'sentiment']
+                          'textblob_sentiment', 'vader_sentiment', 'sentiment',
+                        'corpus_suspense_entropy_ex_gold_1',
+                        'generated_suspense_entropy_ex_gold_1',
+                        'corpus_suspense_l1_ex_gold', 'corpus_suspense_l2_ex_gold',
+                        'generated_suspense_l1_state_ex_gold', 'generated_suspense_l2_state_ex_gold',
+                        'corpus_suspense_l1_state_ex_gold', 'corpus_suspense_l2_state_ex_gold',
+                        ]
 
 def scale_prediction_columns(position_df):
     for col in prediction_columns:
@@ -489,7 +496,7 @@ def create_story_plots(args):
             prom_data = []
             for c in y_axis_columns:
                 p_data = group_df[c]
-                p_data = p_data[:len(p_data) - 1]
+                #p_data = p_data[:len(p_data) - 1]
                 prom_data.extend(p_data)
 
             prom_weighting = args["peak_prominence_weighting"]
@@ -824,7 +831,7 @@ def create_story_plots(args):
                 yaxis=dict(
                     title=f'Suspense',
                 ),
-                showlegend=not args["export_only"],
+                showlegend=args["export_only"],
                 legend=dict(
                     orientation="h")
             )

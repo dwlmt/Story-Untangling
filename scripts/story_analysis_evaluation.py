@@ -41,13 +41,14 @@ parser.add_argument("--cuda-device", default=0, type=int, help="The default CUDA
 
 args = parser.parse_args()
 
+
 model_prediction_columns = [
                         'textblob_sentiment', 'vader_sentiment', 'sentiment',
                          "baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
                         'generated_surprise_l1', 'generated_surprise_l2',
                         'generated_suspense_l1', 'generated_suspense_l2',
-                        'generated_suspense_entropy',
-                        'corpus_suspense_entropy',
+                        'generated_suspense_entropy_2',
+                        'corpus_suspense_entropy_2',
                         'generated_surprise_entropy',
                         "corpus_surprise_word_overlap",
                         "corpus_surprise_simple_embedding",
@@ -58,10 +59,14 @@ model_prediction_columns = [
                         'generated_suspense_l1_state', 'generated_suspense_l2_state',
                         'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
                         'corpus_suspense_l1_state', 'corpus_suspense_l2_state',
+                        'corpus_suspense_entropy_ex_gold_2',
+                        'generated_suspense_entropy_ex_gold_2',
+                        'corpus_suspense_l1_ex_gold', 'corpus_suspense_l2_ex_gold',
+                        'generated_suspense_l1_state_ex_gold', 'generated_suspense_l2_state_ex_gold',
+                        'corpus_suspense_l1_state_ex_gold', 'corpus_suspense_l2_state_ex_gold',
                         ]
 
 annotator_prediction_column = "suspense"
-
 
 def ensure_dir(file_path):
     directory = os.path.dirname(file_path)
@@ -319,7 +324,7 @@ class RelativeToAbsoluteModel(torch.nn.Module):
                     torch.tensor([1.0])).item() - self.epsilon)
             elif cat == 5:
                 change_value = self.big_increase(torch.tensor([1.0])).clamp(
-                    min=max(0.0, self.increase(torch.tensor([1.0])).item())) + self.epsilon
+                    min=max(0.0, self.increase(torch.tensor([1.0])).item()) + self.epsilon)
 
             if cat != 0:
                 new_value = last + change_value
@@ -437,6 +442,10 @@ def cont_model_pred_to_ann(args, train_df):
                     worker_ids = story_df["worker_id"].unique()
                     for worker_id in worker_ids:
 
+                        if worker_id in ["median", "mean"]:
+                            continue
+                            # Only compare against the real annotators not the virtual average.
+
                         meta_dict = {}
 
                         worker_df = story_df.loc[story_df["worker_id"] == worker_id]
@@ -457,7 +466,7 @@ def cont_model_pred_to_ann(args, train_df):
                             measure_values = worker_df[f"{col}_scaled"].tolist()
                             measure_values_unscaled = worker_df[f"{col}"].tolist()
 
-                            if col != "baseclass":
+                            if col != "baseclass" and sum([1 for i in measure_values_unscaled if i > 0.0]) > 0:
                                 #print(measure_values, measure_values_unscaled, suspense_list)
                                 measure_values, measure_values_unscaled, suspense_list = zip(*((m, mu, s) for m, mu, s in
                                                                                                zip(measure_values,
@@ -475,12 +484,20 @@ def cont_model_pred_to_ann(args, train_df):
 
                             abs_suspense = fitting_model(suspense)
 
-                            if len(model_predictions) == 0 or len(abs_suspense) != len(model_predictions):
+                            if len(model_predictions) == 0 or len(abs_suspense) == 0:
                                 continue
 
-                            comparison_one_all.append(model_predictions.tolist())
-                            comparison_two_all.append(abs_suspense.tolist())
-                            story_meta.append(meta_dict)
+                            model_predictions_list = model_predictions.tolist()
+                            abs_suspense_list = abs_suspense.tolist()
+
+                            model_predictions_list = model_predictions_list[0: min(len(model_predictions_list),len(abs_suspense_list))]
+                            abs_suspense_list = abs_suspense_list[0: min(len(model_predictions_list), len(abs_suspense_list))]
+
+                            #print(model_predictions_list, abs_suspense_list)
+                            if len(model_predictions_list) >= 2:
+                                comparison_one_all.append(model_predictions_list)
+                                comparison_two_all.append(abs_suspense_list)
+                                story_meta.append(meta_dict)
 
                             if abs_suspense.size(0) == model_predictions.size(0):
                                 loss = criterion(abs_suspense, model_predictions)
@@ -584,8 +601,10 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
             try:
 
                 if len(pred) != len(ann):
-                    print("List not equal", results_dict, pred, ann)
+                    #print("List not equal", results_dict, pred, ann)
                     continue
+                else:
+                    pass#print(results_dict, pred, ann)
 
                 cross_correlation = ccf(numpy.asarray(pred), numpy.asarray(ann))
                 cross_correlation_list.append(numpy.mean(cross_correlation))
@@ -632,8 +651,10 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
     else:
 
         if len(predictions) != len(annotations):
-            print("List not equal", results_dict, predictions, annotations)
+            #print("List not equal", results_dict, predictions, annotations)
             return
+        else:
+            pass#print(results_dict, predictions, annotations)
 
         cross_correlation = ccf(numpy.asarray(predictions), numpy.asarray(annotations))
         results_dict[f"cross_correlation"] = numpy.mean(cross_correlation)
@@ -648,7 +669,7 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         results_dict["l2_distance"] = distance.euclidean(predictions, annotations) / len(annotations)
         results_dict["l1_distance"] = distance.cityblock(predictions, annotations) / len(annotations)
 
-        print(results_dict, predictions, annotations)
+        #print(results_dict, predictions, annotations)
 
         #triples = [("pred", i, p) for i, p in enumerate(predictions)]
         #triples += [("ann", i, p) for i, p in enumerate(annotations)]
@@ -656,7 +677,7 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
 
         #if len(triples) > 2:
         #    t = AnnotationTask(data=triples, distance=interval_distance)
-       #     results_dict["alpha"] = t.alpha()
+        #     results_dict["alpha"] = t.alpha()
 
         try:
             coint_t, coint_t_p_value, coint_t_critical_values = coint(numpy.asarray(annotations),
@@ -760,7 +781,8 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
                     measure_offset = 0.0 - measure_values[0]
                     measure_values = [m + measure_offset for m in measure_values]
 
-                    if col != "baseclass":
+                    #print(col, measure_values, measure_values_unscaled, sentence_nums)
+                    if col != "baseclass" and sum([1 for i in measure_values_unscaled if i > 0]) > 0:
                         measure_values, measure_values_unscaled, sentence_nums = zip(*((m, mu, s) for m, mu, s in zip(measure_values, measure_values_unscaled, sentence_nums) if mu > 0))
 
                     color_lookup = 1
