@@ -51,14 +51,13 @@ parser.add_argument('--export-columns', required=False, type=str, nargs="*",
 
 args = parser.parse_args()
 
-
 model_prediction_columns = [
                         'textblob_sentiment', 'vader_sentiment', 'sentiment',
                          "baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
                         'generated_surprise_l1', 'generated_surprise_l2',
                         'generated_suspense_l1', 'generated_suspense_l2',
-                        'generated_suspense_entropy_1',
-                        'corpus_suspense_entropy_1',
+                        'generated_suspense_entropy_2',
+                        'corpus_suspense_entropy_2',
                         'generated_surprise_entropy',
                         "corpus_surprise_word_overlap",
                         "corpus_surprise_simple_embedding",
@@ -69,8 +68,8 @@ model_prediction_columns = [
                         'generated_suspense_l1_state', 'generated_suspense_l2_state',
                         'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
                         'corpus_suspense_l1_state', 'corpus_suspense_l2_state',
-                        'corpus_suspense_entropy_ex_gold_1',
-                        'generated_suspense_entropy_ex_gold_1',
+                        'corpus_suspense_entropy_ex_gold_2',
+                        'generated_suspense_entropy_ex_gold_2',
                         'corpus_suspense_l1_ex_gold', 'corpus_suspense_l2_ex_gold',
                         'generated_suspense_l1_state_ex_gold', 'generated_suspense_l2_state_ex_gold',
                         'corpus_suspense_l1_state_ex_gold', 'corpus_suspense_l2_state_ex_gold',
@@ -648,7 +647,7 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
             except Exception as ex:
                 print(ex)
 
-        def ci(r, p, n, alpha=0.05):
+        def ci(r, n, alpha=0.05):
 
             r_z = numpy.arctanh(r)
             se = 1 / numpy.sqrt(n - 3)
@@ -665,18 +664,22 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
         results_dict[f"kendall"] = sum(kendall_list) / float(len(kendall_list))
         results_dict[f"spearman"] = sum(spearman_list) / float(len(spearman_list))
 
-        results_dict[f"pearson_pvalue"] = combine_pvalues(pearson_pvalue_list)
-        results_dict[f"kendall_pvalue"] = combine_pvalues(kendall_pvalue_list)
-        results_dict[f"spearman_pvalue"] = combine_pvalues(spearman_pvalue_list)
+        results_dict[f"pearson_agg_stat"], results_dict[f"pearson_pvalue"] = combine_pvalues([x for x in pearson_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
+        results_dict[f"kendall_agg_stat"], results_dict[f"kendall_pvalue"] = combine_pvalues([x for x in kendall_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
+        results_dict[f"spearman_agg_stat"], results_dict[f"spearman_pvalue"] = combine_pvalues([x for x in spearman_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
 
-        results_dict[f"pearson_low"], results_dict[f"pearson_high"] = ci(results_dict[f"pearson"],
-                                                                         results_dict[f"pearson_pvalue"], len(pearson_list))
-        results_dict[f"kendall_low"], results_dict[f"kendall_high"] = ci(results_dict[f"kendall"],
-                                                                         results_dict[f"kendall_pvalue"],
+        results_dict[f"pearson_low_95"], results_dict[f"pearson_high_95"] = ci(results_dict[f"pearson"], len(pearson_list))
+        results_dict[f"kendall_low_95"], results_dict[f"kendall_high_95"] = ci(results_dict[f"kendall"],
                                                                          len(kendall_list))
-        results_dict[f"spearman_low"], results_dict[f"spearman_high"] = ci(results_dict[f"spearman"],
-                                                                         results_dict[f"spearman_pvalue"],
+        results_dict[f"spearman_low_95"], results_dict[f"spearman_high_95"] = ci(results_dict[f"spearman"],
                                                                          len(spearman_list))
+
+        results_dict[f"pearson_low_99"], results_dict[f"pearson_high_99"] = ci(results_dict[f"pearson"],
+                                                                               len(pearson_list), alpha=0.01)
+        results_dict[f"kendall_low_99"], results_dict[f"kendall_high_99"] = ci(results_dict[f"kendall"],
+                                                                               len(kendall_list), alpha=0.01)
+        results_dict[f"spearman_low_99"], results_dict[f"spearman_high_99"] = ci(results_dict[f"spearman"],
+                                                                                 len(spearman_list), alpha=0.01)
 
         results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(l2_distance_list))
         results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(l1_distance_list))
