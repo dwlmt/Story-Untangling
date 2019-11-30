@@ -54,10 +54,12 @@ args = parser.parse_args()
 model_prediction_columns = [
                         'textblob_sentiment', 'vader_sentiment', 'sentiment',
                          "baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
+                        "generated_surprise_gpt_embedding",
                         'generated_surprise_l1', 'generated_surprise_l2',
                         'generated_suspense_l1', 'generated_suspense_l2',
-                        'generated_suspense_entropy_2',
-                        'corpus_suspense_entropy_2',
+                        'generated_suspense_entropy_1',
+                        'corpus_suspense_entropy_1',
+                        'generated_suspense_entropy_1_diff',
                         'generated_surprise_entropy',
                         "corpus_surprise_word_overlap",
                         "corpus_surprise_simple_embedding",
@@ -68,8 +70,8 @@ model_prediction_columns = [
                         'generated_suspense_l1_state', 'generated_suspense_l2_state',
                         'corpus_surprise_l1_state', 'corpus_surprise_l2_state',
                         'corpus_suspense_l1_state', 'corpus_suspense_l2_state',
-                        'corpus_suspense_entropy_ex_gold_2',
-                        'generated_suspense_entropy_ex_gold_2',
+                        'corpus_suspense_entropy_ex_gold_1',
+                        'generated_suspense_entropy_ex_gold_1',
                         'corpus_suspense_l1_ex_gold', 'corpus_suspense_l2_ex_gold',
                         'generated_suspense_l1_state_ex_gold', 'generated_suspense_l2_state_ex_gold',
                         'corpus_suspense_l1_state_ex_gold', 'corpus_suspense_l2_state_ex_gold',
@@ -918,7 +920,7 @@ def prepare_dataset(annotator_df, position_df, keep_first_sentence=False):
     #merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
 
     for col in model_prediction_columns:
-        merged_df[f"{col}_diff"] = merged_df[f"{col}_later"] - merged_df[col]
+        merged_df[f"{col}_diff"] = max(merged_df[f"{col}_later"] - merged_df[col],0.0)
 
         # if not keep_first_sentence:
     if keep_first_sentence:

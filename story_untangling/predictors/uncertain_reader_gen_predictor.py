@@ -12,6 +12,7 @@ from allennlp.common import JsonDict
 from allennlp.common.util import sanitize
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
+from allennlp.nn.util import get_lengths_from_binary_sequence_mask
 from allennlp.predictors import Predictor
 from anytree import AnyNode, Node, PreOrderIter, LevelOrderGroupIter
 from anytree.exporter import DictExporter
@@ -220,6 +221,7 @@ class UncertainReaderGenPredictor(Predictor):
     def del_tensors_on_node(self, n, keep_text_tensor=False):
         if not self.keep_tensor_output:
             n.story_tensor = None
+            n.gpt_tensor = None
             n.sentence_tensor = None
             n.indexed_tokens = None
 
@@ -353,6 +355,10 @@ class UncertainReaderGenPredictor(Predictor):
             child_tokens = [t.lemma_ for t in child_sentence]
             c.word_jaccard_sim = jaccard_similarity(sentence_tokens, child_tokens)
             c.spacy_embedding_sim = spacy_sentence.similarity(child_sentence)
+
+            if c.gold == True:
+                c.gpt_embedding_sim = torch.cosine_similarity(root.gpt_embedding, c.gpt_embedding, dim=0)
+
             # print("Similarity:", c.word_jaccard_sim, c.spacy_embedding_sim)
 
         if not self._cosine:
@@ -464,7 +470,7 @@ class UncertainReaderGenPredictor(Predictor):
                                     textblob_sentiment=textblob_sent,
                                     parent=per_sentence)
 
-            correct_futures = self.create_correct_futures(embedded_text_mask, encoded_story, position, text,
+            correct_futures = self.create_correct_futures(embedded_text_mask, embedded_text_tensor, encoded_story, position, text,
                                                           text_field, story_id, sentence_ids, sentence_nums,
                                                           merged_sentiment)
 
@@ -676,9 +682,12 @@ class UncertainReaderGenPredictor(Predictor):
 
             return base_correct
 
-    def create_correct_futures(self, embedded_text_mask, encoded_stories, position, text, text_field, story_id,
+    def create_correct_futures(self, embedded_text_mask, embedded_text_tensor, encoded_stories, position, text, text_field, story_id,
                                sentence_ids, sentence_nums, sentiment):
         correct_futures = []
+
+        embedded_text_lengths = get_lengths_from_binary_sequence_mask(embedded_text_mask)
+
         # Put the correct representations into the sentences at the given point.
         parent_story_tensor = None
         for i in range(0, self.levels_to_rollout + 2):
@@ -696,7 +705,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             correct_future = AnyNode(gold=True,
                                      story_tensor=encoded_stories[position + i].detach(),
-                                     token_ids=text_to_gen_from_future,
+                                     gpt_tensor=embedded_text_tensor[position + i, embedded_text_lengths[position + i] - 1],                                     token_ids=text_to_gen_from_future,
                                      story_id=story_id,
                                      sentence_id=sentence_ids[position + i],
                                      sentence_num=sentence_nums[position + i],
@@ -818,6 +827,7 @@ class UncertainReaderGenPredictor(Predictor):
             type = "generated"
             stats_source_dict = {**stats_source_dict, **{f"{type}_surprise_word_overlap": [],
                                                          f"{type}_surprise_simple_embedding": [],
+                                                         f"{type}_surprise_gpt_embedding": [],
                                                          f"{type}_suspense_l1": [],
                                                          f"{type}_suspense_l2": [],
                                                          f"{type}_suspense_l1_state": [],
@@ -838,6 +848,7 @@ class UncertainReaderGenPredictor(Predictor):
             type = "corpus"
             stats_source_dict = {**stats_source_dict, **{f"{type}_surprise_word_overlap": [],
                                                          f"{type}_surprise_simple_embedding": [],
+                                                         f"{type}_surprise_gpt_embedding": [],
                                                          f"{type}_suspense_l1": [],
                                                          f"{type}_suspense_l2": [],
                                                          f"{type}_suspense_l1_state": [],
@@ -927,6 +938,7 @@ class UncertainReaderGenPredictor(Predictor):
 
         surprise_word_overlap_culm = 0.0
         surprise_simple_embedding_culm = 0.0
+        surprise_gpt_embedding_culm = 0.0
 
         suspense_l1_culm = 0.0
         suspense_l2_culm = 0.0
@@ -967,6 +979,9 @@ class UncertainReaderGenPredictor(Predictor):
                 surprise_word_overlap_culm += surprise_word_overlap
                 surprise_simple_embedding = 1.0 - gold.spacy_embedding_sim
                 surprise_simple_embedding_culm += surprise_simple_embedding
+
+                surprise_gpt_embedding = 1.0 - gold.gpt_embedding_sim
+                surprise_gpt_embedding_culm += surprise_gpt_embedding
 
                 metrics_dict[f"{type}_surprise_word_overlap_{i}"] = surprise_word_overlap
                 metrics_dict[f"{type}_surprise_simple_embedding_{i}"] = surprise_simple_embedding
@@ -1070,6 +1085,7 @@ class UncertainReaderGenPredictor(Predictor):
         # print("Calculated", surprise_word_overlap_culm, surprise_simple_embedding_culm)
         metrics_dict[f"{type}_surprise_word_overlap"] = surprise_word_overlap_culm
         metrics_dict[f"{type}_surprise_simple_embedding"] = surprise_simple_embedding_culm
+        metrics_dict[f"{type}_surprise_gpt_embedding"] = surprise_gpt_embedding_culm
 
         metrics_dict[f"{type}_suspense_l1"] = suspense_l1_culm
         metrics_dict[f"{type}_suspense_l2"] = suspense_l2_culm
