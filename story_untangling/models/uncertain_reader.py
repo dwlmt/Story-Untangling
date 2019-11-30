@@ -293,9 +293,7 @@ class UncertainReader(Model):
                 #print("Gen loss", loss)
 
             if self.full_output_embedding:
-                padded_embedded_text_tensor = torch.zeros((embedded_text_tensor.shape[0], embedded_text_tensor.shape[1],
-                                                           masks_tensor.shape[-1],
-                                                           embedded_text_tensor.shape[-1])).float()
+                padded_embedded_text_tensor = embedded_text_tensor
 
                 output_dict["source_encoded_stories"] = source_encoded_stories.cpu()
                 output_dict["embedded_text_tensor"] = padded_embedded_text_tensor.cpu()
