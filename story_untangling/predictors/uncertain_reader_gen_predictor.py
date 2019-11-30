@@ -358,6 +358,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             if c.gold == True:
                 c.gpt_embedding_sim = torch.cosine_similarity(root.gpt_tensor, c.gpt_tensor, dim=0)
+                print("Gpt",root.gpt_tensor,c.gpt_tensor, c.gpt_embedding_sim)
 
 
             # print("Similarity:", c.word_jaccard_sim, c.spacy_embedding_sim)
@@ -704,6 +705,8 @@ class UncertainReaderGenPredictor(Predictor):
 
             text_as_list = text_to_gen_from_future.tolist()
 
+            print("Create node, GPT Tensor",embedded_text_tensor[position + i, embedded_text_lengths[position + i] - 1])
+
             correct_future = AnyNode(gold=True,
                                      story_tensor=encoded_stories[position + i].detach(),
                                      gpt_tensor=embedded_text_tensor[position + i, embedded_text_lengths[position + i] - 1],                                     token_ids=text_to_gen_from_future,
@@ -981,6 +984,7 @@ class UncertainReaderGenPredictor(Predictor):
                 surprise_simple_embedding = 1.0 - gold.spacy_embedding_sim
                 surprise_simple_embedding_culm += surprise_simple_embedding
 
+                print("GPT Embedding Sim", gold.gpt_embedding_sim)
                 surprise_gpt_embedding = 1.0 - gold.gpt_embedding_sim
                 surprise_gpt_embedding_culm += surprise_gpt_embedding
 
