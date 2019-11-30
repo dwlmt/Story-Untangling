@@ -359,6 +359,7 @@ class UncertainReaderGenPredictor(Predictor):
             if c.gold == True:
                 c.gpt_embedding_sim = torch.cosine_similarity(root.gpt_tensor, c.gpt_tensor, dim=0)
 
+
             # print("Similarity:", c.word_jaccard_sim, c.spacy_embedding_sim)
 
         if not self._cosine:
