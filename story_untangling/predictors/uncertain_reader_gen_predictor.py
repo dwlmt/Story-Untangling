@@ -357,7 +357,7 @@ class UncertainReaderGenPredictor(Predictor):
             c.spacy_embedding_sim = spacy_sentence.similarity(child_sentence)
 
             if c.gold == True:
-                c.gpt_embedding_sim = torch.cosine_similarity(root.gpt_embedding, c.gpt_embedding, dim=0)
+                c.gpt_embedding_sim = torch.cosine_similarity(root.gpt_tensor, c.gpt_tensor, dim=0)
 
             # print("Similarity:", c.word_jaccard_sim, c.spacy_embedding_sim)
 
