@@ -689,6 +689,8 @@ class UncertainReaderGenPredictor(Predictor):
         correct_futures = []
 
         embedded_text_lengths = get_lengths_from_binary_sequence_mask(embedded_text_mask)
+        print("Embedded text", embedded_text_tensor, embedded_text_mask, embedded_text_lengths)
+        print("Embedded text shape", embedded_text_tensor.size(), embedded_text_mask.size(), embedded_text_lengths.size())
 
         # Put the correct representations into the sentences at the given point.
         parent_story_tensor = None
