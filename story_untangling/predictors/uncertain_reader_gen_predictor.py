@@ -146,13 +146,13 @@ class UncertainReaderGenPredictor(Predictor):
 
         self.min_sentence_length = 3
         self.max_generated_sentence_length = 300
-        self.context_sentence_to_generate_from = 24
+        self.context_sentence_to_generate_from = 25
 
         self.sentiment_weighting =  float(os.getenv('PREDICTION_SENTIMENT_WEIGHTING', 1.0))
         self.sentiment_positive = float(os.getenv('PREDICTION_SENTIMENT_POSITIVE_WEIGHTING', 1.0))
         self.sentiment_negative = float(os.getenv('PREDICTION_SENTIMENT_NEGATIVE_WEIGHTING', 2.0))
 
-        self._remove_sentence_output = True
+        self._remove_sentence_output = bool(os.getenv('REMOVE_SENTENCE_OUTPUT', True))
 
         self._model.full_output_embedding = True
         self._model.run_feedforwards = False  # Turn off normal feedforwards to avoid running twice.
