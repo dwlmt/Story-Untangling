@@ -69,7 +69,7 @@ parser.add_argument('--turning-point-stds', required=False, type=float, nargs="*
 parser.add_argument("--export-only", default=False, action="store_true", help="Only for export so remove legend and filter down export parameters.")
 parser.add_argument('--export-columns', required=False, type=str, nargs="*",
                     default=['generated_surprise_l1', 'generated_suspense_l1',
-                          'generated_suspense_entropy_1',
+                          'generated_surprise_entropy',
                           'generated_suspense_l1_state'])
 
 
@@ -384,14 +384,13 @@ def create_sentiment_plots(args):
             print(f"Save plot pdf: {file_path}")
             pio.write_image(fig, file_path)
 
-#prediction_columns = ["generated_suspense_entropy_1","corpus_suspense_entropy_1"]
 
 prediction_columns = ["generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
                           'generated_surprise_l1', 'generated_surprise_l2'
                           , 'generated_suspense_l1', 'generated_suspense_l2',
-                          'generated_suspense_entropy_1',
-                          'corpus_suspense_entropy_1',
+                          'generated_suspense_entropy_1_diff',
+                          'corpus_suspense_entropy_1_diff',
                           'generated_surprise_entropy',
                           "corpus_surprise_word_overlap",
                           "corpus_surprise_simple_embedding",
@@ -413,12 +412,15 @@ prediction_columns = ["generated_surprise_word_overlap",
 def scale_prediction_columns(position_df):
     for col in prediction_columns:
 
+        if not col in position_df.columns:
+            continue
+
         scaler = StandardScaler()
         scaled_col = numpy.squeeze(scaler.fit_transform(position_df[col].to_numpy().reshape(-1, 1)), axis=1).tolist()
         position_df[f"{col}_scaled"] = scaled_col
         print(position_df[f"{col}_scaled"], scaled_col)
 
-    position_df = position_df.reset_index()
+    #position_df = position_df.reset_index()
 
     return position_df
 
@@ -434,6 +436,22 @@ def create_story_plots(args):
         turning_points_df = turning_points_df.fillna(value=0.0)
 
     position_df = pd.read_csv(args["position_stats"])
+
+    position_df = position_df.sort_values(by=["story_id", "sentence_num"]).reset_index()
+
+    position_df = pd.concat([position_df, position_df[1:].reset_index(drop=True).add_suffix("_later")],
+                            axis=1)
+    position_df = position_df.sort_values(by=["story_id", "sentence_num"]).reset_index()
+    position_df = position_df.loc[position_df["story_id"] == position_df["story_id_later"]]
+
+    # merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
+
+    for col in prediction_columns:
+        if "diff" in col:
+            continue
+
+        position_df[f"{col}_diff"] = position_df[f"{col}_later"] - position_df[col]
+        position_df[f"{col}_diff"] = numpy.where(position_df[f"{col}_diff"] < 0.0, 0.0, position_df[f"{col}_diff"])
 
     position_df = scale_prediction_columns(position_df)
 
@@ -660,8 +678,6 @@ def create_story_plots(args):
 
                             if done_story:
                                 continue
-                            else:
-                                done_story
 
                             turn_dict = {}
 
@@ -831,7 +847,7 @@ def create_story_plots(args):
                 yaxis=dict(
                     title=f'Suspense',
                 ),
-                showlegend=args["export_only"],
+                showlegend=not args["export_only"],
                 legend=dict(
                     orientation="h")
             )

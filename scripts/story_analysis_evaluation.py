@@ -52,8 +52,12 @@ parser.add_argument('--export-columns', required=False, type=str, nargs="*",
 args = parser.parse_args()
 
 model_prediction_columns = [
+                        "corpus_surprise_gpt_embedding",
+                        ]
+
+model_prediction_columns = [
                         'textblob_sentiment', 'vader_sentiment', 'sentiment',
-                         "baseclass", "generated_surprise_word_overlap","generated_surprise_simple_embedding",
+                         "baseclass", "generated_surprise_word_overlap","corpus_surprise_simple_embedding",
                         "generated_surprise_gpt_embedding",
                         'generated_surprise_l1', 'generated_surprise_l2',
                         'generated_suspense_l1', 'generated_suspense_l2',
@@ -112,7 +116,7 @@ def ordinal_regression_bucketed_evaluation(annotator_df, position_df, args):
     results_data = []
 
     for col in model_prediction_columns:
-        for feature_col in [f"{col}_diff", f"{col}"]:
+        for feature_col in [f"{col}"]:
             results_dict = OrderedDict()
             results_dict["measure"] = feature_col
 
@@ -281,6 +285,7 @@ def agreement(agreement_triples, m, results_dict, distance=interval_distance):
 
 
 def features(feature_col, train_df):
+
     train_features = train_df[f"{feature_col}_scaled"].to_numpy()
     train_features = train_features.reshape(-1, 1)
     return train_features
@@ -658,33 +663,36 @@ def abs_evaluate_predictions(predictions, annotations, results_dict):
             lo, hi = numpy.tanh((lo_z, hi_z))
             return lo, hi
 
-        results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(coint_ann_to_pred))
-        results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(coint_pred_to_ann))
-        results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(cross_correlation_list))
+        try:
+            results_dict[f"pearson"] = sum(pearson_list) / float(len(pearson_list))
+            results_dict[f"kendall"] = sum(kendall_list) / float(len(kendall_list))
+            results_dict[f"spearman"] = sum(spearman_list) / float(len(spearman_list))
 
-        results_dict[f"pearson"] = sum(pearson_list) / float(len(pearson_list))
-        results_dict[f"kendall"] = sum(kendall_list) / float(len(kendall_list))
-        results_dict[f"spearman"] = sum(spearman_list) / float(len(spearman_list))
+            results_dict[f"pearson_agg_stat"], results_dict[f"pearson_pvalue"] = combine_pvalues([x for x in pearson_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
+            results_dict[f"kendall_agg_stat"], results_dict[f"kendall_pvalue"] = combine_pvalues([x for x in kendall_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
+            results_dict[f"spearman_agg_stat"], results_dict[f"spearman_pvalue"] = combine_pvalues([x for x in spearman_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
 
-        results_dict[f"pearson_agg_stat"], results_dict[f"pearson_pvalue"] = combine_pvalues([x for x in pearson_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
-        results_dict[f"kendall_agg_stat"], results_dict[f"kendall_pvalue"] = combine_pvalues([x for x in kendall_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
-        results_dict[f"spearman_agg_stat"], results_dict[f"spearman_pvalue"] = combine_pvalues([x for x in spearman_pvalue_list if x > 0.0 and x < 1.0], method="mudholkar_george")
+            results_dict[f"pearson_low_95"], results_dict[f"pearson_high_95"] = ci(results_dict[f"pearson"], len(pearson_list))
+            results_dict[f"kendall_low_95"], results_dict[f"kendall_high_95"] = ci(results_dict[f"kendall"],
+                                                                             len(kendall_list))
+            results_dict[f"spearman_low_95"], results_dict[f"spearman_high_95"] = ci(results_dict[f"spearman"],
+                                                                             len(spearman_list))
 
-        results_dict[f"pearson_low_95"], results_dict[f"pearson_high_95"] = ci(results_dict[f"pearson"], len(pearson_list))
-        results_dict[f"kendall_low_95"], results_dict[f"kendall_high_95"] = ci(results_dict[f"kendall"],
-                                                                         len(kendall_list))
-        results_dict[f"spearman_low_95"], results_dict[f"spearman_high_95"] = ci(results_dict[f"spearman"],
-                                                                         len(spearman_list))
+            results_dict[f"pearson_low_99"], results_dict[f"pearson_high_99"] = ci(results_dict[f"pearson"],
+                                                                                   len(pearson_list), alpha=0.01)
+            results_dict[f"kendall_low_99"], results_dict[f"kendall_high_99"] = ci(results_dict[f"kendall"],
+                                                                                   len(kendall_list), alpha=0.01)
+            results_dict[f"spearman_low_99"], results_dict[f"spearman_high_99"] = ci(results_dict[f"spearman"],
+                                                                                     len(spearman_list), alpha=0.01)
 
-        results_dict[f"pearson_low_99"], results_dict[f"pearson_high_99"] = ci(results_dict[f"pearson"],
-                                                                               len(pearson_list), alpha=0.01)
-        results_dict[f"kendall_low_99"], results_dict[f"kendall_high_99"] = ci(results_dict[f"kendall"],
-                                                                               len(kendall_list), alpha=0.01)
-        results_dict[f"spearman_low_99"], results_dict[f"spearman_high_99"] = ci(results_dict[f"spearman"],
-                                                                                 len(spearman_list), alpha=0.01)
+            results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(l2_distance_list))
+            results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(l1_distance_list))
 
-        results_dict[f"l2_distance"] = sum(l2_distance_list) / float(len(l2_distance_list))
-        results_dict[f"l1_distance"] = sum(l1_distance_list) / float(len(l1_distance_list))
+            results_dict[f"first_second_cointegration"] = sum(coint_ann_to_pred) / float(len(coint_ann_to_pred))
+            results_dict[f"second_first_cointegration"] = sum(coint_pred_to_ann) / float(len(coint_pred_to_ann))
+            results_dict[f"cross_correlation"] = sum(cross_correlation_list) / float(len(cross_correlation_list))
+        except Exception as ex:
+            print(ex)
         #results_dict[f"alpha"] = sum(alpha_list) / float(len(annotations))
 
     else:
@@ -741,7 +749,27 @@ def plot_annotator_and_model_predictions(position_df, merged_sentence_df, args, 
     else:
         columns = model_prediction_columns
 
+    position_df  = position_df.sort_values(by=["story_id", "sentence_num"]).reset_index()
+
+    position_df = pd.concat([position_df , position_df [1:].reset_index(drop=True).add_suffix("_later")],
+                          axis=1)
+    position_df  = position_df .sort_values(by=["story_id", "sentence_num"]).reset_index()
+    position_df  = position_df .loc[position_df ["story_id"] == position_df ["story_id_later"]]
+
+    # merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
+
+    for col in model_prediction_columns:
+        if "diff" in col:
+            continue
+
+        position_df[f"{col}_diff"] = position_df[f"{col}_later"] - position_df[col]
+        position_df[f"{col}_diff"] = numpy.where(position_df[f"{col}_diff"]<0.0, 0.0, position_df[f"{col}_diff"])
+
+
     position_df = scale_prediction_columns(position_df)
+
+    print(position_df)
+    print(position_df.columns)
 
     colors = plotly.colors.DEFAULT_PLOTLY_COLORS
 
@@ -920,7 +948,9 @@ def prepare_dataset(annotator_df, position_df, keep_first_sentence=False):
     #merged_df = merged_df.loc[merged_df["sentence_num"] + 1 == merged_df["sentence_num_later"]]
 
     for col in model_prediction_columns:
-        merged_df[f"{col}_diff"] = max(merged_df[f"{col}_later"] - merged_df[col],0.0)
+        col = col.replace("_diff","")
+        merged_df[f"{col}_diff"] = merged_df[f"{col}_later"] - merged_df[col]
+        merged_df[f"{col}_diff"] = numpy.where(merged_df[f"{col}_diff"] < 0.0, 0.0, merged_df[f"{col}_diff"])
 
         # if not keep_first_sentence:
     if keep_first_sentence:
