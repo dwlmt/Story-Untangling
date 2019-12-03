@@ -705,7 +705,7 @@ class UncertainReaderGenPredictor(Predictor):
 
             correct_future = AnyNode(gold=True,
                                      story_tensor=encoded_stories[position + i].detach(),
-                                     gpt_tensor=torch.mean(torch.squeeze(embedded_text_tensor[position + i, 0: embedded_text_lengths[position + i] - 1])),
+                                     gpt_tensor=torch.mean(torch.squeeze(embedded_text_tensor[position + i, 0: embedded_text_lengths[position + i]])),
                                      token_ids=text_to_gen_from_future,
                                      story_id=story_id,
                                      sentence_id=sentence_ids[position + i],
