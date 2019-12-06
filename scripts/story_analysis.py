@@ -385,7 +385,8 @@ def create_sentiment_plots(args):
             pio.write_image(fig, file_path)
 
 
-prediction_columns = ["generated_surprise_word_overlap",
+prediction_columns = [   "baseclass", "random",
+                          "generated_surprise_word_overlap",
                           "generated_surprise_simple_embedding",
                           'generated_surprise_l1', 'generated_surprise_l2'
                           , 'generated_suspense_l1', 'generated_suspense_l2',
@@ -436,6 +437,9 @@ def create_story_plots(args):
         turning_points_df = turning_points_df.fillna(value=0.0)
 
     position_df = pd.read_csv(args["position_stats"])
+
+    position_df["baseclass"] = 0.0
+    position_df["random"] = numpy.random.randint(1, 100, position_df.shape[0])
 
     position_df = position_df.sort_values(by=["story_id", "sentence_num"]).reset_index()
 

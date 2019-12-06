@@ -57,7 +57,7 @@ model_prediction_columns = [
 
 model_prediction_columns = [
                         'textblob_sentiment', 'vader_sentiment', 'sentiment',
-                         "baseclass", "generated_surprise_word_overlap","corpus_surprise_simple_embedding",
+                         "baseclass", "random", "generated_surprise_word_overlap","corpus_surprise_simple_embedding",
                         "generated_surprise_gpt_embedding",
                         'generated_surprise_l1', 'generated_surprise_l2',
                         'generated_suspense_l1', 'generated_suspense_l2',
@@ -904,6 +904,7 @@ def evaluate_stories(args):
     position_df = pd.read_csv(args["position_stats"])
 
     position_df["baseclass"] = 0.0
+    position_df["random"] = numpy.random.randint(1, 100, position_df.shape[0])
 
     print(f"Position rows : {len(position_df)}")
     annotator_df = pd.read_csv(args["annotator_targets"])
