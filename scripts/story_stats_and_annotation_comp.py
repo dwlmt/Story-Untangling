@@ -833,8 +833,8 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
     merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
                                    how='inner')
 
-    merged_story_df = merged_story_df.fillna(value=0)
-    merged_sentence_df = merged_sentence_df.fillna(value=0)
+    #merged_story_df = merged_story_df.fillna(value=0)
+    #merged_sentence_df = merged_sentence_df.fillna(value=0)
 
     inter_annotator_agreement(merged_sentence_df, args)
     plot_annotator_sentences(merged_sentence_df, args)
