@@ -1,5 +1,6 @@
 import logging
 import random
+from itertools import islice
 from typing import Dict, Any, List, Optional, Tuple
 
 import torch
@@ -116,7 +117,7 @@ class UncertainReader(Model):
             for i, h in enumerate(reversed(transformer.h), start=1):
                 for param in h.parameters():
                     param.requires_grad = True
-                print(f"Finetune LM layer -{i}")
+                #print(f"Finetune LM layer -{i}")
                 if i == lm_finetune_top_layers:
                     break
 
@@ -181,8 +182,6 @@ class UncertainReader(Model):
                 for top_n in self._accuracy_top_k:
                     self._metrics[f"disc_accuracy_{i}_{top_n}"] = CategoricalAccuracy(top_k=top_n)
 
-                # self._metrics[f"entropy_{i}"] = Entropy()
-
                 self._metrics[f"disc_correct_dot_product_avg_{i}"] = Average()
                 self._metrics[f"disc_correct_log_prob_avg_{i}"] = Average()
                 self._metrics[f"disc_correct_prob_avg_{i}"] = Average()
@@ -213,12 +212,15 @@ class UncertainReader(Model):
            loss : ``torch.FloatTensor``, optional
                A scalar loss to be optimised.
            """
+
+        #print("Forward", text, metadata)
+
         output_dict = {}
         output_dict["metadata"] = metadata
 
-        try:
+        loss = torch.FloatTensor([0.0])
 
-            torch.set_printoptions(profile="full")
+        try:
 
             # Because the batch has sentences need to reshape so can use the masking util function.
             text_mod = {}
@@ -239,6 +241,8 @@ class UncertainReader(Model):
 
             masks_tensor = masks_tensor.to(def_device).view(batch_size, num_sentences, -1)
 
+            #print("Masks", masks_tensor)
+
             batch_encoded_stories = []
             batch_embedded_text = []
             batch_encoded_sentences = []
@@ -249,6 +253,8 @@ class UncertainReader(Model):
 
                 encoded_story, encoded_sentence = self.encode_story_vectors(story_embedded_text, story_mask)
 
+                #print("Encoded story", encoded_story, encoded_sentence)
+
                 batch_encoded_stories.append(encoded_story)
                 batch_embedded_text.append(story_embedded_text)
                 batch_encoded_sentences.append(encoded_sentence)
@@ -256,10 +262,10 @@ class UncertainReader(Model):
             batch_encoded_stories = torch.stack(batch_encoded_stories)
             batch_encoded_sentences = torch.stack(batch_encoded_sentences)
 
-            loss = torch.tensor(0.0).to(batch_encoded_stories.device)
+            loss = loss.to(batch_encoded_stories.device)
 
             source_encoded_stories = batch_encoded_stories
-            target_encoded_stories = batch_encoded_stories
+            target_encoded_stories = batch_encoded_sentences
 
             if self._story_feedforward and self.run_feedforwards:
                 source_encoded_stories = self._story_feedforward(source_encoded_stories)
@@ -267,24 +273,27 @@ class UncertainReader(Model):
             if self._target_feedforward and self.run_feedforwards:
                 target_encoded_stories = self._target_feedforward(target_encoded_stories)
 
+            #print("Source and target encoded", source_encoded_stories, target_encoded_stories)
+
             flip = random.choice([True, False])
 
             if self._disc_loss or (self._flip_loss and flip):
                 disc_loss, disc_output_dict = self.calculate_discriminatory_loss(source_encoded_stories,
-                                                                                 target_encoded_stories)
+                                                                                 target_encoded_stories, metadata)
                 output_dict = {**output_dict, **disc_output_dict}
                 loss += (disc_loss * self._disc_loss_weight)
+                #print("Disc loss", loss)
 
             if self._gen_loss or (self._flip_loss and not flip):
-                gen_loss, output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor,
+                gen_loss, gen_output_dict = self.calculate_gen_loss(source_encoded_stories, embedded_text_tensor,
                                                                 masks_tensor,
                                                                 text_mod, batch_size, num_sentences)
+                output_dict = {**output_dict, **gen_output_dict}
                 loss += (gen_loss * self._gen_loss_weight)
+                #print("Gen loss", loss)
 
             if self.full_output_embedding:
-                padded_embedded_text_tensor = torch.zeros((embedded_text_tensor.shape[0], embedded_text_tensor.shape[1],
-                                                           masks_tensor.shape[-1],
-                                                           embedded_text_tensor.shape[-1])).float()
+                padded_embedded_text_tensor = embedded_text_tensor
 
                 output_dict["source_encoded_stories"] = source_encoded_stories.cpu()
                 output_dict["embedded_text_tensor"] = padded_embedded_text_tensor.cpu()
@@ -296,7 +305,7 @@ class UncertainReader(Model):
             return output_dict
 
         except Exception as e:
-            print(text, metadata)
+            #print(e, text, metadata)
             raise e
 
     def encode_story_vectors(self, story_embedded_text, story_mask, sentence_hidden_state=None,
@@ -330,8 +339,10 @@ class UncertainReader(Model):
     def calculate_gen_loss(self, encoded_stories, encoded_sentences, masks_tensor, target_text, batch_size,
                            num_sentences):
 
+        ##print("Gen Loss")
+
         output_dict = {}
-        loss = torch.tensor(0.0).to(encoded_stories.device)
+        loss = torch.FloatTensor([0.0]).to(encoded_stories.device)
 
         encoded_sentences = encoded_sentences.view(encoded_sentences.shape[0] * encoded_sentences.shape[1],
                                                    encoded_sentences.shape[2], -1)
@@ -375,10 +386,13 @@ class UncertainReader(Model):
 
         return loss, output_dict
 
-    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_stories,
+    def calculate_discriminatory_loss(self, encoded_stories, target_encoded_stories, metadata,
                                       sentence_loss=False):
+
+        #print("Disc Loss")
+
         output_dict = {}
-        loss = torch.tensor(0.0).to(encoded_stories.device)
+        loss = torch.FloatTensor([0.0]).to(encoded_stories.device)
 
         batch_size, sentence_num, feature_size = encoded_stories.shape
 
@@ -451,6 +465,7 @@ class UncertainReader(Model):
                                                        i:, ]
                     batch_encoded_stories_correct = encoded_stories_flat[:encoded_stories_flat.shape[0] - i, :]
 
+
                     for top_k in self._accuracy_top_k:
                         self._metrics[f"disc_accuracy_{i}_{top_k}"](scores_softmax, target_classes)
                         self._metrics["accuracy_combined"](self._metrics[f"disc_accuracy_{i}_{top_k}"].get_metric())
@@ -489,7 +504,7 @@ class UncertainReader(Model):
         batch_group.index_fill_(0, torch.tensor(list(range(sentence_num - i, sentence_num))), 0)
         batch_group = batch_group.unsqueeze(dim=0)
         batch_group = batch_group.expand(batch_size, sentence_num)
-        batch_group = batch_group.contiguous().view(batch_size * sentence_num).byte()
+        batch_group = batch_group.contiguous().view(batch_size * sentence_num).bool()
 
         return batch_group
 

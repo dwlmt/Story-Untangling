@@ -6,7 +6,6 @@ from story_untangling.dataset_readers.dataset_features import save_sentiment
 
 engine_kwargs = {"pool_recycle": 3600, "connect_args": {'timeout': 1000, "check_same_thread": False}}
 
-
 async def add_sentiment_features(args):
     database = args["database"]
     dataset_db = f"sqlite:///{database}"
@@ -24,4 +23,6 @@ parser.add_argument('--max-workers', type=int, default=16, help="Number of topic
 
 args = parser.parse_args()
 
-add_sentiment_features(vars(args))
+loop = asyncio.get_event_loop()
+dataset_db = loop.run_until_complete(add_sentiment_features(vars(args)))
+

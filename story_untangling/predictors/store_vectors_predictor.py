@@ -25,7 +25,7 @@ class UncertainReaderStoreVectorPredictor(Predictor):
     def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
 
-        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_mapping.csv"
+        story_id_file = "/afs/inf.ed.ac.uk/group/project/comics/stories/WritingPrompts/annotation_results/raw/story_id_dev_splitad"
 
         story_id_df = pandas.read_csv(story_id_file)
         self.story_ids_to_predict = set(story_id_df['story_id'])
@@ -44,19 +44,21 @@ class UncertainReaderStoreVectorPredictor(Predictor):
         self.tokenizer = dataset_reader._tokenizer
         self.indexer = dataset_reader._token_indexers["openai_transformer"]
 
-        self.keep_tensor_output = False
+
+        self.dataset_reader = dataset_reader
+        self.dataset_reader._story_chunking = 200  # Allow bigger batching for sampling.
+        self.dataset_reader._marked_sentences = True
 
         self._device = self._model._lm_model._decoder.weight.device
 
     def predict_instance(self, instance: Instance) -> JsonDict:
 
         story_id = instance["metadata"]["story_id"]
-        if story_id not in self.story_ids_to_predict and self.only_annotation_stories:
+        if self.only_annotation_stories and story_id not in self.story_ids_to_predict:
             print(f"Skipping non annotation story: {story_id}")
             return None
 
         print(f"Predicting story: {story_id}")
-        print(f'{instance["metadata"]["text"]}')
 
         outputs = self._model.forward_on_instance(instance)
 
@@ -65,6 +67,7 @@ class UncertainReaderStoreVectorPredictor(Predictor):
         for n in PreOrderIter(root, only_tensor_nodes):
 
             for attr, value in n.__dict__.items():
+                print(attr, value)
                 if isinstance(value, torch.Tensor):
                     if len(value.shape) == 0:
                         n.__dict__[attr] = value.item()
@@ -78,11 +81,11 @@ class UncertainReaderStoreVectorPredictor(Predictor):
         ''' Create a hierarchy of possibilities by generating sentences in a tree structure.
         '''
         embedded_text_tensor = outputs["embedded_text_tensor"]
-        embedded_text_tensor = torch.from_numpy(embedded_text_tensor).cpu()
-        embedded_text_mask = torch.from_numpy(outputs["masks"]).cpu().long()
-        encoded_stories = torch.from_numpy(outputs["source_encoded_stories"]).cpu()
+        embedded_text_tensor = torch.from_numpy(embedded_text_tensor)
+        embedded_text_mask = torch.from_numpy(outputs["masks"]).long()
+        encoded_stories = torch.from_numpy(outputs["source_encoded_stories"])
 
-        encoded_sentences = torch.from_numpy(outputs["sentence_tensor"]).cpu()
+        encoded_sentences = torch.from_numpy(outputs["sentence_tensor"])
 
         text = instance["text"]
 
