@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objs as go
 import plotly.io as pio
 import scipy
+import statsmodels.api as sm
 from jsonlines import jsonlines
 from nltk import AnnotationTask, interval_distance, binary_distance
 from scipy.signal import find_peaks
@@ -37,6 +38,7 @@ parser.add_argument('--peak-prominence-weighting', required=False, type=int, def
 parser.add_argument('--peak-width', default=1.0, type=float,
                     help="How wide must a peak be to be included. 1.0 allow a single point sentence to be a peak.")
 parser.add_argument('--min-time', type=int, default=150, help="Min time in seconds.")
+parser.add_argument('--exclude-worker-ids', type=str, nargs="+", required=False, help="A list of workers to exclude from the task.")
 
 args = parser.parse_args()
 
@@ -550,15 +552,21 @@ def inter_annotator_agreement(merged_sentence_df, args):
 
                 story_agreement_dict["num_of_judgements"] = len(x_list)
 
-                kendall, _ = kendalltau(x_list, y_list)
+                kendall, kendall_p_value = kendalltau(x_list, y_list)
                 if not numpy.isnan(kendall):
                     story_agreement_dict["kendall"] = kendall
-                pearson, _ = pearsonr(x_list, y_list)
+                    story_agreement_dict["kendall_p_value"] = kendall_p_value
+                pearson, pearson_p_value = pearsonr(x_list, y_list)
                 if not numpy.isnan(pearson):
                     story_agreement_dict["pearson"] = pearson
-                spearman, _ = spearmanr(x_list, y_list)
+                    story_agreement_dict["pearson_p_value"] = pearson_p_value
+                spearman, spearman_p_value = spearmanr(x_list, y_list)
                 if not numpy.isnan(spearman):
                     story_agreement_dict["spearman"] = spearman
+                    story_agreement_dict["spearman"] = spearman_p_value
+
+
+                summary_statistics(x_list, c, story_agreement_dict)
 
             if len(story_agreement_triples) > 0 and len(set([t[0] for t in story_agreement_triples])) > 1:
                 t = AnnotationTask(data=story_agreement_triples, distance=dist)
@@ -615,23 +623,28 @@ def inter_annotator_agreement(merged_sentence_df, args):
                 worker_dict[f"abs_diff_mean"] = mean
                 worker_dict[f"abs_diff_var"] = variance
 
-                kendall, _ = kendalltau(x_list, y_list)
+                kendall, kendall_p_value = kendalltau(x_list, y_list)
                 if not numpy.isnan(kendall):
                     kendall_list.append(kendall)
                     worker_dict["kendall"] = kendall
-                pearson, _ = pearsonr(x_list, y_list)
+
+                pearson, pearson_p_value = pearsonr(x_list, y_list)
                 if not numpy.isnan(pearson):
                     pearson_list.append(pearson)
                     worker_dict["pearson"] = pearson
-                spearman, _ = spearmanr(x_list, y_list)
+                    worker_dict["pearson_p_value"] = pearson_p_value
+                spearman, spearman_p_value = spearmanr(x_list, y_list)
                 if not numpy.isnan(spearman):
                     spearman_list.append(spearman)
                     worker_dict["spearman"] = spearman
+                    worker_dict["spearman_p_value"] = spearman_p_value
 
                 worker_items.append(len(x_list))
 
                 t = AnnotationTask(data=worker_agreement_triples, distance=dist)
                 worker_dict["alpha"] = t.alpha()
+
+                summary_statistics(x_list, c, worker_dict)
 
                 worker_dict["measure"] = c
 
@@ -806,13 +819,7 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
 
             stat_data = [s[stats_column] for s in document["sentence_annotations"]]
 
-            nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(stat_data)
-
-            story_dict[f"{stats_column}_num"] = nobs
-            story_dict[f"{stats_column}_min"], story_dict[f"{stats_column}_max"]  = minmax
-            story_dict[f"{stats_column}_var"] = variance
-            story_dict[f"{stats_column}_skew"] = skew
-            story_dict[f"{stats_column}_kurt"] = kurtosis
+            summary_statistics(stat_data, stats_column, story_dict)
 
         print(story_dict)
         story_level_data.append(story_dict)
@@ -826,14 +833,35 @@ def sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data):
     merged_sentence_df = pandas.merge(sentence_annotation_df, mturk_df, left_on='assignment_id', right_on='AssignmentId',
                                    how='inner')
 
-    merged_story_df = merged_story_df.fillna(value=0)
-    merged_sentence_df = merged_sentence_df.fillna(value=0)
+    #merged_story_df = merged_story_df.fillna(value=0)
+    #merged_sentence_df = merged_sentence_df.fillna(value=0)
 
     inter_annotator_agreement(merged_sentence_df, args)
     plot_annotator_sentences(merged_sentence_df, args)
 
     merged_story_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_story.csv")
     merged_sentence_df.to_csv(f"{args['output_dir']}/sentence_annotations_stats/mturk_sentence.csv")
+
+
+def summary_statistics(stat_data, stats_column, story_dict):
+    nobs, minmax, mean, variance, skew, kurtosis = scipy.stats.describe(stat_data)
+    story_dict[f"{stats_column}_num"] = nobs
+    story_dict[f"{stats_column}_min"], story_dict[f"{stats_column}_max"] = minmax
+    story_dict[f"{stats_column}_var"] = variance
+    story_dict[f"{stats_column}_skew"] = skew
+    story_dict[f"{stats_column}_kurt"] = kurtosis
+
+    story_dict[f"{stats_column}_perc_25"] = numpy.percentile(stat_data, 0.25)
+    story_dict[f"{stats_column}_perc_50"] = numpy.percentile(stat_data, 0.50)
+    story_dict[f"{stats_column}_perc_75"] = numpy.percentile(stat_data, 0.75)
+
+    if stats_column == "suspense":
+        stats, ref_dict = sm.tools.categorical(numpy.asarray(stat_data), dictnames=True, drop=True)
+        stats_summed = numpy.sum(stats, axis=0)
+
+        for k, v in ref_dict.items():
+            story_dict[f"{stats_column}_cat_{v}"] = stats_summed[k]
+
 
 
 def calculate_task_time(args, mturk_df):
@@ -905,10 +933,13 @@ def story_stats_correlation(args):
         position_df = pandas.read_csv(args["position_stats"])
         position_df = position_df.fillna(value=0.0)
 
+    print(mturk_df.columns)
+    if args["exclude_worker_ids"] is not None and len(args["exclude_worker_ids"]) > 0:
+        mturk_df = mturk_df[~mturk_df["WorkerId"].isin(args["exclude_worker_ids"])]
+
     if annotation_df is not None:
         genres_per_story_df = genres_per_story(args, annotation_df)
         annotation_correlation(args, annotation_df, genres_per_story_df)
-
 
     if mturk_df is not None and len(firebase_data):
         sentence_annotation_stats_and_agreement(args, mturk_df, firebase_data)
@@ -921,7 +952,6 @@ def story_stats_correlation(args):
         prediction_correlation(args, pred_df)
     if annotation_df is not None and pred_df is not None:
         prediction_annotation_correlation(args, annotation_df, pred_df)
-
 
 def prediction_position_correlation(args, position_df):
     ensure_dir(f"{args['output_dir']}/prediction_sentence_correlation/")

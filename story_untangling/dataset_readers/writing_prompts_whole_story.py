@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import os
 import textwrap
 from typing import Dict, List, Union, Any
 
 import dataset
-import enchant
+
 import more_itertools
 import nltk
 import torch
@@ -16,7 +17,8 @@ from allennlp.data.fields import TextField, MetadataField, ListField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.token_indexers.openai_transformer_byte_pair_indexer import text_standardize
-from allennlp.data.tokenizers import Tokenizer, WordTokenizer
+from allennlp.data.tokenizers import Tokenizer
+from allennlp.data.tokenizers.word_tokenizer import WordTokenizer
 from nostril import nonsense
 from overrides import overrides
 from spacy.lang.en import STOP_WORDS
@@ -29,7 +31,6 @@ from itertools import groupby
 from string import punctuation
 
 punc = set(punctuation) - set('.')
-
 
 @DatasetReader.register("writing_prompts_whole_story")
 class WritingPromptsWholeStoryDatasetReader(DatasetReader):
@@ -115,6 +116,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         self._coreference_model = coreference_model
         self._marked_sentences = marked_sentences
 
+        if "DATASET_PATH" in os.environ:
+            self._dataset_path = os.getenv('DATASET_PATH')
+
         self._cuda_device = cuda_device
 
         self._allowed_tokens = set([])
@@ -133,8 +137,6 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             self._tried_tokens.add(t)
 
         self._py_dictionary = PyDictionary()
-        self._enchant_dict_us = enchant.Dict("en_US")
-        self._enchant_dict_uk = enchant.Dict("en_UK")
 
         self._seen_datasets = set()
 
@@ -146,8 +148,8 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
 
         batch_num = 0
 
-        # tensors = self.block_memory()
-        # self.unblock_memory(tensors)
+        #tensors = self.block_memory()
+        #self.unblock_memory(tensors)
 
         dataset_db = self.create_cached_dataset(file_path)
 
@@ -331,7 +333,9 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
                 token_len = len(token)
 
                 # Disable the main checker
-                if token_len > self._max_word_length:
+                if self._marked_sentences:
+                    stripped_tokens.append(token)
+                elif token_len > self._max_word_length:
                     if len(token.pos_) > 0:
                         stripped_tokens.append(Token(token.pos_))
                 elif token_len < self._min_check_word_length or token_text in self._allowed_tokens:
@@ -363,10 +367,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
         def lookup_tokens(token_text):
 
             add_token = False
-            if self._enchant_dict_us.check(token_text) or self._enchant_dict_uk.check(token_text):
-                print("Enchant Dictionary", token_text)
-                add_token = True
-            elif self._py_dictionary.meaning(token_text) != None:
+            if self._py_dictionary.meaning(token_text) != None:
                 print("Py Dictionary", token_text)
                 add_token = True
             else:
@@ -399,7 +400,7 @@ class WritingPromptsWholeStoryDatasetReader(DatasetReader):
             sentence_text, sentence_text_field, = tokenize(sentence, self._tokenizer.tokenize,
                                                            self._token_indexers)
 
-            sentence_length = sentence_text_field.sequence_length
+            sentence_length = int(sentence_text_field.sequence_length())
             sentence_lengths.append(sentence_length)
             if sentence_length == 0:
                 print("Empty Sentence")

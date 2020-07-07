@@ -33,7 +33,7 @@ def grant_or_revoke_qualification(args):
     for worker in args["workers"]:
         try:
             if args["command"] == "grant":
-                result = mturk.associate_qualification_with_worker(QualificationTypeId=args["qualification_code"], WorkerId=worker, SendNotification=False)
+                result = mturk.associate_qualification_with_worker(QualificationTypeId=args["qualification_code"], WorkerId=worker, IntegerValue=1, SendNotification=False)
             elif args["command"] == "revoke":
                 result = mturk.disassociate_qualification_with_worker(QualificationTypeId=args["qualification_code"], WorkerId=worker)
             print(result)

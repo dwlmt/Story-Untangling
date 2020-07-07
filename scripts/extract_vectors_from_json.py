@@ -87,10 +87,12 @@ def train_kmeans(x, k, niter, ngpu):
 def extract_json_stats(args):
     print(args)
 
+    vector_fields = []
+
     ensure_dir(args["dask_tmp"])
     with dask.config.set(temporary_directory=args["dask_tmp"]):
 
-        vector_fields += ["sentence_tensor_diff", "story_tensor_diff"]
+        vector_fields += ["sentence_tensor", "story_tensor"]
         metadata_fields = ["story_id", "sentence_id", "sentence_num", "sentence_length", "sentence_text"]
 
         ensure_dir(args["output"])

@@ -11,8 +11,9 @@ import dataset
 import more_itertools
 import nltk
 from aiofile import AIOFile, LineReader
-from allennlp.data.tokenizers import SentenceSplitter, WordTokenizer
+from allennlp.data.tokenizers import SentenceSplitter
 from allennlp.data.tokenizers.sentence_splitter import SpacySentenceSplitter
+from allennlp.data.tokenizers.word_tokenizer import WordTokenizer
 from allennlp.models import Model
 from allennlp.predictors import Predictor
 from dataset import Database
@@ -244,13 +245,16 @@ async def save_ner(ner_model: Model, batch_size: int, dataset_db: str, cuda_devi
 
 
 async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_device: Union[List[int], int] = None,
-                            save_batch_size: int = 25, sentence_chunks: int = 100):
+                            save_batch_size: int = 25, sentence_chunks: int = 200):
     with dataset.connect(dataset_db, engine_kwargs=engine_kwargs) as db:
 
         coref_table = db.create_table('coreference')
         coref_table.create_column('story_id', db.types.bigint)
+        coref_table.create_column('coref_id', db.types.integer)
         coref_table.create_column('start_span', db.types.integer)
         coref_table.create_column('end_span', db.types.integer)
+        coref_table.create_column('mention_text', db.types.string)
+        coref_table.create_column('context_text', db.types.string)
         coref_table.create_index(['story_id'])
         coref_table.create_index(['start_span'])
         coref_table.create_index(['end_span'])
@@ -287,9 +291,9 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
                     if len(sentence_chunk_flat) < 10:
                         continue
 
-                    sentence_text = " ".join(s.text for s in sentence_chunk_flat)
+                    sentence_chunk_text = [t.text for t in sentence_chunk_flat]
 
-                    tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_text, story["id"]))
+                    tasks.append(loop.run_in_executor(executor, next(processors_cycle), sentence_chunk_text, story["id"]))
 
                     if len(tasks) == save_batch_size:
                         results = await asyncio.gather(*tasks)
@@ -316,7 +320,6 @@ async def save_coreferences(coreference_model: Model, dataset_db: str, cuda_devi
 
             logger.info(f"Coreferences Saved")
 
-
 def update_table_on_id(db, table, data):
     try:
         sentence_table = db[table]
@@ -324,7 +327,6 @@ def update_table_on_id(db, table, data):
             sentence_table.update(sent_dict, ["id"])
     except Exception as e:
         logging.error(e)
-
 
 async def chunk_stories_from_file(file: str, batch_size: int = 100) -> Tuple[List[str], List[int]]:
     """ Async yield batches of stories that are line separated/
@@ -485,21 +487,26 @@ class NERProcessor(object):
 
         stories_ner = []
 
-        batch_json = [{"sentence": story["text"], "cuda_device": self._cuda_device} for story in stories_sentences]
+        try:
+            batch_json = [{"sentence": story["text"], "cuda_device": self._cuda_device} for story in stories_sentences]
 
-        batch_result = self._ner_predictor.predict_batch_json(
-            batch_json
-        )
-        for ner_dict, sentence_dict in zip(batch_result, stories_sentences):
-            ner_tags = dict(sentence_id=sentence_dict["id"], story_id=sentence_dict["story_id"],
-                            ner_tags=" ".join(ner_dict["tags"]))
-            stories_ner.append(ner_tags)
+            batch_result = self._ner_predictor.predict_batch_json(
+                batch_json
+            )
+            for ner_dict, sentence_dict in zip(batch_result, stories_sentences):
+                ner_tags = dict(sentence_id=sentence_dict["id"], story_id=sentence_dict["story_id"],
+                                ner_tags=" ".join(ner_dict["tags"]))
+                stories_ner.append(ner_tags)
+        except Exception as e:
+            print(e)
+
+
         return stories_ner
 
 
 class CoreferenceProcessor(object):
-    def __init__(self, corefernce_model: str, database_db: str, cuda_device: Union[List[int], int] = -1):
-        self._coreference_predictor = Predictor.from_path(corefernce_model)
+    def __init__(self, coreference_model: str, database_db: str, cuda_device: Union[List[int], int] = -1):
+        self._coreference_predictor = Predictor.from_path(coreference_model)
 
         if cuda_device != -1:
             self._coreference_predictor._model = self._coreference_predictor._model.to(cuda_device)
@@ -507,15 +514,20 @@ class CoreferenceProcessor(object):
         self._database_db = database_db
         self._cuda_device = cuda_device
 
-    def __call__(self, stories_sentences: str, story_id: int) -> List[List[str]]:
-
-        result = self._coreference_predictor.predict(
-            document=stories_sentences
-        )
+    def __call__(self, stories_sentences: List[str], story_id: int) -> List[List[str]]:
         coreference_clusters = []
-        clusters = result["clusters"]
-        for i, cluster in enumerate(clusters):
-            for span in cluster:
-                coreference_clusters.append(dict(coref_id=i, story_id=story_id, start_span=span[0], end_span=span[1]))
 
+        try:
+            result = self._coreference_predictor.predict_tokenized(
+                tokenized_document=stories_sentences
+            )
+
+            clusters = result["clusters"]
+            for i, cluster in enumerate(clusters):
+                for span in cluster:
+                    mention_text = " ".join(stories_sentences[span[0] : min(span[1] + 1,len(stories_sentences) - 1)])
+                    context_text = " ".join(stories_sentences[max(0, span[0] - 5): min(span[1] + 5,len(stories_sentences) - 1)])
+                    coreference_clusters.append(dict(coref_id=i, story_id=story_id, start_span=span[0], end_span=span[1], mention_text=mention_text, context_text=context_text))
+        except Exception as e:
+            print(e)
         return coreference_clusters
