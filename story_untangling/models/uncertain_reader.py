@@ -265,7 +265,7 @@ class UncertainReader(Model):
             loss = loss.to(batch_encoded_stories.device)
 
             source_encoded_stories = batch_encoded_stories
-            target_encoded_stories = batch_encoded_stories
+            target_encoded_stories = batch_encoded_sentences
 
             if self._story_feedforward and self.run_feedforwards:
                 source_encoded_stories = self._story_feedforward(source_encoded_stories)
