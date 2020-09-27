@@ -14,7 +14,7 @@ def ensure_dir(file_path):
 
 
 parser = argparse.ArgumentParser(
-    description='Extract JSON perform dimensionality reduction and save to Parquet format.')
+    description='Extract JSON perform dimensionality reduction and save window, position and batch information.')
 parser.add_argument('--source-json', required=True, type=str, help="JSON file to process.")
 parser.add_argument('--output-dir', required=True, type=str,
                     help="Output for the Panda data frames with the extracted stats.")

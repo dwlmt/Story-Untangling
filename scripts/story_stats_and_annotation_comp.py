@@ -23,7 +23,7 @@ px.defaults.height = 1000
 sentiment_columns = ["sentiment", "textblob_sentiment", "vader_sentiment"]
 
 parser = argparse.ArgumentParser(
-    description='Annotations statistical analysis and comparisons with the Story output preidictions.')
+    description='Annotations statistical analysis and comparisons with the Story output predictions.')
 parser.add_argument('--batch-stats', required=False, type=str, help="CSV of the prediction batch stats.")
 parser.add_argument('--position-stats', required=False, type=str, help="The per sentence prediction output.")
 parser.add_argument('--annotation-stats', required=False, nargs='+', type=str, help="CSV of the prediction batch stats.")
