@@ -6,9 +6,8 @@ import pandas
 parser = argparse.ArgumentParser(
     description='Approve and reject MTurk assignments.')
 parser.add_argument('--mturk-results-file', required=True, type=str, help="Link to the annotations file and codes.")
-parser.add_argument('--access-key-id', required=False, type=str, default="AKIAI33ZD245LOFYMYAQ", help="AWS Access Key.")
-parser.add_argument('--secret-access-key', required=False, type=str, default="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",
-                    help="AWS Access Key.")
+parser.add_argument('--access-key-id', required=True, help="AWS Access Key.")
+parser.add_argument('--secret-access-key', required=True, type=str, help="AWS Access Key.")
 parser.add_argument('--mturk-url', required=False, type=str,
                     default="https://mturk-requester-sandbox.us-east-1.amazonaws.com/", help="Mechanical turk link.")
 
