@@ -3,7 +3,7 @@ textblob==0.15.3
 mord==0.6
 colorlover==0.3.0
 aiofile==1.5.2
-dask==2.6.0
+dask==2021.10.0
 matplotlib==3.1.1
 scipy==1.3.1
 umap_learn==0.3.10
