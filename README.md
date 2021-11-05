@@ -1,6 +1,6 @@
 # Modelling Suspense in Short Stories as Uncertainty Reduction over Neural Representation
 
-This is the code repsoitory for the following [[paper]](https://aclanthology.org/2020.acl-main.161/):
+This is the code repository for the following [[paper]](https://aclanthology.org/2020.acl-main.161/):
 
 ## Abstract
 
